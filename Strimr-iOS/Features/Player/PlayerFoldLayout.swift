@@ -90,14 +90,8 @@ private struct FoldInputs: Equatable {
     var isPictureInPictureActive: Bool
 }
 
-@available(iOS 27.1, *)
 private extension PlayerHingeState {
-    init(_ hinge: DeviceHinge?) {
-        switch hinge?.status {
-        case .closed?: self = .closed
-        case .partiallyOpen?: self = .partiallyOpen
-        case .fullyOpen?: self = .fullyOpen
-        default: self = .unavailable
-        }
+    init(hinge: Any?) {
+        self = .unavailable
     }
 }
