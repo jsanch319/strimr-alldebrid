@@ -12,6 +12,14 @@ struct AllDebridLibraryView: View {
     @State private var showPlayer = false
     @State private var isConfigured = false
 
+    private var refreshToolbarPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .primaryAction
+        #else
+        .topBarTrailing
+        #endif
+    }
+
     private var signOutToolbarPlacement: ToolbarItemPlacement {
         #if os(macOS)
         .automatic
@@ -64,7 +72,7 @@ struct AllDebridLibraryView: View {
             .navigationTitle("AllDebrid Movies")
             .toolbar {
                 if isConfigured {
-                    ToolbarItem(placement: .topBarTrailing) {
+                    ToolbarItem(placement: refreshToolbarPlacement) {
                         Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
                     }
                     ToolbarItem(placement: signOutToolbarPlacement) {
