@@ -18,7 +18,7 @@ struct PlayerFoldLayout<Video: View, VideoOverlay: View, Controls: View>: View {
         if #available(iOS 27.1, *) {
             foldAwareContent
                 .onHingeChange { _, context in
-                    let state = PlayerHingeState(context.hinge)
+                    let state = PlayerHingeState(hinge: context.hinge)
                     if state != hinge {
                         hinge = state
                     }

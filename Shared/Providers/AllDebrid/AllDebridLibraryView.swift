@@ -12,6 +12,14 @@ struct AllDebridLibraryView: View {
     @State private var showPlayer = false
     @State private var isConfigured = false
 
+    private var signOutToolbarPlacement: ToolbarItemPlacement {
+        #if os(macOS)
+        .automatic
+        #else
+        .topBarLeading
+        #endif
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -59,7 +67,7 @@ struct AllDebridLibraryView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Refresh", systemImage: "arrow.clockwise") { Task { await refresh() } }
                     }
-                    ToolbarItem(placement: .topBarLeading) {
+                    ToolbarItem(placement: signOutToolbarPlacement) {
                         Button("Sign out") {
                             AllDebridKeychain.delete()
                             apiKey = ""
