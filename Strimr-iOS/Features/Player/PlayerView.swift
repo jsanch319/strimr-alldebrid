@@ -363,7 +363,11 @@ struct PlayerView: View {
                     "Watch Together on Discord",
                     isPresented: Binding(
                         get: { discordWatchTogetherMessage != nil },
-                        set: { if !$0 { discordWatchTogetherMessage = nil } },
+                        set: {
+                            if !$0 {
+                                discordWatchTogetherMessage = nil
+                            }
+                        },
                     ),
                 ) {
                     Button("OK", role: .cancel) { discordWatchTogetherMessage = nil }

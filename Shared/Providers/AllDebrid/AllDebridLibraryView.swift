@@ -1,5 +1,5 @@
-import AVKit
 import AetherEngine
+import AVKit
 import SwiftUI
 
 /// Independent, experimental AllDebrid library. It does not impersonate a Plex server.
@@ -404,57 +404,57 @@ private struct AllDebridVideoPlayer: View {
 }
 
 #if os(iOS)
-private struct AllDebridMagnetPlayer: View {
-    @State private var viewModel: PlayerViewModel
+    private struct AllDebridMagnetPlayer: View {
+        @State private var viewModel: PlayerViewModel
 
-    init(file: AllDebridMagnetFile, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
-        _viewModel = State(initialValue: PlayerViewModel(
-            localMedia: Self.media(for: file),
-            localPlaybackURL: url,
-            localExternalSubtitles: externalSubtitles,
-        ))
-    }
+        init(file: AllDebridMagnetFile, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
+            _viewModel = State(initialValue: PlayerViewModel(
+                localMedia: Self.media(for: file),
+                localPlaybackURL: url,
+                localExternalSubtitles: externalSubtitles,
+            ))
+        }
 
-    var body: some View {
-        PlayerWrapper(viewModel: viewModel)
-    }
+        var body: some View {
+            PlayerWrapper(viewModel: viewModel)
+        }
 
-    private static func media(for file: AllDebridMagnetFile) -> MediaItem {
-        MediaItem(
-            id: file.id,
-            guid: "alldebrid://\(file.id)",
-            summary: nil,
-            title: AllDebridLibraryView.cleanTitle(file.filename),
-            type: .movie,
-            parentRatingKey: nil,
-            grandparentRatingKey: nil,
-            genres: [],
-            year: nil,
-            duration: nil,
-            videoResolution: nil,
-            rating: nil,
-            ratings: [],
-            contentRating: nil,
-            studio: nil,
-            tagline: nil,
-            thumbPath: nil,
-            artPath: nil,
-            artworkCornerColors: nil,
-            viewOffset: nil,
-            viewCount: nil,
-            childCount: nil,
-            leafCount: nil,
-            viewedLeafCount: nil,
-            grandparentTitle: nil,
-            parentTitle: nil,
-            parentIndex: nil,
-            index: nil,
-            grandparentThumbPath: nil,
-            grandparentArtPath: nil,
-            parentThumbPath: nil,
-        )
+        private static func media(for file: AllDebridMagnetFile) -> MediaItem {
+            MediaItem(
+                id: file.id,
+                guid: "alldebrid://\(file.id)",
+                summary: nil,
+                title: AllDebridLibraryView.cleanTitle(file.filename),
+                type: .movie,
+                parentRatingKey: nil,
+                grandparentRatingKey: nil,
+                genres: [],
+                year: nil,
+                duration: nil,
+                videoResolution: nil,
+                rating: nil,
+                ratings: [],
+                contentRating: nil,
+                studio: nil,
+                tagline: nil,
+                thumbPath: nil,
+                artPath: nil,
+                artworkCornerColors: nil,
+                viewOffset: nil,
+                viewCount: nil,
+                childCount: nil,
+                leafCount: nil,
+                viewedLeafCount: nil,
+                grandparentTitle: nil,
+                parentTitle: nil,
+                parentIndex: nil,
+                index: nil,
+                grandparentThumbPath: nil,
+                grandparentArtPath: nil,
+                parentThumbPath: nil,
+            )
+        }
     }
-}
 #endif
 
 private struct AllDebridSourcePicker: View {

@@ -74,8 +74,8 @@ enum AllDebridSubtitleMatcher {
                 name: filename.deletingPathExtension,
                 language: language(in: subtitle.filename),
                 isForced: tokens.contains("forced"),
-                isDefault: false,
                 isHearingImpaired: tokens.contains { ["sdh", "hi", "cc"].contains($0) },
+                isDefault: false,
                 formatHint: filename.pathExtension.lowercased(),
             )
         }
