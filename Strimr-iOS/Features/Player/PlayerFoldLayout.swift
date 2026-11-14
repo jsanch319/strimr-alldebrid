@@ -20,7 +20,12 @@ struct PlayerFoldLayout<Video: View, VideoOverlay: View, Controls: View>: View {
             if #available(iOS 27.1, *) {
                 foldAwareContent
                     .onHingeChange { _, context in
-                        let state = PlayerHingeState(hinge: context.hinge)
+                        let state: PlayerHingeState = switch context.hinge?.status {
+                        case .closed?: .closed
+                        case .partiallyOpen?: .partiallyOpen
+                        case .fullyOpen?: .fullyOpen
+                        default: .unavailable
+                        }
                         if state != hinge {
                             hinge = state
                         }
@@ -96,17 +101,3 @@ private struct FoldInputs: Equatable {
     var geometry: FoldGeometry
     var isPictureInPictureActive: Bool
 }
-
-#if compiler(>=6.3)
-    @available(iOS 27.1, *)
-    private extension PlayerHingeState {
-        init(hinge: DeviceHinge?) {
-            switch hinge?.status {
-            case .closed?: self = .closed
-            case .partiallyOpen?: self = .partiallyOpen
-            case .fullyOpen?: self = .fullyOpen
-            default: self = .unavailable
-            }
-        }
-    }
-#endif
