@@ -70,7 +70,7 @@ struct AllDebridAPIClientTests {
         let magnets = try await client.readyMagnets()
 
         #expect(magnets.map(\.id) == ["101", "102"])
-        #expect(magnets.allSatisfy(\.isReady))
+        #expect(magnets.map(\.isReady) == [true, true])
         #expect(magnets[0].filename == "Movie.2024.2160p.WEB-DL.mkv")
         #expect(magnets[0].size == 12_000_000_000)
         #expect(magnets[1].statusCode == 4)
