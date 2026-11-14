@@ -139,9 +139,13 @@ struct MediaQuickActions {
             TrackerCoordinator.shared.setPlayed(played, item: item, detail: services.detail)
         }
         setFavoriteHandler = { favorite, media in try await services.favorites.setFavorite(favorite, media: media) }
-        removeFromContinueWatchingHandler = services.home.supportsContinueWatchingRemoval
-            ? { itemID in try await services.home.removeFromContinueWatching(itemID: itemID) }
-            : nil
+        if services.home.supportsContinueWatchingRemoval {
+            removeFromContinueWatchingHandler = { itemID in
+                try await services.home.removeFromContinueWatching(itemID: itemID)
+            }
+        } else {
+            removeFromContinueWatchingHandler = nil
+        }
         didChange = { services.noteWatchStateChanged() }
         let service = services.management
         let authorization = services.authorization
