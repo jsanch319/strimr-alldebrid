@@ -132,7 +132,7 @@ actor AllDebridAPIClient {
         guard let data = payload["data"] as? [String: Any],
               let rawMagnets = data["magnets"] as? [Any] else { throw APIError.invalidResponse }
 
-        let magnets = rawMagnets.compactMap { rawMagnet in
+        let magnets: [AllDebridMagnet] = rawMagnets.compactMap { rawMagnet -> AllDebridMagnet? in
             guard let magnet = rawMagnet as? [String: Any],
                   let id = Self.stringValue(magnet["id"]) else { return nil }
             let status = magnet["status"] as? String ?? ""

@@ -76,7 +76,10 @@ struct AllDebridLibraryView: View {
                            !magnetFiles.contains(where: \.isVideo)
                         {
                             ContentUnavailableView(
-                                emptyLibraryMessage(totalMagnets: totalMagnetCount, readyMagnets: readyMagnetCount),
+                                Self.emptyLibraryMessage(
+                                    totalMagnets: totalMagnetCount,
+                                    readyMagnets: readyMagnetCount,
+                                ),
                                 systemImage: "film",
                             )
                         }
