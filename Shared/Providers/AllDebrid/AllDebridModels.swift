@@ -28,6 +28,10 @@ struct AllDebridMagnetFile: Identifiable, Sendable, Hashable {
         return [".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm", ".ts", ".m2ts"]
             .contains { path.hasSuffix($0) }
     }
+
+    var isSubtitle: Bool {
+        AllDebridSubtitleMatcher.isSubtitleFile(filename)
+    }
 }
 
 /// Prototype data model for a future AllDebrid-backed media provider.

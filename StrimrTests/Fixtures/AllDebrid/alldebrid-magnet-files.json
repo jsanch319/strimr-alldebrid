@@ -20,6 +20,26 @@
                     "n": "poster.jpg",
                     "s": 100000,
                     "l": "https://alldebrid.com/direct/poster"
+                  },
+                  {
+                    "n": "Movie.2024.en.srt",
+                    "s": 10000,
+                    "l": "https://alldebrid.com/direct/movie-en"
+                  },
+                  {
+                    "n": "Movie.2024.ass",
+                    "s": 10000,
+                    "l": "https://alldebrid.com/direct/movie-ass"
+                  },
+                  {
+                    "n": "Movie.2024.ssa",
+                    "s": 10000,
+                    "l": "https://alldebrid.com/direct/movie-ssa"
+                  },
+                  {
+                    "n": "Movie.2024.vtt",
+                    "s": 10000,
+                    "l": "https://alldebrid.com/direct/movie-vtt"
                   }
                 ]
               }

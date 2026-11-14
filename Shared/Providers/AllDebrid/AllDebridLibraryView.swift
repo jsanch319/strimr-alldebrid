@@ -1,4 +1,5 @@
 import AVKit
+import AetherEngine
 import SwiftUI
 
 /// Independent, experimental AllDebrid library. It does not impersonate a Plex server.
@@ -13,11 +14,13 @@ struct AllDebridLibraryView: View {
 
     private enum ActiveSheet: Identifiable {
         case player(URL)
+        case magnetPlayer(AllDebridMagnetFile)
         case sources(AllDebridMagnetFile)
 
         var id: String {
             switch self {
             case let .player(url): "player:\(url.absoluteString)"
+            case let .magnetPlayer(file): "magnet-player:\(file.id)"
             case let .sources(file): "sources:\(file.id)"
             }
         }
@@ -126,10 +129,28 @@ struct AllDebridLibraryView: View {
                 switch sheet {
                 case let .player(playerURL):
                     AllDebridVideoPlayer(url: playerURL)
+                case let .magnetPlayer(file):
+                    if let url = URL(string: file.link),
+                       ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+                       url.host != nil
+                    {
+                        #if os(iOS)
+                            AllDebridMagnetPlayer(
+                                file: file,
+                                url: url,
+                                externalSubtitles: AllDebridSubtitleMatcher.externalTracks(for: file, in: magnetFiles),
+                            )
+                        #else
+                            AllDebridVideoPlayer(url: url)
+                        #endif
+                    } else {
+                        ContentUnavailableView("The playback link is invalid.", systemImage: "film")
+                    }
                 case let .sources(file):
                     AllDebridSourcePicker(
                         magnetTitle: Self.cleanTitle(file.filename),
                         sources: Self.sources(for: file.magnetID, in: magnetFiles),
+                        subtitleFiles: magnetFiles.filter { $0.magnetID == file.magnetID && $0.isSubtitle },
                     ) { source in
                         play(source)
                     }
@@ -171,7 +192,7 @@ struct AllDebridLibraryView: View {
             let (savedLinks, readyMagnets) = try await (savedLinksTask, readyMagnetsTask)
             let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
             links = savedLinks.filter(\.isVideo)
-            magnetFiles = files.filter(\.isVideo)
+            magnetFiles = files
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -197,7 +218,7 @@ struct AllDebridLibraryView: View {
             errorMessage = "The playback link is invalid."
             return
         }
-        activeSheet = .player(url)
+        activeSheet = .magnetPlayer(file)
     }
 
     private func magnetRow(_ file: AllDebridMagnetFile) -> some View {
@@ -382,27 +403,91 @@ private struct AllDebridVideoPlayer: View {
     }
 }
 
+#if os(iOS)
+private struct AllDebridMagnetPlayer: View {
+    @State private var viewModel: PlayerViewModel
+
+    init(file: AllDebridMagnetFile, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
+        _viewModel = State(initialValue: PlayerViewModel(
+            localMedia: Self.media(for: file),
+            localPlaybackURL: url,
+            localExternalSubtitles: externalSubtitles,
+        ))
+    }
+
+    var body: some View {
+        PlayerWrapper(viewModel: viewModel)
+    }
+
+    private static func media(for file: AllDebridMagnetFile) -> MediaItem {
+        MediaItem(
+            id: file.id,
+            guid: "alldebrid://\(file.id)",
+            summary: nil,
+            title: AllDebridLibraryView.cleanTitle(file.filename),
+            type: .movie,
+            parentRatingKey: nil,
+            grandparentRatingKey: nil,
+            genres: [],
+            year: nil,
+            duration: nil,
+            videoResolution: nil,
+            rating: nil,
+            ratings: [],
+            contentRating: nil,
+            studio: nil,
+            tagline: nil,
+            thumbPath: nil,
+            artPath: nil,
+            artworkCornerColors: nil,
+            viewOffset: nil,
+            viewCount: nil,
+            childCount: nil,
+            leafCount: nil,
+            viewedLeafCount: nil,
+            grandparentTitle: nil,
+            parentTitle: nil,
+            parentIndex: nil,
+            index: nil,
+            grandparentThumbPath: nil,
+            grandparentArtPath: nil,
+            parentThumbPath: nil,
+        )
+    }
+}
+#endif
+
 private struct AllDebridSourcePicker: View {
     @Environment(\.dismiss) private var dismiss
 
     let magnetTitle: String
     let sources: [AllDebridMagnetFile]
+    let subtitleFiles: [AllDebridMagnetFile]
     let onSelect: (AllDebridMagnetFile) -> Void
 
     var body: some View {
         NavigationStack {
             List {
                 ForEach(sources) { source in
+                    let subtitleCount = AllDebridSubtitleMatcher.subtitles(for: source, in: subtitleFiles).count
+                    let subtitleLabel = "\(subtitleCount) subtitle \(subtitleCount == 1 ? "track" : "tracks")"
+                    let sourceTitle = AllDebridLibraryView.cleanTitle(source.filename)
+                    let sourceDetails = AllDebridLibraryView.sourceDetails(source)
                     Button {
                         onSelect(source)
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(AllDebridLibraryView.cleanTitle(source.filename))
+                            Text(sourceTitle)
                                 .font(.headline)
                                 .foregroundStyle(.primary)
-                            Text(AllDebridLibraryView.sourceDetails(source))
+                            Text(sourceDetails)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                            if subtitleCount > 0 {
+                                Text(subtitleLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                             Text(source.fullPath)
                                 .font(.caption2)
                                 .foregroundStyle(.tertiary)
@@ -413,12 +498,14 @@ private struct AllDebridSourcePicker: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(
-                        "\(AllDebridLibraryView.cleanTitle(source.filename)), \(AllDebridLibraryView.sourceDetails(source))",
+                        "\(sourceTitle), \(sourceDetails)\(subtitleCount > 0 ? ", \(subtitleLabel)" : "")",
                     )
                 }
             }
             .navigationTitle("Select Source")
-            .navigationBarTitleDisplayMode(.inline)
+            #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+            #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }

@@ -88,12 +88,20 @@ struct AllDebridAPIClientTests {
 
         let files = try await client.magnetFiles(for: ["101", "102"])
 
-        #expect(files.count == 3)
+        #expect(files.count == 7)
         let movie = try #require(files.first { $0.filename == "Movie.2024.2160p.WEB-DL.mkv" })
         #expect(movie.magnetID == "101")
         #expect(movie.fullPath == "Movies/Movie (2024)/Movie.2024.2160p.WEB-DL.mkv")
         #expect(movie.link == "https://alldebrid.com/direct/movie-2160p")
         #expect(movie.isVideo)
+        let subtitles = files.filter(\.isSubtitle)
+        #expect(subtitles.count == 4)
+        #expect(subtitles.map(\.fullPath) == [
+            "Movies/Movie (2024)/Movie.2024.en.srt",
+            "Movies/Movie (2024)/Movie.2024.ass",
+            "Movies/Movie (2024)/Movie.2024.ssa",
+            "Movies/Movie (2024)/Movie.2024.vtt",
+        ])
         #expect(files.contains { $0.filename == "episode01.mp4" && $0.fullPath == "Series/Season 1/episode01.mp4" })
         #expect(stub.requests.count == 1)
         let requestBody = try #require(stub.requests[0].httpBody)
@@ -170,6 +178,67 @@ struct AllDebridAPIClientTests {
         #expect(
             AllDebridLibraryView.cleanTitle("Movie.Name.2024.2160p.WEB-DL.DV.x265-GROUP.mkv") == "Movie Name 2024",
         )
+    }
+
+    @Test func `subtitle extension detection accepts supported extensions only`() {
+        #expect(["srt", "ass", "ssa", "vtt"].allSatisfy {
+            AllDebridSubtitleMatcher.isSubtitleFile("subtitles.\($0)")
+        })
+        #expect(AllDebridSubtitleMatcher.isSubtitleFile("subtitles.SRT"))
+        #expect(!AllDebridSubtitleMatcher.isSubtitleFile("subtitles.idx"))
+        #expect(!AllDebridSubtitleMatcher.isSubtitleFile("subtitles"))
+    }
+
+    @Test func `subtitle matching selects files for the exact video and rejects other episodes`() {
+        let video = magnetFile("Show.S01E02.1080p.mkv", size: 1000, path: "Season 1/Show.S01E02.1080p.mkv")
+        let files = [
+            video,
+            magnetFile("Show.S01E02.en.srt", size: 1, path: "Season 1/Subs/Show.S01E02.en.srt"),
+            magnetFile("Show.S01E01.en.srt", size: 1, path: "Season 1/Show.S01E01.en.srt"),
+            magnetFile("Another.Show.S01E02.en.srt", size: 1, path: "Season 1/Another.Show.S01E02.en.srt"),
+        ]
+
+        #expect(AllDebridSubtitleMatcher.subtitles(for: video, in: files).map(\.filename) == ["Show.S01E02.en.srt"])
+    }
+
+    @Test func `subtitle matcher prefers same folder among equally matching filenames`() {
+        let video = magnetFile("Film.2024.mkv", size: 1000, path: "Movies/Film.2024.mkv")
+        let elsewhere = magnetFile("Film.2024.en.srt", size: 1, path: "Subtitles/Film.2024.en.srt")
+        let sameFolder = magnetFile("Film.2024.fr.srt", size: 1, path: "Movies/Film.2024.fr.srt")
+
+        #expect(AllDebridSubtitleMatcher.subtitles(for: video, in: [video, elsewhere, sameFolder]) == [
+            sameFolder,
+            elsewhere,
+        ])
+    }
+
+    @Test func `subtitle filename language tags are parsed`() {
+        #expect(AllDebridSubtitleMatcher.language(in: "Film.en.srt") == "eng")
+        #expect(AllDebridSubtitleMatcher.language(in: "Film.english.ass") == "eng")
+        #expect(AllDebridSubtitleMatcher.language(in: "Film.spa.ssa") == "spa")
+        #expect(AllDebridSubtitleMatcher.language(in: "Film.French.vtt") == "fre")
+        #expect(AllDebridSubtitleMatcher.language(in: "Film.srt") == nil)
+    }
+
+    @Test func `manual source subtitle tracks use the selected source and same magnet`() {
+        let first = magnetFile("Show.S01E01.mkv", size: 1000, path: "Season 1/Show.S01E01.mkv")
+        let selected = magnetFile("Show.S01E02.mkv", size: 2000, path: "Season 1/Show.S01E02.mkv")
+        let firstSubtitle = magnetFile("Show.S01E01.en.srt", size: 1, path: "Season 1/Show.S01E01.en.srt")
+        let selectedSubtitle = magnetFile("Show.S01E02.spa.srt", size: 1, path: "Season 1/Show.S01E02.spa.srt")
+        let otherMagnetSubtitle = magnetFile(
+            "Show.S01E02.fr.srt",
+            size: 1,
+            path: "Season 1/Show.S01E02.fr.srt",
+            magnetID: "102",
+        )
+
+        let tracks = AllDebridSubtitleMatcher.externalTracks(
+            for: selected,
+            in: [first, selected, firstSubtitle, selectedSubtitle, otherMagnetSubtitle],
+        )
+
+        #expect(tracks.map(\.url.absoluteString) == [selectedSubtitle.link])
+        #expect(tracks.first?.language == "spa")
     }
 
     private func magnetFile(
