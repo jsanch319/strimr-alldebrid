@@ -107,10 +107,8 @@ private enum StrimrShortcutError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidLink:
-            return "Could not open Strimr."
-        case .invalidMediaIdentifier:
-            return "A valid provider, server, media identifier, and movie/show type are required."
+        case .invalidLink: "Could not open Strimr."
+        case .invalidMediaIdentifier: "A valid provider, server, media identifier, and movie/show type are required."
         }
     }
 }

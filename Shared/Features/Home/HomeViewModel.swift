@@ -720,7 +720,7 @@ final class HomeViewModel {
                 guard let remoteDate = remoteByIdentity[progress.media.identity]?.lastViewedAt else { return true }
                 return progress.lastWatchedAt >= remoteDate
             }
-            let localIdentities = Set(preferredLocalProgress.map { $0.media.identity })
+            let localIdentities = Set(preferredLocalProgress.map(\.media.identity))
             let remoteItems = (existing?.items ?? []).filter { item in
                 guard let playable = item.playableItem else { return true }
                 return !localIdentities.contains(playable.identity)

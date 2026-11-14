@@ -99,9 +99,15 @@ struct MainTabView: View {
             }
             .alert("errors.selectServer.playMedia", isPresented: Binding(
                 get: { shortcutFailure != nil },
-                set: { if !$0 { shortcutFailure = nil } },
+                set: {
+                    if !$0 {
+                        shortcutFailure = nil
+                    }
+                },
             )) {
-                Button("common.actions.done", role: .cancel) { shortcutFailure = nil }
+                Button("common.actions.done", role: .cancel) {
+                    shortcutFailure = nil
+                }
             } message: {
                 Text(shortcutFailure ?? "")
             }

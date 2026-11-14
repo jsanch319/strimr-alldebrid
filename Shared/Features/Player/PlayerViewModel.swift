@@ -288,9 +288,9 @@ final class PlayerViewModel {
                ),
                saved.lastWatchedAt >= (currentMedia.lastViewedAt ?? .distantPast)
             {
-                self.media = saved.media
+                media = saved.media
             } else {
-                self.media = currentMedia
+                media = currentMedia
             }
         #else
             media = currentMedia

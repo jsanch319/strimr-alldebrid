@@ -37,8 +37,8 @@ struct HomeRowSectionView: View {
         {
             mediaCardActions.resume(item)
         } else if playsOnSelect,
-           let item = media.playableItem,
-           let mediaCardActions
+                  let item = media.playableItem,
+                  let mediaCardActions
         {
             mediaCardActions.play(item, false)
         } else {
