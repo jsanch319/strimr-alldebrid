@@ -643,11 +643,10 @@ struct PlayerView: View {
     private var playerControls: some View {
         let activeMarker = viewModel.activeSkipMarker
         let skipTitle = activeMarker?.skipTitle
-        let watchTogetherAction: (() -> Void)?
-        if canStartDiscordWatchTogether {
-            watchTogetherAction = startDiscordWatchTogether
+        let watchTogetherAction: (() -> Void)? = if canStartDiscordWatchTogether {
+            startDiscordWatchTogether
         } else {
-            watchTogetherAction = nil
+            nil
         }
 
         return PlayerControlsView(
