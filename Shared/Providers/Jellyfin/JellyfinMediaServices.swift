@@ -214,6 +214,8 @@ final class JellyfinMediaServiceAdapter: MediaHomeService, MediaLibraryService, 
         return rows
     }
 
+    func removeFromContinueWatching(itemID _: String) async throws {}
+
     func libraries() async throws -> [Library] {
         try await catalog.libraries().map { Library(jellyfinItem: $0, server: server) }
     }

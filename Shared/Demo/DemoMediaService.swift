@@ -78,6 +78,8 @@
             })
         }
 
+        func removeFromContinueWatching(itemID _: String) async throws {}
+
         func items(in hub: Hub, startIndex: Int, limit: Int) async throws -> MediaPage<MediaDisplayItem> {
             page(hub.items, startIndex: startIndex, limit: limit)
         }

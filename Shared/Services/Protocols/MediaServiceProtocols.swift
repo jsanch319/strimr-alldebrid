@@ -226,8 +226,6 @@ extension MediaHomeService {
         false
     }
 
-    func removeFromContinueWatching(itemID _: String) async throws {}
-
     func homeRowCatalog(hiddenLibraryIDs _: Set<String>) async throws -> [HomeRow] {
         []
     }
