@@ -276,15 +276,15 @@ actor AllDebridAPIClient {
     private static func integerValue(_ value: Any?) -> Int64? {
         switch value {
         case let value as Int:
-            return Int64(value)
+            Int64(value)
         case let value as Int64:
-            return value
+            value
         case let value as NSNumber:
-            return value.int64Value
+            value.int64Value
         case let value as String:
-            return Int64(value)
+            Int64(value)
         default:
-            return nil
+            nil
         }
     }
 

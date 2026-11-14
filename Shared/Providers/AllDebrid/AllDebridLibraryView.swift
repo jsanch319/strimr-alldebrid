@@ -181,7 +181,8 @@ struct AllDebridLibraryView: View {
     private func play(_ file: AllDebridMagnetFile) {
         guard let url = URL(string: file.link),
               ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
-              url.host != nil else {
+              url.host != nil
+        else {
             errorMessage = "The playback link is invalid."
             return
         }
@@ -211,22 +212,34 @@ struct AllDebridLibraryView: View {
             versions.max {
                 let leftResolution = resolutionRank($0.filename)
                 let rightResolution = resolutionRank($1.filename)
-                if leftResolution != rightResolution { return leftResolution < rightResolution }
-                if $0.size != $1.size { return $0.size < $1.size }
+                if leftResolution != rightResolution {
+                    return leftResolution < rightResolution
+                }
+                if $0.size != $1.size {
+                    return $0.size < $1.size
+                }
                 return $0.fullPath > $1.fullPath
             }
         }
         .sorted {
-            if $0.magnetID != $1.magnetID { return $0.magnetID < $1.magnetID }
+            if $0.magnetID != $1.magnetID {
+                return $0.magnetID < $1.magnetID
+            }
             return $0.fullPath < $1.fullPath
         }
     }
 
     private static func resolutionRank(_ filename: String) -> Int {
         let name = filename.lowercased()
-        if name.range(of: #"\b(2160p|4k)\b"#, options: .regularExpression) != nil { return 3 }
-        if name.range(of: #"\b1080p\b"#, options: .regularExpression) != nil { return 2 }
-        if name.range(of: #"\b720p\b"#, options: .regularExpression) != nil { return 1 }
+        if name.range(of: #"\b(2160p|4k)\b"#, options: .regularExpression) != nil {
+            return 3
+        }
+        if name.range(of: #"\b1080p\b"#, options: .regularExpression) != nil {
+            return 2
+        }
+        if name.range(of: #"\b720p\b"#, options: .regularExpression) != nil {
+            return 1
+        }
         return 0
     }
 
@@ -240,7 +253,10 @@ struct AllDebridLibraryView: View {
         let pattern =
             #"(?i)[ ._-]+\b(2160p|4k|1080p|720p|web[- ]?dl|web[- ]?rip|bluray|blu[- ]?ray|remux|x26[45]|h26[45]|hevc|av1|hdr10?|dovi|dv|aac|dts|proper|repack)\b.*$"#
         let withoutClutter = groupTrimmed.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-        let separators = withoutClutter.replacingOccurrences(of: ".", with: " ").replacingOccurrences(of: "_", with: " ")
+        let separators = withoutClutter.replacingOccurrences(of: ".", with: " ").replacingOccurrences(
+            of: "_",
+            with: " ",
+        )
         return separators.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

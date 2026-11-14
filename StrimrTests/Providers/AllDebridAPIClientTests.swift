@@ -96,7 +96,8 @@ struct AllDebridAPIClientTests {
         #expect(movie.isVideo)
         #expect(files.contains { $0.filename == "episode01.mp4" && $0.fullPath == "Series/Season 1/episode01.mp4" })
         #expect(stub.requests.count == 1)
-        let body = try #require(String(data: #require(stub.requests[0].httpBody), encoding: .utf8))
+        let requestBody = try #require(stub.requests[0].httpBody)
+        let body = try #require(String(data: requestBody, encoding: .utf8))
         let bodyItems = URLComponents(string: "https://example.com/?\(body)")?.queryItems ?? []
         #expect(bodyItems.filter { $0.name == "id[]" }.compactMap(\.value) == ["101", "102"])
         #expect(bodyItems.first { $0.name == "apikey" }?.value == "private-key")
@@ -134,7 +135,7 @@ struct AllDebridAPIClientTests {
             magnetFile("film-1080p.mkv", size: 8_000_000_000),
             magnetFile("film.1080p.mkv", size: 10_000_000_000),
             magnetFile("film-2160p.mkv", size: 20 * 1024 * 1024 * 1024 + 1),
-            magnetFile("cover.jpg", size: 1_000),
+            magnetFile("cover.jpg", size: 1000),
             magnetFile("episode01.mp4", size: 1_000_000_000, path: "Season 1/episode01.mp4"),
             magnetFile("other-1080p.mkv", size: 8_000_000_000, magnetID: "102"),
             magnetFile("other-2160p.mkv", size: 20 * 1024 * 1024 * 1024, magnetID: "102"),
