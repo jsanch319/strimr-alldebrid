@@ -1,0 +1,49 @@
+name: Build SideStore IPA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Prepare local build configuration
+        run: |
+          cp Config/Config-example.xcconfig Config/Config.xcconfig
+          printf '\nPRODUCT_BUNDLE_IDENTIFIER = app.strimr.alldebrid.ci\n' >> Config/Config.xcconfig
+          touch Config/Config-TopShelf.xcconfig
+
+      - name: Build iOS device app (unsigned)
+        run: |
+          xcodebuild \
+            -project Strimr.xcodeproj \
+            -scheme Strimr \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p build/ipa/Payload
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/Strimr.app build/ipa/Payload/Strimr.app
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent build/ipa/Payload Strimr-unsigned.ipa
+
+      - name: Upload SideStore IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Strimr-SideStore-IPA
+          path: Strimr-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
