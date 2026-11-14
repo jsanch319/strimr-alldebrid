@@ -189,7 +189,7 @@ final class CachedArtworkService: MediaArtworkService {
 }
 
 private extension CGImage {
-    var hasAlpha: Bool {
+    nonisolated var hasAlpha: Bool {
         switch alphaInfo {
         case .none, .noneSkipFirst, .noneSkipLast: false
         default: true
