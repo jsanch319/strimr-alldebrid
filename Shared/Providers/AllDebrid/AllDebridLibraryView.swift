@@ -5,6 +5,7 @@ import SwiftUI
 struct AllDebridLibraryView: View {
     @State private var apiKey = ""
     @State private var links: [AllDebridSavedLink] = []
+    @State private var magnetFiles: [AllDebridMagnetFile] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var playerURL: URL?
@@ -41,34 +42,38 @@ struct AllDebridLibraryView: View {
                         }
                         Section {
                             Text(
-                                "Your key is saved in the iOS Keychain, not in the project files. This experimental screen reads saved links; magnet history is not supported yet.",
+                                "Your key is saved in the iOS Keychain, not in the project files. This experimental screen reads saved links and ready magnet files.",
                             )
                             .font(.footnote)
                         }
                     }
                 } else {
                     List {
-                        if links.isEmpty, !isLoading {
-                            ContentUnavailableView(
-                                "No video links found",
-                                systemImage: "film",
-                                description: Text(
-                                    "Saved links may be empty. Magnet history is not supported in this version.",
-                                ),
-                            )
+                        if links.isEmpty, magnetFiles.isEmpty, !isLoading {
+                            ContentUnavailableView("No playable AllDebrid videos found.", systemImage: "film")
                         }
-                        ForEach(links.filter(\.isVideo)) { link in
-                            Button {
-                                Task { await play(link) }
-                            } label: {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "film").foregroundStyle(.orange)
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(Self.cleanTitle(link.filename)).font(.headline)
-                                        Text(link.filename).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        if !links.isEmpty {
+                            Section("Saved Links") {
+                                ForEach(links) { link in
+                                    Button {
+                                        Task { await play(link) }
+                                    } label: {
+                                        libraryRow(title: Self.cleanTitle(link.filename), subtitle: link.filename)
                                     }
-                                    Spacer()
-                                    Image(systemName: "play.circle.fill")
+                                }
+                            }
+                        }
+                        if !magnetFiles.isEmpty {
+                            Section("Magnets") {
+                                ForEach(magnetFiles) { file in
+                                    Button {
+                                        play(file)
+                                    } label: {
+                                        libraryRow(
+                                            title: Self.cleanTitle(file.filename),
+                                            subtitle: file.fullPath,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -88,6 +93,7 @@ struct AllDebridLibraryView: View {
                                 try AllDebridCredentialStore().delete()
                                 apiKey = ""
                                 links = []
+                                magnetFiles = []
                                 isConfigured = false
                                 playerURL = nil
                             } catch {
@@ -148,7 +154,12 @@ struct AllDebridLibraryView: View {
         defer { isLoading = false }
         do {
             let client = try AllDebridAPIClient(apiKey: apiKey)
-            links = try await client.savedLinks().filter(\.isVideo)
+            async let savedLinksTask = client.savedLinks()
+            async let readyMagnetsTask = client.readyMagnets()
+            let (savedLinks, readyMagnets) = try await (savedLinksTask, readyMagnetsTask)
+            let playableFiles = try await client.magnetFiles(for: readyMagnets.map(\.id))
+            links = savedLinks.filter(\.isVideo)
+            magnetFiles = Self.selectBestVideos(playableFiles)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -167,12 +178,70 @@ struct AllDebridLibraryView: View {
         }
     }
 
+    private func play(_ file: AllDebridMagnetFile) {
+        guard let url = URL(string: file.link),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else {
+            errorMessage = "The playback link is invalid."
+            return
+        }
+        playerURL = url
+        showPlayer = true
+    }
+
+    private func libraryRow(title: String, subtitle: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "film").foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer()
+            Image(systemName: "play.circle.fill")
+        }
+    }
+
+    static func selectBestVideos(_ files: [AllDebridMagnetFile]) -> [AllDebridMagnetFile] {
+        let maximumSize: Int64 = 20 * 1024 * 1024 * 1024
+        let candidates = files.filter { $0.isVideo && (0 ... maximumSize).contains($0.size) }
+        let groups = Dictionary(grouping: candidates) {
+            "\($0.magnetID):\(cleanTitle($0.filename).lowercased())"
+        }
+        return groups.values.compactMap { versions in
+            versions.max {
+                let leftResolution = resolutionRank($0.filename)
+                let rightResolution = resolutionRank($1.filename)
+                if leftResolution != rightResolution { return leftResolution < rightResolution }
+                if $0.size != $1.size { return $0.size < $1.size }
+                return $0.fullPath > $1.fullPath
+            }
+        }
+        .sorted {
+            if $0.magnetID != $1.magnetID { return $0.magnetID < $1.magnetID }
+            return $0.fullPath < $1.fullPath
+        }
+    }
+
+    private static func resolutionRank(_ filename: String) -> Int {
+        let name = filename.lowercased()
+        if name.range(of: #"\b(2160p|4k)\b"#, options: .regularExpression) != nil { return 3 }
+        if name.range(of: #"\b1080p\b"#, options: .regularExpression) != nil { return 2 }
+        if name.range(of: #"\b720p\b"#, options: .regularExpression) != nil { return 1 }
+        return 0
+    }
+
     static func cleanTitle(_ filename: String) -> String {
         let basename = (filename as NSString).deletingPathExtension
-        let separators = basename.replacingOccurrences(of: ".", with: " ").replacingOccurrences(of: "_", with: " ")
-        let pattern = #"(?i)\b(2160p|1080p|720p|web[- ]?dl|bluray|remux|x265|h265|hevc|hdr10|dv|dovi)\b.*$"#
-        let cleaned = separators.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        let groupTrimmed = basename.replacingOccurrences(
+            of: #"(?i)-[a-z0-9]{2,}$"#,
+            with: "",
+            options: .regularExpression,
+        )
+        let pattern =
+            #"(?i)[ ._-]+\b(2160p|4k|1080p|720p|web[- ]?dl|web[- ]?rip|bluray|blu[- ]?ray|remux|x26[45]|h26[45]|hevc|av1|hdr10?|dovi|dv|aac|dts|proper|repack)\b.*$"#
+        let withoutClutter = groupTrimmed.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        let separators = withoutClutter.replacingOccurrences(of: ".", with: " ").replacingOccurrences(of: "_", with: " ")
+        return separators.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

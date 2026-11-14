@@ -122,6 +122,61 @@ actor AllDebridAPIClient {
         }
     }
 
+    /// Fetches only ready magnets. The API key is sent in the POST body, not the request URL.
+    func readyMagnets() async throws -> [AllDebridMagnet] {
+        let payload = try await request(
+            "/v4.1/magnet/status",
+            parameters: [URLQueryItem(name: "status", value: "ready")],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any],
+              let rawMagnets = data["magnets"] as? [Any] else { return [] }
+
+        return rawMagnets.compactMap { rawMagnet in
+            guard let magnet = rawMagnet as? [String: Any],
+                  let id = Self.stringValue(magnet["id"]) else { return nil }
+            let status = (magnet["status"] as? String) ?? (magnet["status"] as? NSNumber)?.stringValue ?? ""
+            return AllDebridMagnet(
+                id: id,
+                filename: (magnet["filename"] as? String) ?? (magnet["name"] as? String) ?? "Untitled",
+                size: Self.integerValue(magnet["size"]) ?? 0,
+                status: status,
+                statusCode: (Self.integerValue(magnet["statusCode"]) ?? Self.integerValue(magnet["statuscode"]))
+                    .flatMap { Int(exactly: $0) },
+            )
+        }
+        .filter(\.isReady)
+    }
+
+    /// Fetches playable files for multiple ready magnets and recursively flattens their folder trees.
+    func magnetFiles(for magnetIDs: [String]) async throws -> [AllDebridMagnetFile] {
+        let ids = Array(Set(magnetIDs)).sorted()
+        guard !ids.isEmpty else { return [] }
+        let parameters = ids.map { URLQueryItem(name: "id[]", value: $0) }
+        let payload = try await request(
+            "/v4/magnet/files",
+            parameters: parameters,
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any] else { return [] }
+
+        var files: [AllDebridMagnetFile] = []
+        if let magnets = data["magnets"] as? [Any] {
+            for rawMagnet in magnets {
+                guard let magnet = rawMagnet as? [String: Any],
+                      let magnetID = Self.stringValue(magnet["id"]),
+                      ids.contains(magnetID),
+                      let entries = magnet["files"] as? [Any] else { continue }
+                Self.flatten(entries, magnetID: magnetID, parentPath: "", into: &files)
+            }
+        } else if ids.count == 1, let entries = data["files"] as? [Any] {
+            Self.flatten(entries, magnetID: ids[0], parentPath: "", into: &files)
+        }
+        return files
+    }
+
     /// Resolves an AllDebrid link to a streamable URL. Resolve again when expired.
     func unlock(_ link: String) async throws -> URL {
         guard let candidate = URL(string: link),
@@ -136,22 +191,101 @@ actor AllDebridAPIClient {
         return url
     }
 
-    private func request(_ path: String, parameters: [URLQueryItem] = []) async throws -> [String: Any] {
+    private func request(
+        _ path: String,
+        parameters: [URLQueryItem] = [],
+        method: String = "GET",
+        parametersInBody: Bool = false,
+    ) async throws -> [String: Any] {
         guard let apiKey else { throw APIError.invalidAPIKey }
         guard let endpoint = URL(string: path, relativeTo: baseURL)?.absoluteURL,
               var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         else {
             throw APIError.invalidResponse
         }
-        components.queryItems = [
+        let requestParameters = [
             URLQueryItem(name: "agent", value: "StrimrAllDebridPrototype"),
             URLQueryItem(name: "apikey", value: apiKey),
         ] + parameters
+        if parametersInBody {
+            components.queryItems = nil
+        } else {
+            components.queryItems = requestParameters
+        }
         guard let url = components.url else { throw APIError.invalidResponse }
         var request = URLRequest(url: url)
+        request.httpMethod = method
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
+        if parametersInBody {
+            var bodyComponents = URLComponents()
+            bodyComponents.queryItems = requestParameters
+            guard let body = bodyComponents.percentEncodedQuery?.data(using: .utf8) else {
+                throw APIError.invalidResponse
+            }
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
         return try await send(request)
+    }
+
+    private static func flatten(
+        _ entries: [Any],
+        magnetID: String,
+        parentPath: String,
+        into files: inout [AllDebridMagnetFile],
+    ) {
+        for rawEntry in entries {
+            guard let entry = rawEntry as? [String: Any],
+                  let name = entry["n"] as? String,
+                  !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let fullPath = parentPath.isEmpty ? name : "\(parentPath)/\(name)"
+            if let children = entry["e"] as? [Any] {
+                flatten(children, magnetID: magnetID, parentPath: fullPath, into: &files)
+            }
+            guard let link = entry["l"] as? String,
+                  let url = URL(string: link),
+                  ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+                  url.host != nil else { continue }
+            let size = integerValue(entry["s"]) ?? 0
+            files.append(
+                AllDebridMagnetFile(
+                    id: "\(magnetID):\(fullPath):\(size)",
+                    magnetID: magnetID,
+                    filename: name,
+                    fullPath: fullPath,
+                    size: size,
+                    link: link,
+                ),
+            )
+        }
+    }
+
+    private static func stringValue(_ value: Any?) -> String? {
+        switch value {
+        case let value as String:
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        case let value as NSNumber:
+            return value.stringValue
+        default:
+            return nil
+        }
+    }
+
+    private static func integerValue(_ value: Any?) -> Int64? {
+        switch value {
+        case let value as Int:
+            return Int64(value)
+        case let value as Int64:
+            return value
+        case let value as NSNumber:
+            return value.int64Value
+        case let value as String:
+            return Int64(value)
+        default:
+            return nil
+        }
     }
 
     private func send(_ request: URLRequest) async throws -> [String: Any] {

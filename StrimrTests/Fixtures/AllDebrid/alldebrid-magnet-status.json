@@ -1,0 +1,35 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": 101,
+        "filename": "Movie.2024.2160p.WEB-DL.mkv",
+        "size": 12000000000,
+        "status": "Ready",
+        "statusCode": 4
+      },
+      {
+        "id": "102",
+        "filename": "Series.S01",
+        "size": "5000000000",
+        "status": "ready",
+        "statusCode": "4"
+      },
+      {
+        "id": 103,
+        "filename": "unfinished",
+        "size": 1000,
+        "status": "Downloading",
+        "statusCode": 2
+      },
+      {
+        "id": "104",
+        "filename": "expired",
+        "size": 1000,
+        "status": "Error",
+        "statusCode": 0
+      }
+    ]
+  }
+}

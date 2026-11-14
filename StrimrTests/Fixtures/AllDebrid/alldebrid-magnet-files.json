@@ -1,0 +1,52 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": 101,
+        "files": [
+          {
+            "n": "Movies",
+            "e": [
+              {
+                "n": "Movie (2024)",
+                "e": [
+                  {
+                    "n": "Movie.2024.2160p.WEB-DL.mkv",
+                    "s": 12000000000,
+                    "l": "https://alldebrid.com/direct/movie-2160p"
+                  },
+                  {
+                    "n": "poster.jpg",
+                    "s": 100000,
+                    "l": "https://alldebrid.com/direct/poster"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "102",
+        "files": [
+          {
+            "n": "Series",
+            "e": [
+              {
+                "n": "Season 1",
+                "e": [
+                  {
+                    "n": "episode01.mp4",
+                    "s": "900000000",
+                    "l": "https://alldebrid.com/direct/episode01"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

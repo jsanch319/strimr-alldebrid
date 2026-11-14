@@ -1,0 +1,33 @@
+{
+  "status": "success",
+  "data": {
+    "magnets": [
+      {
+        "id": 103,
+        "files": [
+          null,
+          {},
+          {
+            "n": "missing-link.mkv",
+            "s": 100
+          },
+          {
+            "n": "invalid-link.mkv",
+            "s": 100,
+            "l": "not-a-url"
+          },
+          {
+            "n": "Folder",
+            "e": [
+              {
+                "n": "valid.mkv",
+                "s": 1000,
+                "l": "https://alldebrid.com/direct/valid"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
