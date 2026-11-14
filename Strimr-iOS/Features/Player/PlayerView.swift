@@ -85,6 +85,7 @@ struct PlayerView: View {
     @State private var doubleTapSeek = DoubleTapSeek()
     @State private var tapAreaWidth = 0.0
     @State private var showsPlaybackStatistics = false
+    @State private var discordWatchTogetherMessage: String?
 
     private let controlsHideDelay: TimeInterval = 3.0
     private var seekBackwardInterval: Double {
@@ -357,6 +358,17 @@ struct PlayerView: View {
                     Button("common.actions.done", role: .cancel) {}
                 } message: {
                     Text(subtitleSearchErrorMessage)
+                },
+                .alert(
+                    "Watch Together on Discord",
+                    isPresented: Binding(
+                        get: { discordWatchTogetherMessage != nil },
+                        set: { if !$0 { discordWatchTogetherMessage = nil } },
+                    ),
+                ) {
+                    Button("OK", role: .cancel) { discordWatchTogetherMessage = nil }
+                } message: {
+                    Text(discordWatchTogetherMessage ?? "")
                 },
         )
 
@@ -653,6 +665,7 @@ struct PlayerView: View {
             onDismiss: { dismissPlayer() },
             tracksMenu: tracksMenuModel,
             tracksMenuActions: tracksMenuActions,
+            onWatchTogether: canStartDiscordWatchTogether ? startDiscordWatchTogether : nil,
             onShowSettings: showSettings,
             chapters: viewModel.chapters,
             showsChaptersOnTimeline: settingsManager.playback.showChaptersOnTimeline,
@@ -694,6 +707,37 @@ struct PlayerView: View {
             onNextChannel: { switchLiveChannel(by: 1) },
             sleepTimer: sleepTimer,
         )
+    }
+
+    private var canStartDiscordWatchTogether: Bool {
+        guard let media = viewModel.media else { return false }
+        return [.movie, .episode].contains(media.kind)
+    }
+
+    private func startDiscordWatchTogether() {
+        guard let media = viewModel.media,
+              let url = DiscordWatchTogetherConfiguration.activityLaunchURL(
+                  for: media,
+                  position: playerController.position,
+                  isPlaying: !playerController.isPaused,
+                  duration: playerController.duration ?? viewModel.duration,
+                  selectedSourceIdentifier: viewModel.currentVersionID,
+              ) else {
+            discordWatchTogetherMessage =
+                "Discord Watch Together is not configured. Set " +
+                "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig."
+            return
+        }
+        DiscordWatchTogetherConfiguration.openActivityURL(url) { result in
+            switch result {
+            case .opened:
+                break
+            case .discordNotInstalled:
+                discordWatchTogetherMessage = "Install Discord to start a Watch Together Activity."
+            case .activityUnavailable:
+                discordWatchTogetherMessage = "Discord could not open the Watch Together Activity."
+            }
+        }
     }
 
     private var areControlsShown: Bool {

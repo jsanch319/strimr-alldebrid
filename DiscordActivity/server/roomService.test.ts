@@ -13,6 +13,29 @@ test("new rooms default to host-only playback and source changes", () => {
   assert.equal(room.participants[0]?.canChangeSource, true);
 });
 
+test("the first join seeds playback state and later joins do not overwrite it", () => {
+  const rooms = new RoomService();
+  const firstRoom = rooms.join(
+    "activity-seed",
+    { userId: "host", username: "Host", joinedAt: 10_000 },
+    media,
+    10_000,
+    { position: 45, isPlaying: true },
+  );
+  assert.equal(firstRoom.currentPosition, 45);
+  assert.equal(firstRoom.isPlaying, true);
+
+  const joinedRoom = rooms.join(
+    "activity-seed",
+    { userId: "friend", username: "Friend", joinedAt: 20_000 },
+    media,
+    20_000,
+    { position: 0, isPlaying: false },
+  );
+  assert.equal(joinedRoom.currentPosition, 55);
+  assert.equal(joinedRoom.isPlaying, true);
+});
+
 test("host can grant everyone playback control without granting source selection", () => {
   const rooms = roomWithParticipants();
   rooms.command("activity-1", "host", { type: "set-control-mode", mode: "everyone" }, 10);

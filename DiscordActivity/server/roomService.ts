@@ -2,6 +2,7 @@ import {
   defaultMedia,
   sanitizeMedia,
   type ControlMode,
+  type InitialPlaybackState,
   type Participant,
   type RoomCommand,
   type SafeMediaMetadata,
@@ -25,17 +26,24 @@ const EMPTY_ROOM_TTL = 10 * 60 * 1000;
 export class RoomService {
   private readonly rooms = new Map<string, RoomRecord>();
 
-  join(sessionId: string, user: ConnectedUser, media: SafeMediaMetadata, now = Date.now()): WatchRoom {
+  join(
+    sessionId: string,
+    user: ConnectedUser,
+    media: SafeMediaMetadata,
+    now = Date.now(),
+    initialPlayback: InitialPlaybackState = { position: 0, isPlaying: false },
+  ): WatchRoom {
     this.validateSessionId(sessionId);
     this.prune(now);
     let room = this.rooms.get(sessionId);
     if (!room) {
+      const safeMedia = sanitizeMedia(media);
       room = {
         state: {
           sessionId,
-          media: sanitizeMedia(media),
-          currentPosition: 0,
-          isPlaying: false,
+          media: safeMedia,
+          currentPosition: this.clampPosition(initialPlayback.position, safeMedia.duration),
+          isPlaying: initialPlayback.isPlaying,
           hostUserId: user.userId,
           participants: [],
           controlMode: "host-only",

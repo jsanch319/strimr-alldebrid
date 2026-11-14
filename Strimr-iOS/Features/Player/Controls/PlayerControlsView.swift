@@ -16,6 +16,7 @@ struct PlayerControlsView: View {
     var onDismiss: () -> Void
     var tracksMenu: PlayerTracksMenuModel
     var tracksMenuActions: PlayerTracksMenuActions
+    var onWatchTogether: (() -> Void)?
     var onShowSettings: () -> Void
     var chapters: [MediaChapter]
     var showsChaptersOnTimeline: Bool
@@ -83,6 +84,7 @@ struct PlayerControlsView: View {
                     onDismiss: onDismiss,
                     tracksMenu: tracksMenu,
                     tracksMenuActions: tracksMenuActions,
+                    onWatchTogether: onWatchTogether,
                     onShowSettings: onShowSettings,
                     sleepTimer: sleepTimer,
                     isSharePlay: isSharePlay,
@@ -236,6 +238,7 @@ private struct PlayerControlsHeader: View {
     var onDismiss: () -> Void
     var tracksMenu: PlayerTracksMenuModel
     var tracksMenuActions: PlayerTracksMenuActions
+    var onWatchTogether: (() -> Void)?
     var onShowSettings: () -> Void
     var sleepTimer: SleepTimer?
     var isSharePlay: Bool
@@ -284,6 +287,15 @@ private struct PlayerControlsHeader: View {
             if showsPictureInPicture {
                 PlayerPictureInPictureButton(action: onStartPictureInPicture)
                     .disabled(!isPictureInPictureEnabled)
+            }
+
+            if let onWatchTogether {
+                PlayerIconButton(
+                    systemName: "person.2.wave.2",
+                    accessibilityLabel: "Watch Together on Discord",
+                    size: .small,
+                    action: onWatchTogether,
+                )
             }
 
             PlayerTracksMenuButton(model: tracksMenu, actions: tracksMenuActions)

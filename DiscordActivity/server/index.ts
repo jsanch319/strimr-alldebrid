@@ -8,6 +8,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   defaultMedia,
   sanitizeMedia,
+  type InitialPlaybackState,
   type RoomCommand,
   type SafeMediaMetadata,
   type WatchRoom,
@@ -103,12 +104,15 @@ webSocketServer.on("connection", (webSocket) => {
       const identity = verifyRoomToken(request.token);
       if (request.sessionId !== identity.instanceId) throw new Error("This Discord identity is for another Activity.");
       const media = isPlainRecord(request.media) ? sanitizeMedia(request.media) : defaultMedia;
+      const initialPlayback = parseInitialPlayback(request.initialPlayback);
       roomIdentity = { sessionId: identity.instanceId, userId: identity.userId };
       sockets.set(webSocket, roomIdentity);
       rooms.join(
         identity.instanceId,
         { userId: identity.userId, username: identity.username, joinedAt: Date.now() },
         media,
+        Date.now(),
+        initialPlayback,
       );
       broadcast(identity.instanceId);
     } catch (error) {
@@ -223,6 +227,17 @@ function parseJSON(data: RawData): Record<string, unknown> {
   const value: unknown = JSON.parse(data.toString());
   if (!isPlainRecord(value)) throw new Error("Invalid message.");
   return value;
+}
+
+function parseInitialPlayback(value: unknown): InitialPlaybackState {
+  if (value === undefined) return { position: 0, isPlaying: false };
+  if (!isPlainRecord(value) ||
+      typeof value.position !== "number" || !Number.isFinite(value.position) ||
+      typeof value.isPlaying !== "boolean")
+  {
+    throw new Error("Invalid initial playback state.");
+  }
+  return { position: Math.max(0, value.position), isPlaying: value.isPlaying };
 }
 
 function parseCommand(value: unknown): RoomCommand {

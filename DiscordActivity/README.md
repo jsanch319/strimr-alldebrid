@@ -76,9 +76,12 @@ DISCORD_APPLICATION_CLIENT_ID = your-public-application-id
 DISCORD_ACTIVITY_URL = https://your-activity-host.example
 ```
 
-The native button opens the Discord Activity URL with only safe media metadata in its
-query string. If either value is missing, Strimr shows a configuration-required
-message. Neither value is a secret.
+The native detail-screen button opens the Discord Activity URL with only safe media
+metadata in its query string. The player controls also provide the action while
+watching; that entry point carries the current position, play/pause state, duration,
+and safe selected-source identifier into the new room. Discord must be installed to
+open the Activity. If configuration is missing, or Discord cannot open it, Strimr
+shows a clear message. Neither configured value is a secret.
 
 ## Build, test, run
 

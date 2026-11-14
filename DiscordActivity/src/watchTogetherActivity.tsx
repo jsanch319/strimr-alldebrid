@@ -1,11 +1,12 @@
 import React from "react";
-import type { ControlMode, RoomCommand, WatchRoom } from "./shared.js";
+import type { ControlMode, InitialPlaybackState, RoomCommand, WatchRoom } from "./shared.js";
 
 export interface ActivitySession {
   token: string;
   user: { id: string; username: string };
   sessionId: string;
   media: WatchRoom["media"];
+  initialPlayback: InitialPlaybackState;
   openInvite: () => Promise<void>;
 }
 
@@ -37,6 +38,7 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
           token: session.token,
           sessionId: session.sessionId,
           media: session.media,
+          initialPlayback: session.initialPlayback,
         }));
         setConnection("Connected");
       });

@@ -10,6 +10,11 @@ export interface SafeMediaMetadata {
   selectedSourceIdentifier: string | null;
 }
 
+export interface InitialPlaybackState {
+  position: number;
+  isPlaying: boolean;
+}
+
 export interface Participant {
   userId: string;
   username: string;

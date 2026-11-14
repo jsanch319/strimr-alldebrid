@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { DiscordSDK } from "@discord/embedded-app-sdk";
-import type { SafeMediaMetadata } from "./shared.js";
+import type { InitialPlaybackState, SafeMediaMetadata } from "./shared.js";
 import { WatchTogetherActivity, type ActivitySession } from "./watchTogetherActivity.js";
 import "./style.css";
 
@@ -68,6 +68,7 @@ function ActivityRoot() {
           user: authentication.user,
           sessionId: discord.instanceId,
           media: mediaFromURL(),
+          initialPlayback: initialPlaybackFromURL(),
           openInvite: async () => {
             await discord.commands.openInviteDialog();
           },
@@ -105,6 +106,17 @@ function ActivityRoot() {
     );
   }
   return <WatchTogetherActivity session={session} />;
+}
+
+function initialPlaybackFromURL(): InitialPlaybackState {
+  const query = new URLSearchParams(location.search);
+  const position = Number(query.get("position"));
+  const duration = Number(query.get("duration"));
+  const safeDuration = Number.isFinite(duration) && duration > 0 ? duration : Number.MAX_SAFE_INTEGER;
+  return {
+    position: Number.isFinite(position) ? Math.min(Math.max(0, position), safeDuration) : 0,
+    isPlaying: query.get("is_playing") === "1",
+  };
 }
 
 function mediaFromURL(): SafeMediaMetadata {
