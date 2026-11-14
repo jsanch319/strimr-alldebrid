@@ -505,14 +505,10 @@ final class OfflineStore {
             ErrorReporter.capture(PlaybackProgressPersistenceError.encodingFailed)
             return
         }
-        let mediaType: String
-        switch media.kind {
-        case .movie:
-            mediaType = "movie"
-        case .episode:
-            mediaType = "show"
-        default:
-            mediaType = media.kind.rawValue
+        let mediaType = switch media.kind {
+        case .movie: "movie"
+        case .episode: "show"
+        default: media.kind.rawValue
         }
         let record = PlaybackProgressRecord(
             ownerID: owner.id,
