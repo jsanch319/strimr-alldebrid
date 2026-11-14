@@ -71,7 +71,7 @@ struct AllDebridAPIClientTests {
                 #expect(request.httpMethod == "HEAD")
                 return .init(statusCode: 200, headers: ["Content-Type": "video/x-matroska"])
             default:
-                .status(404)
+                return .status(404)
             }
         }
         let client = try AllDebridAPIClient(apiKey: "private-key", session: stub.session)
@@ -85,7 +85,7 @@ struct AllDebridAPIClientTests {
         #expect(resolution.statusCode == 200)
         #expect(resolution.contentType == "video/x-matroska")
         #expect(!resolution.followedRedirect)
-        #expect(stub.requests.map(\.httpMethod) == ["POST", "HEAD"])
+        #expect(stub.requests.map { $0.httpMethod ?? "" } == ["POST", "HEAD"])
     }
 
     @Test func `playback resolution rejects HTML and JSON responses`() async throws {
