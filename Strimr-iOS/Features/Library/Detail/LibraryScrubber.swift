@@ -62,28 +62,35 @@ struct LibraryScrubber: View {
     }
 
     var body: some View {
-        scrubberTrack
-            .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isShown)
-            .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isDragging)
-            .sensoryFeedback(.selection, trigger: scrubSection) { old, new in
-                old != nil && new != nil && old != new
-            }
-            .sensoryFeedback(.impact(weight: .light), trigger: reachedEdge) { _, new in new != nil }
-            .onChange(of: isScrolling) { _, scrolling in
-                if scrolling {
-                    reveal()
-                } else {
-                    scheduleHide()
-                }
-            }
-            .onDisappear { hideTask?.cancel() }
-            // VoiceOver users scroll with the system three-finger swipe.
-            .accessibilityHidden(true)
+        scrubberLifecycle
     }
 
-    private var scrubberTrack: AnyView {
+    private var scrubberLifecycle: AnyView {
         AnyView(
-            GeometryReader { proxy in
+            scrubberFeedback
+                .onChange(of: isScrolling) { _, scrolling in
+                    updateVisibility(isScrolling: scrolling)
+                }
+                .onDisappear { hideTask?.cancel() }
+                .accessibilityHidden(true),
+        )
+    }
+
+    private var scrubberFeedback: AnyView {
+        AnyView(
+            scrubberDisplay
+                .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isShown)
+                .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isDragging)
+                .sensoryFeedback(.selection, trigger: scrubSection) { old, new in
+                    old != nil && new != nil && old != new
+                }
+                .sensoryFeedback(.impact(weight: .light), trigger: reachedEdge) { _, new in new != nil },
+        )
+    }
+
+    private var scrubberDisplay: AnyView {
+        AnyView(
+            GeometryReader { (proxy: GeometryProxy) -> AnyView in
                 AnyView(scrubberContents(height: proxy.size.height))
             }
             .coordinateSpace(.named(trackSpace))
@@ -168,6 +175,14 @@ struct LibraryScrubber: View {
     private func reveal() {
         hideTask?.cancel()
         isRevealed = true
+    }
+
+    private func updateVisibility(isScrolling: Bool) {
+        if isScrolling {
+            reveal()
+        } else {
+            scheduleHide()
+        }
     }
 
     private func scheduleHide() {
