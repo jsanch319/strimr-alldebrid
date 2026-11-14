@@ -62,43 +62,53 @@ struct LibraryScrubber: View {
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            let travel = max(proxy.size.height - hitSize.height, 1)
-            let thumbOffset = CGFloat(dragFraction ?? scrollFraction) * travel
-
-            ZStack(alignment: .topTrailing) {
-                if isDragging {
-                    bubble
-                        .frame(height: hitSize.height)
-                        .offset(x: -hitSize.width, y: thumbOffset)
-                        .transition(.opacity)
+        scrubberTrack
+            .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isShown)
+            .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isDragging)
+            .sensoryFeedback(.selection, trigger: scrubSection) { old, new in
+                old != nil && new != nil && old != new
+            }
+            .sensoryFeedback(.impact(weight: .light), trigger: reachedEdge) { _, new in new != nil }
+            .onChange(of: isScrolling) { _, scrolling in
+                if scrolling {
+                    reveal()
+                } else {
+                    scheduleHide()
                 }
-                thumb
-                    .offset(y: thumbOffset)
-                    .gesture(dragGesture(travel: travel))
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        }
-        .coordinateSpace(.named(trackSpace))
-        .padding(.vertical, 8)
-        .opacity(isShown ? 1 : 0)
-        .allowsHitTesting(isShown)
-        .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isShown)
-        .animation(Motion.animation(Motion.controls, reduceMotion: reduceMotion), value: isDragging)
-        .sensoryFeedback(.selection, trigger: scrubSection) { old, new in
-            old != nil && new != nil && old != new
-        }
-        .sensoryFeedback(.impact(weight: .light), trigger: reachedEdge) { _, new in new != nil }
-        .onChange(of: isScrolling) { _, scrolling in
-            if scrolling {
-                reveal()
-            } else {
-                scheduleHide()
+            .onDisappear { hideTask?.cancel() }
+            // VoiceOver users scroll with the system three-finger swipe.
+            .accessibilityHidden(true)
+    }
+
+    private var scrubberTrack: AnyView {
+        AnyView(
+            GeometryReader { proxy in
+                AnyView(scrubberContents(height: proxy.size.height))
             }
+            .coordinateSpace(.named(trackSpace))
+            .padding(.vertical, 8)
+            .opacity(isShown ? 1 : 0)
+            .allowsHitTesting(isShown),
+        )
+    }
+
+    private func scrubberContents(height: CGFloat) -> some View {
+        let travel = max(height - hitSize.height, 1)
+        let thumbOffset = CGFloat(dragFraction ?? scrollFraction) * travel
+
+        return ZStack(alignment: .topTrailing) {
+            if isDragging {
+                bubble
+                    .frame(height: hitSize.height)
+                    .offset(x: -hitSize.width, y: thumbOffset)
+                    .transition(.opacity)
+            }
+            thumb
+                .offset(y: thumbOffset)
+                .gesture(dragGesture(travel: travel))
         }
-        .onDisappear { hideTask?.cancel() }
-        // VoiceOver users scroll with the system three-finger swipe.
-        .accessibilityHidden(true)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     private var thumb: some View {

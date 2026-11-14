@@ -225,7 +225,11 @@ struct PlayerView: View {
                 }
                 .onChange(of: playerController.bufferedAhead) { _, newValue in
                     viewModel.handleBufferedAhead(newValue)
-                }
+                },
+        )
+
+        let playbackStatusObservers = AnyView(
+            playbackObservers
                 .onChange(of: playerController.videoFormatBadge) { _, newValue in
                     videoFormatBadge = newValue
                 }
@@ -246,7 +250,11 @@ struct PlayerView: View {
                     terminationAlertMessage = newValue
                     showingTerminationAlert = true
                     playerController.pause()
-                }
+                },
+        )
+
+        let playbackLifecycleObservers = AnyView(
+            playbackStatusObservers
                 .onChange(of: viewModel.serverAccessGeneration) { _, generation in
                     Task { await reloadPlaybackAfterServerAccessChange(generation) }
                 }
@@ -272,7 +280,7 @@ struct PlayerView: View {
         )
 
         let sessionObservers = AnyView(
-            playbackObservers
+            playbackLifecycleObservers
                 .onChange(of: sharePlayCoordinator.activityChangeID) { _, _ in
                     guard let activity = sharePlayCoordinator.activity,
                           activity.ratingKey != viewModel.currentRatingKey
@@ -300,92 +308,100 @@ struct PlayerView: View {
                 },
         )
 
-        return sessionObservers
-            .overlay {
-                IsolatedSheetPresentationHost(
-                    presentation: sheetPresentation,
-                    refreshID: PlayerSheetRefreshID(
-                        playbackRate: playbackRate,
-                        videoZoom: playerController.videoZoom,
+        let presentation = AnyView(
+            sessionObservers
+                .overlay {
+                    IsolatedSheetPresentationHost(
+                        presentation: sheetPresentation,
+                        refreshID: PlayerSheetRefreshID(
+                            playbackRate: playbackRate,
+                            videoZoom: playerController.videoZoom,
+                        ),
+                        onDismiss: { showControls(temporarily: true) },
+                    ) { sheet in
+                        switch sheet {
+                        case .settings:
+                            playbackSettingsSheet
+                                .presentationDetents([.medium])
+                        case .subtitleSearch:
+                            subtitleSearchSheet
+                        }
+                    }
+                    .equatable()
+                }
+                .alert("player.termination.title", isPresented: $showingTerminationAlert) {
+                    Button("player.termination.dismiss") {
+                        dismissPlayer(force: true)
+                    }
+                } message: {
+                    Text(terminationAlertMessage)
+                }
+                .alert("offline.player.interrupted.title", isPresented: $isShowingOfflineInterruption) {
+                    if let offlineHandoff {
+                        Button("offline.player.resumeDownloaded") {
+                            self.offlineHandoff = nil
+                            Task { await startPlayback(using: PlayerViewModel(request: offlineHandoff)) }
+                        }
+                    }
+                    Button("player.termination.dismiss", role: .cancel) {
+                        offlineHandoff = nil
+                        dismissPlayer(force: true)
+                    }
+                } message: {
+                    Text(offlineHandoff == nil
+                        ? "offline.player.interrupted.message"
+                        : "offline.player.interrupted.downloadedMessage")
+                }
+                .alert("subtitles.search.activation.error", isPresented: $showingSubtitleSearchError) {
+                    Button("common.actions.done", role: .cancel) {}
+                } message: {
+                    Text(subtitleSearchErrorMessage)
+                },
+        )
+
+        let recoveryAlerts = AnyView(
+            presentation
+                .alert("player.serverRecovery.title", isPresented: $isShowingServerRecoveryAlert) {
+                    Button("common.actions.retry") {
+                        Task { await retryServerAccessRecovery() }
+                    }
+                    Button("player.serverRecovery.exitPlayer") {
+                        Task { await exitAfterServerAccessFailure() }
+                    }
+                } message: {
+                    Text(serverRecoveryMessage)
+                }
+                .alert(
+                    "player.settings.quality",
+                    isPresented: Binding(
+                        get: { qualityNoticeMessage != nil },
+                        set: {
+                            if !$0 {
+                                qualityNoticeMessage = nil
+                            }
+                        },
                     ),
-                    onDismiss: { showControls(temporarily: true) },
-                ) { sheet in
-                    switch sheet {
-                    case .settings:
-                        playbackSettingsSheet
-                            .presentationDetents([.medium])
-                    case .subtitleSearch:
-                        subtitleSearchSheet
-                    }
+                ) {
+                    Button("common.actions.done") { qualityNoticeMessage = nil }
+                } message: {
+                    Text(qualityNoticeMessage ?? "")
                 }
-                .equatable()
-            }
-            .alert("player.termination.title", isPresented: $showingTerminationAlert) {
-                Button("player.termination.dismiss") {
-                    dismissPlayer(force: true)
-                }
-            } message: {
-                Text(terminationAlertMessage)
-            }
-            .alert("offline.player.interrupted.title", isPresented: $isShowingOfflineInterruption) {
-                if let offlineHandoff {
-                    Button("offline.player.resumeDownloaded") {
-                        self.offlineHandoff = nil
-                        Task { await startPlayback(using: PlayerViewModel(request: offlineHandoff)) }
-                    }
-                }
-                Button("player.termination.dismiss", role: .cancel) {
-                    offlineHandoff = nil
-                    dismissPlayer(force: true)
-                }
-            } message: {
-                Text(offlineHandoff == nil
-                    ? "offline.player.interrupted.message"
-                    : "offline.player.interrupted.downloadedMessage")
-            }
-            .alert("subtitles.search.activation.error", isPresented: $showingSubtitleSearchError) {
-                Button("common.actions.done", role: .cancel) {}
-            } message: {
-                Text(subtitleSearchErrorMessage)
-            }
-            .alert("player.serverRecovery.title", isPresented: $isShowingServerRecoveryAlert) {
-                Button("common.actions.retry") {
-                    Task { await retryServerAccessRecovery() }
-                }
-                Button("player.serverRecovery.exitPlayer") {
-                    Task { await exitAfterServerAccessFailure() }
-                }
-            } message: {
-                Text(serverRecoveryMessage)
-            }
-            .alert(
-                "player.settings.quality",
-                isPresented: Binding(
-                    get: { qualityNoticeMessage != nil },
-                    set: {
-                        if !$0 {
-                            qualityNoticeMessage = nil
-                        }
-                    },
-                ),
-            ) {
-                Button("common.actions.done") { qualityNoticeMessage = nil }
-            } message: {
-                Text(qualityNoticeMessage ?? "")
-            }
-            .alert(
-                Text(viewModel.launchNotice ?? ""),
-                isPresented: Binding(
-                    get: { viewModel.launchNotice != nil },
-                    set: {
-                        if !$0 {
-                            viewModel.launchNotice = nil
-                        }
-                    },
-                ),
-            ) {
-                Button("common.actions.done") { viewModel.launchNotice = nil }
-            }
+                .alert(
+                    Text(viewModel.launchNotice ?? ""),
+                    isPresented: Binding(
+                        get: { viewModel.launchNotice != nil },
+                        set: {
+                            if !$0 {
+                                viewModel.launchNotice = nil
+                            }
+                        },
+                    ),
+                ) {
+                    Button("common.actions.done") { viewModel.launchNotice = nil }
+                },
+        )
+
+        return recoveryAlerts
             .confirmationDialog("sharePlay.leave.title", isPresented: $isShowingSharePlayExitPrompt) {
                 Button("sharePlay.leave.action", role: .destructive) {
                     sharePlayCoordinator.leave()
