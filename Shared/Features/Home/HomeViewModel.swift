@@ -703,8 +703,11 @@ final class HomeViewModel {
             return rows
         #else
             guard let store = OfflineCoordinator.shared.store else { return rows }
-            let localProgress = registry.connectedServices
-                .flatMap { store.playbackProgress(owner: $0.owner) }
+            var localProgress: [SavedPlaybackProgress] = []
+            for services in registry.connectedServices {
+                localProgress.append(contentsOf: store.playbackProgress(owner: services.owner))
+            }
+            localProgress = localProgress
                 .filter { $0.media.kind == .movie || $0.media.kind == .episode }
                 .sorted { $0.lastWatchedAt > $1.lastWatchedAt }
             guard !localProgress.isEmpty else { return rows }
@@ -716,32 +719,30 @@ final class HomeViewModel {
                 },
                 uniquingKeysWith: { first, _ in first },
             )
-            let preferredLocalProgress = localProgress.filter { progress in
+            let preferredLocalProgress: [SavedPlaybackProgress] = localProgress.filter { progress in
                 guard let remoteDate = remoteByIdentity[progress.media.identity]?.lastViewedAt else { return true }
                 return progress.lastWatchedAt >= remoteDate
             }
-            let localIdentities = Set(preferredLocalProgress.map(\.media.identity))
-            let remoteItems = (existing?.items ?? []).filter { item in
+            let localIdentities = Set<MediaIdentity>(preferredLocalProgress.map(\.media.identity))
+            let remoteItems: [MediaDisplayItem] = (existing?.items ?? []).filter { item in
                 guard let playable = item.playableItem else { return true }
                 return !localIdentities.contains(playable.identity)
             }
-            let items = (preferredLocalProgress.map { MediaDisplayItem.playable($0.media) } + remoteItems)
-                .enumerated()
-                .sorted { lhs, rhs in
-                    let lhsDate = lhs.element.playableItem?.lastViewedAt
-                    let rhsDate = rhs.element.playableItem?.lastViewedAt
-                    switch (lhsDate, rhsDate) {
-                    case let (left?, right?) where left != right:
-                        left > right
-                    case (_?, nil):
-                        true
-                    case (nil, _?):
-                        false
-                    default:
-                        lhs.offset < rhs.offset
-                    }
+            let itemsToSort = preferredLocalProgress.map { MediaDisplayItem.playable($0.media) } + remoteItems
+            let items = itemsToSort.enumerated().sorted { lhs, rhs in
+                let lhsDate = lhs.element.playableItem?.lastViewedAt
+                let rhsDate = rhs.element.playableItem?.lastViewedAt
+                switch (lhsDate, rhsDate) {
+                case let (left?, right?) where left != right:
+                    left > right
+                case (_?, nil):
+                    true
+                case (nil, _?):
+                    false
+                default:
+                    lhs.offset < rhs.offset
                 }
-                .map(\.element)
+            }.map(\.element)
             let title = existing?.title ?? String(localized: "offline.home.continueWatching")
             let row = HomeRow(
                 id: HomeRow.localContinueWatchingID,
