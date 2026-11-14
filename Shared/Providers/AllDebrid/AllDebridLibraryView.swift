@@ -509,7 +509,6 @@ private struct AllDebridSourcePicker: View {
                     Button("Done") { dismiss() }
                 }
             }
-
         }
         .accessibilityIdentifier("AllDebridSourcePicker")
         .overlay {
@@ -525,7 +524,6 @@ private struct AllDebridSourcePicker: View {
 }
 
 private extension View {
-    @ViewBuilder
     func allDebridSourcePickerTitleDisplayMode() -> some View {
         #if os(iOS)
             navigationBarTitleDisplayMode(.inline)

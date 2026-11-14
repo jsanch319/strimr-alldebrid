@@ -360,11 +360,6 @@ struct PlayerView: View {
                 } message: {
                     Text(subtitleSearchErrorMessage)
                 },
-                .alert("Watch Together on Discord", isPresented: $isShowingDiscordWatchTogetherAlert) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text(discordWatchTogetherMessage ?? "")
-                },
         )
 
         let recoveryAlerts = AnyView(
@@ -419,6 +414,11 @@ struct PlayerView: View {
                 Button("common.actions.cancel", role: .cancel) {}
             } message: {
                 Text("sharePlay.leave.message")
+            }
+            .alert("Watch Together on Discord", isPresented: $isShowingDiscordWatchTogetherAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(discordWatchTogetherMessage ?? "")
             }
             .onChange(of: isPauseScreenEligible, initial: true) { _, isEligible in
                 pauseScreen.update(isEligible: isEligible)
@@ -710,14 +710,16 @@ struct PlayerView: View {
     }
 
     private func startDiscordWatchTogether() {
-        guard let media = viewModel.media,
-              let url = DiscordWatchTogetherConfiguration.activityLaunchURL(
-                  for: media,
-                  position: playerController.position,
-                  isPlaying: !playerController.isPaused,
-                  duration: playerController.duration ?? viewModel.duration,
-                  selectedSourceIdentifier: viewModel.currentVersionID,
-              ) else {
+        guard
+            let media = viewModel.media,
+            let url = DiscordWatchTogetherConfiguration.activityLaunchURL(
+                for: media,
+                position: playerController.position,
+                isPlaying: !playerController.isPaused,
+                duration: playerController.duration ?? viewModel.duration,
+                selectedSourceIdentifier: viewModel.currentVersionID,
+            )
+        else {
             showDiscordWatchTogetherMessage(
                 "Discord Watch Together is not configured. Set " +
                     "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig.",

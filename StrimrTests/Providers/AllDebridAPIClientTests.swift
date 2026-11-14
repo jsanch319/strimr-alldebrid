@@ -1,3 +1,4 @@
+import AetherEngine
 import Foundation
 @testable import Strimr
 import Testing
