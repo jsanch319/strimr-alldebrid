@@ -146,6 +146,26 @@ struct AllDebridAPIClientTests {
         #expect(Set(selected.map(\.filename)) == ["film.1080p.mkv", "episode01.mp4", "other-2160p.mkv"])
     }
 
+    @Test func `manual magnet sources include oversized video files and sort by quality`() {
+        let files = [
+            magnetFile("film-1080p-h264.mkv", size: 15_000_000_000),
+            magnetFile("film-2160p-hevc-dv.mkv", size: 25_000_000_000),
+            magnetFile("film-2160p-h264.mkv", size: 18_000_000_000),
+            magnetFile("cover.jpg", size: 1000),
+            magnetFile("other-2160p.mkv", size: 30_000_000_000, magnetID: "102"),
+        ]
+
+        let sources = AllDebridLibraryView.sources(for: "101", in: files)
+
+        #expect(sources.map(\.filename) == [
+            "film-2160p-hevc-dv.mkv",
+            "film-2160p-h264.mkv",
+            "film-1080p-h264.mkv",
+        ])
+        #expect(AllDebridLibraryView.sourceDetails(sources[0]).contains("HEVC / H.265"))
+        #expect(AllDebridLibraryView.sourceDetails(sources[0]).contains("Dolby Vision"))
+    }
+
     @Test func `magnet movie titles omit release and encoding details`() {
         #expect(
             AllDebridLibraryView.cleanTitle("Movie.Name.2024.2160p.WEB-DL.DV.x265-GROUP.mkv") == "Movie Name 2024",

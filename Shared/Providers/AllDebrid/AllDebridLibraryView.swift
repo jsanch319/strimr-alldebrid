@@ -8,9 +8,20 @@ struct AllDebridLibraryView: View {
     @State private var magnetFiles: [AllDebridMagnetFile] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var playerURL: URL?
-    @State private var showPlayer = false
+    @State private var activeSheet: ActiveSheet?
     @State private var isConfigured = false
+
+    private enum ActiveSheet: Identifiable {
+        case player(URL)
+        case sources(AllDebridMagnetFile)
+
+        var id: String {
+            switch self {
+            case let .player(url): "player:\(url.absoluteString)"
+            case let .sources(file): "sources:\(file.id)"
+            }
+        }
+    }
 
     private var refreshToolbarPlacement: ToolbarItemPlacement {
         #if os(macOS)
@@ -65,15 +76,8 @@ struct AllDebridLibraryView: View {
                         }
                         if !magnetFiles.isEmpty {
                             Section("Magnets") {
-                                ForEach(magnetFiles) { file in
-                                    Button {
-                                        play(file)
-                                    } label: {
-                                        libraryRow(
-                                            title: Self.cleanTitle(file.filename),
-                                            subtitle: file.fullPath,
-                                        )
-                                    }
+                                ForEach(Self.selectBestVideos(magnetFiles)) { file in
+                                    magnetRow(file)
                                 }
                             }
                         }
@@ -95,7 +99,7 @@ struct AllDebridLibraryView: View {
                                 links = []
                                 magnetFiles = []
                                 isConfigured = false
-                                playerURL = nil
+                                activeSheet = nil
                             } catch {
                                 errorMessage = error.localizedDescription
                             }
@@ -118,9 +122,17 @@ struct AllDebridLibraryView: View {
             ) {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "Unknown error") }
-            .sheet(isPresented: $showPlayer, onDismiss: { playerURL = nil }) {
-                if let playerURL {
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case let .player(playerURL):
                     AllDebridVideoPlayer(url: playerURL)
+                case let .sources(file):
+                    AllDebridSourcePicker(
+                        magnetTitle: Self.cleanTitle(file.filename),
+                        sources: Self.sources(for: file.magnetID, in: magnetFiles),
+                    ) { source in
+                        play(source)
+                    }
                 }
             }
             .task {
@@ -157,9 +169,9 @@ struct AllDebridLibraryView: View {
             async let savedLinksTask = client.savedLinks()
             async let readyMagnetsTask = client.readyMagnets()
             let (savedLinks, readyMagnets) = try await (savedLinksTask, readyMagnetsTask)
-            let playableFiles = try await client.magnetFiles(for: readyMagnets.map(\.id))
+            let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
             links = savedLinks.filter(\.isVideo)
-            magnetFiles = Self.selectBestVideos(playableFiles)
+            magnetFiles = files.filter(\.isVideo)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -171,8 +183,7 @@ struct AllDebridLibraryView: View {
         defer { isLoading = false }
         do {
             let client = try AllDebridAPIClient(apiKey: apiKey)
-            playerURL = try await client.unlock(link.link)
-            showPlayer = true
+            activeSheet = try await .player(client.unlock(link.link))
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -186,8 +197,38 @@ struct AllDebridLibraryView: View {
             errorMessage = "The playback link is invalid."
             return
         }
-        playerURL = url
-        showPlayer = true
+        activeSheet = .player(url)
+    }
+
+    private func magnetRow(_ file: AllDebridMagnetFile) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                play(file)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "film").foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(Self.cleanTitle(file.filename)).font(.headline)
+                        Text(file.fullPath).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "play.circle.fill")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Play \(Self.cleanTitle(file.filename))")
+
+            Button {
+                activeSheet = .sources(file)
+            } label: {
+                Image(systemName: "list.bullet")
+                    .frame(minWidth: 32, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Select Source")
+        }
     }
 
     private func libraryRow(title: String, subtitle: String) -> some View {
@@ -203,22 +244,13 @@ struct AllDebridLibraryView: View {
     }
 
     static func selectBestVideos(_ files: [AllDebridMagnetFile]) -> [AllDebridMagnetFile] {
-        let maximumSize: Int64 = 20 * 1024 * 1024 * 1024
-        let candidates = files.filter { $0.isVideo && (0 ... maximumSize).contains($0.size) }
+        let candidates = files.filter { $0.isVideo && $0.size >= 0 && $0.size <= automaticMaximumSize }
         let groups = Dictionary(grouping: candidates) {
             "\($0.magnetID):\(cleanTitle($0.filename).lowercased())"
         }
         return groups.values.compactMap { versions in
             versions.max {
-                let leftResolution = resolutionRank($0.filename)
-                let rightResolution = resolutionRank($1.filename)
-                if leftResolution != rightResolution {
-                    return leftResolution < rightResolution
-                }
-                if $0.size != $1.size {
-                    return $0.size < $1.size
-                }
-                return $0.fullPath > $1.fullPath
+                sourcePrecedes($1, $0)
             }
         }
         .sorted {
@@ -227,6 +259,26 @@ struct AllDebridLibraryView: View {
             }
             return $0.fullPath < $1.fullPath
         }
+    }
+
+    static func sources(for magnetID: String, in files: [AllDebridMagnetFile]) -> [AllDebridMagnetFile] {
+        files
+            .filter { $0.magnetID == magnetID && $0.isVideo }
+            .sorted(by: sourcePrecedes)
+    }
+
+    private static let automaticMaximumSize: Int64 = 20 * 1024 * 1024 * 1024
+
+    private static func sourcePrecedes(_ lhs: AllDebridMagnetFile, _ rhs: AllDebridMagnetFile) -> Bool {
+        let leftResolution = resolutionRank(lhs.filename)
+        let rightResolution = resolutionRank(rhs.filename)
+        if leftResolution != rightResolution {
+            return leftResolution > rightResolution
+        }
+        if lhs.size != rhs.size {
+            return lhs.size > rhs.size
+        }
+        return lhs.fullPath < rhs.fullPath
     }
 
     private static func resolutionRank(_ filename: String) -> Int {
@@ -241,6 +293,51 @@ struct AllDebridLibraryView: View {
             return 1
         }
         return 0
+    }
+
+    static func sourceDetails(_ file: AllDebridMagnetFile) -> String {
+        let name = file.filename.lowercased()
+        var details = [resolutionLabel(file.filename)]
+
+        if name.range(of: #"\b(hevc|h\.?265|x265)\b"#, options: .regularExpression) != nil {
+            details.append("HEVC / H.265")
+        } else if name.range(of: #"\b(h\.?264|x264|avc)\b"#, options: .regularExpression) != nil {
+            details.append("H.264")
+        } else if name.range(of: #"\bav1\b"#, options: .regularExpression) != nil {
+            details.append("AV1")
+        }
+
+        if name.range(of: #"\b(dolby[ ._-]?vision|dovi|dv)\b"#, options: .regularExpression) != nil {
+            details.append("Dolby Vision")
+        }
+        if name.range(of: #"\bhdr10\+?\b"#, options: .regularExpression) != nil,
+           !details.contains("Dolby Vision")
+        {
+            details.append("HDR10")
+        } else if name.range(of: #"\bhdr\b"#, options: .regularExpression) != nil,
+                  !details.contains("Dolby Vision"), !details.contains("HDR10")
+        {
+            details.append("HDR")
+        }
+        details.append(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+        return details.joined(separator: " • ")
+    }
+
+    private static func resolutionLabel(_ filename: String) -> String {
+        let name = filename.lowercased()
+        if name.range(of: #"\b2160p\b"#, options: .regularExpression) != nil {
+            return "2160p"
+        }
+        if name.range(of: #"\b4k\b"#, options: .regularExpression) != nil {
+            return "4K"
+        }
+        if name.range(of: #"\b1080p\b"#, options: .regularExpression) != nil {
+            return "1080p"
+        }
+        if name.range(of: #"\b720p\b"#, options: .regularExpression) != nil {
+            return "720p"
+        }
+        return "Resolution unknown"
     }
 
     static func cleanTitle(_ filename: String) -> String {
@@ -281,6 +378,62 @@ private struct AllDebridVideoPlayer: View {
         .onDisappear {
             player?.pause()
             player = nil
+        }
+    }
+}
+
+private struct AllDebridSourcePicker: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let magnetTitle: String
+    let sources: [AllDebridMagnetFile]
+    let onSelect: (AllDebridMagnetFile) -> Void
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(sources) { source in
+                    Button {
+                        onSelect(source)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(AllDebridLibraryView.cleanTitle(source.filename))
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Text(AllDebridLibraryView.sourceDetails(source))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(source.fullPath)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        "\(AllDebridLibraryView.cleanTitle(source.filename)), \(AllDebridLibraryView.sourceDetails(source))",
+                    )
+                }
+            }
+            .navigationTitle("Select Source")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .accessibilityIdentifier("AllDebridSourcePicker")
+        .overlay {
+            if sources.isEmpty {
+                ContentUnavailableView(
+                    "No playable sources",
+                    systemImage: "film",
+                    description: Text(magnetTitle),
+                )
+            }
         }
     }
 }
