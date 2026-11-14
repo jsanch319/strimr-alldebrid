@@ -1,12 +1,18 @@
 import AetherEngine
 import AVKit
+import OSLog
 import SwiftUI
 
 /// Independent, experimental AllDebrid library. It does not impersonate a Plex server.
 struct AllDebridLibraryView: View {
+    private static let logger = Logger(subsystem: "com.strimr", category: "AllDebrid")
+
     @State private var apiKey = ""
     @State private var links: [AllDebridSavedLink] = []
     @State private var magnetFiles: [AllDebridMagnetFile] = []
+    @State private var totalMagnetCount = 0
+    @State private var readyMagnetCount = 0
+    @State private var hasLoadedLibrary = false
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var activeSheet: ActiveSheet?
@@ -63,8 +69,16 @@ struct AllDebridLibraryView: View {
                     }
                 } else {
                     List {
-                        if links.isEmpty, magnetFiles.isEmpty, !isLoading {
-                            ContentUnavailableView("No playable AllDebrid videos found.", systemImage: "film")
+                        if hasLoadedLibrary,
+                           !isLoading,
+                           errorMessage == nil,
+                           links.isEmpty,
+                           !magnetFiles.contains(where: \.isVideo)
+                        {
+                            ContentUnavailableView(
+                                emptyLibraryMessage(totalMagnets: totalMagnetCount, readyMagnets: readyMagnetCount),
+                                systemImage: "film",
+                            )
                         }
                         if !links.isEmpty {
                             Section("Saved Links") {
@@ -101,6 +115,9 @@ struct AllDebridLibraryView: View {
                                 apiKey = ""
                                 links = []
                                 magnetFiles = []
+                                totalMagnetCount = 0
+                                readyMagnetCount = 0
+                                hasLoadedLibrary = false
                                 isConfigured = false
                                 activeSheet = nil
                             } catch {
@@ -161,7 +178,7 @@ struct AllDebridLibraryView: View {
                     if let key = try AllDebridCredentialStore().load() {
                         apiKey = key
                         isConfigured = true
-                        await refresh()
+                        try await refresh(using: key)
                     }
                 } catch {
                     errorMessage = error.localizedDescription
@@ -171,32 +188,45 @@ struct AllDebridLibraryView: View {
     }
 
     private func connect() async {
-        await refresh()
-        if errorMessage == nil {
-            do {
-                try AllDebridCredentialStore().save(apiKey)
-                isConfigured = true
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+        let authenticatedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            try await refresh(using: authenticatedKey)
+            try AllDebridCredentialStore().save(authenticatedKey)
+            apiKey = authenticatedKey
+            isConfigured = true
+            Self.logger.debug("AllDebrid login succeeded and credentials were saved")
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
     private func refresh() async {
-        isLoading = true
-        defer { isLoading = false }
         do {
-            let client = try AllDebridAPIClient(apiKey: apiKey)
-            async let savedLinksTask = client.savedLinks()
-            async let readyMagnetsTask = client.readyMagnets()
-            let (savedLinks, readyMagnets) = try await (savedLinksTask, readyMagnetsTask)
-            let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
-            links = savedLinks.filter(\.isVideo)
-            magnetFiles = files
-            errorMessage = nil
+            try await refresh(using: apiKey)
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func refresh(using key: String) async throws {
+        isLoading = true
+        defer { isLoading = false }
+        errorMessage = nil
+        let client = try AllDebridAPIClient(apiKey: key)
+        async let savedLinksTask = client.savedLinks()
+        async let magnetsTask = client.magnets()
+        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
+        let readyMagnets = magnets.filter(\.isReady)
+        let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
+
+        links = savedLinks.filter(\.isVideo)
+        magnetFiles = files
+        totalMagnetCount = magnets.count
+        readyMagnetCount = readyMagnets.count
+        hasLoadedLibrary = true
+        Self.logger.debug(
+            "AllDebrid refresh complete: savedLinksReturned=\(savedLinks.count), videoLinks=\(links.count), magnetsReturned=\(magnets.count), readyMagnets=\(readyMagnets.count), magnetFilesReturned=\(files.count), playableVideoCandidates=\(files.filter(\.isVideo).count)",
+        )
     }
 
     private func play(_ link: AllDebridSavedLink) async {
@@ -280,6 +310,12 @@ struct AllDebridLibraryView: View {
             }
             return $0.fullPath < $1.fullPath
         }
+    }
+
+    static func emptyLibraryMessage(totalMagnets: Int, readyMagnets: Int) -> String {
+        totalMagnets > 0 && readyMagnets == 0
+            ? "No ready AllDebrid videos found yet."
+            : "No playable AllDebrid videos found."
     }
 
     static func sources(for magnetID: String, in files: [AllDebridMagnetFile]) -> [AllDebridMagnetFile] {

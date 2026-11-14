@@ -55,26 +55,27 @@ struct AllDebridAPIClientTests {
         }
     }
 
-    @Test func `ready magnet parsing accepts numeric and string IDs and excludes unfinished magnets`() async throws {
+    @Test func `magnet status parses numeric and string ready statuses and retains pending magnets`() async throws {
         let stub = HTTPStub { request in
             #expect(request.url?.path == "/v4.1/magnet/status")
             #expect(request.httpMethod == "POST")
             #expect(request.url?.query == nil)
-            #expect(
-                String(data: request.httpBody ?? Data(), encoding: .utf8)?
-                    .contains("status=ready") == true,
-            )
+            let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+            #expect(body.contains("apikey=private-key"))
+            #expect(!body.contains("status=ready"))
             return try .fixture("alldebrid-magnet-status")
         }
         let client = try AllDebridAPIClient(apiKey: "private-key", session: stub.session)
 
-        let magnets = try await client.readyMagnets()
+        let magnets = try await client.magnets()
+        let readyMagnets = magnets.filter(\.isReady)
 
-        #expect(magnets.map(\.id) == ["101", "102"])
-        #expect(magnets.map(\.isReady) == [true, true])
+        #expect(magnets.map(\.id) == ["101", "102", "103", "104", "105"])
+        #expect(readyMagnets.map(\.id) == ["101", "102", "105"])
         #expect(magnets[0].filename == "Movie.2024.2160p.WEB-DL.mkv")
         #expect(magnets[0].size == 12_000_000_000)
         #expect(magnets[1].statusCode == 4)
+        #expect(magnets[4].statusCode == 4)
         #expect(stub.requests.first?.url?.query == nil)
     }
 
@@ -112,6 +113,48 @@ struct AllDebridAPIClientTests {
         #expect(bodyItems.first { $0.name == "apikey" }?.value == "private-key")
     }
 
+    @Test func `initial library requests use the supplied key and fetch links magnets then ready files`() async throws {
+        let stub = HTTPStub { request in
+            switch request.url?.path {
+            case "/v4/user/links":
+                .json(
+                    #"{"status":"success","data":{"links":[{"id":1,"filename":"Saved.mkv","link":"https://alldebrid.com/saved"}]}}"#,
+                )
+            case "/v4.1/magnet/status":
+                try .fixture("alldebrid-magnet-status")
+            case "/v4/magnet/files":
+                try .fixture("alldebrid-magnet-files")
+            default:
+                .status(404)
+            }
+        }
+        let client = try AllDebridAPIClient(apiKey: "newly-authenticated-key", session: stub.session)
+
+        async let savedLinksTask = client.savedLinks()
+        async let magnetsTask = client.magnets()
+        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
+        let readyMagnets = magnets.filter(\.isReady)
+        let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
+
+        #expect(savedLinks.count == 1)
+        #expect(magnets.count == 5)
+        #expect(readyMagnets.count == 3)
+        #expect(files.filter(\.isVideo).count == 2)
+        #expect(Set(stub.requests.compactMap { $0.url?.path }) == [
+            "/v4/user/links",
+            "/v4.1/magnet/status",
+            "/v4/magnet/files",
+        ])
+        #expect(stub.requests.allSatisfy { request in
+            let query = request.url.flatMap {
+                URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems
+            } ?? []
+            let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+            return query.contains { $0.name == "apikey" && $0.value == "newly-authenticated-key" }
+                || body.contains("apikey=newly-authenticated-key")
+        })
+    }
+
     @Test func `empty magnet response returns no ready magnets or files`() async throws {
         let stub = HTTPStub { request in
             #expect(request.url?.path == "/v4.1/magnet/status")
@@ -119,8 +162,8 @@ struct AllDebridAPIClientTests {
         }
         let client = try AllDebridAPIClient(apiKey: "private-key", session: stub.session)
 
-        let magnets = try await client.readyMagnets()
-        let files = try await client.magnetFiles(for: magnets.map(\.id))
+        let magnets = try await client.magnets()
+        let files = try await client.magnetFiles(for: magnets.filter(\.isReady).map(\.id))
 
         #expect(magnets.isEmpty)
         #expect(files.isEmpty)
@@ -173,6 +216,17 @@ struct AllDebridAPIClientTests {
         ])
         #expect(AllDebridLibraryView.sourceDetails(sources[0]).contains("HEVC / H.265"))
         #expect(AllDebridLibraryView.sourceDetails(sources[0]).contains("Dolby Vision"))
+    }
+
+    @Test func `empty library distinguishes magnets that are not ready yet`() {
+        #expect(
+            AllDebridLibraryView.emptyLibraryMessage(totalMagnets: 2, readyMagnets: 0)
+                == "No ready AllDebrid videos found yet.",
+        )
+        #expect(
+            AllDebridLibraryView.emptyLibraryMessage(totalMagnets: 0, readyMagnets: 0)
+                == "No playable AllDebrid videos found.",
+        )
     }
 
     @Test func `magnet movie titles omit release and encoding details`() {

@@ -113,7 +113,7 @@ actor AllDebridAPIClient {
     /// Fetches the user's saved links. Response structure may vary by API version.
     func savedLinks() async throws -> [AllDebridSavedLink] {
         let payload = try await request("user/links")
-        guard let data = payload["data"] as? [String: Any] else { return [] }
+        guard let data = payload["data"] as? [String: Any] else { throw APIError.invalidResponse }
         let rawLinks = (data["links"] as? [[String: Any]]) ?? []
         return rawLinks.compactMap { item in
             guard let link = item["link"] as? String, !link.isEmpty else { return nil }
@@ -122,31 +122,33 @@ actor AllDebridAPIClient {
         }
     }
 
-    /// Fetches only ready magnets. The API key is sent in the POST body, not the request URL.
-    func readyMagnets() async throws -> [AllDebridMagnet] {
+    /// Fetches magnets of every status so an empty library can distinguish pending magnets from no magnets.
+    func magnets() async throws -> [AllDebridMagnet] {
         let payload = try await request(
             "/v4.1/magnet/status",
-            parameters: [URLQueryItem(name: "status", value: "ready")],
             method: "POST",
             parametersInBody: true,
         )
         guard let data = payload["data"] as? [String: Any],
-              let rawMagnets = data["magnets"] as? [Any] else { return [] }
+              let rawMagnets = data["magnets"] as? [Any] else { throw APIError.invalidResponse }
 
-        return rawMagnets.compactMap { rawMagnet in
+        let magnets = rawMagnets.compactMap { rawMagnet in
             guard let magnet = rawMagnet as? [String: Any],
                   let id = Self.stringValue(magnet["id"]) else { return nil }
-            let status = (magnet["status"] as? String) ?? (magnet["status"] as? NSNumber)?.stringValue ?? ""
+            let status = magnet["status"] as? String ?? ""
+            let statusCode = Self.integerValue(magnet["statusCode"])
+                ?? Self.integerValue(magnet["statuscode"])
+                ?? Self.integerValue(magnet["status"])
             return AllDebridMagnet(
                 id: id,
                 filename: (magnet["filename"] as? String) ?? (magnet["name"] as? String) ?? "Untitled",
                 size: Self.integerValue(magnet["size"]) ?? 0,
                 status: status,
-                statusCode: (Self.integerValue(magnet["statusCode"]) ?? Self.integerValue(magnet["statuscode"]))
-                    .flatMap { Int(exactly: $0) },
+                statusCode: statusCode.flatMap { Int(exactly: $0) },
             )
         }
-        .filter(\.isReady)
+        guard magnets.count == rawMagnets.count else { throw APIError.invalidResponse }
+        return magnets
     }
 
     /// Fetches playable files for multiple ready magnets and recursively flattens their folder trees.
@@ -160,7 +162,7 @@ actor AllDebridAPIClient {
             method: "POST",
             parametersInBody: true,
         )
-        guard let data = payload["data"] as? [String: Any] else { return [] }
+        guard let data = payload["data"] as? [String: Any] else { throw APIError.invalidResponse }
 
         var files: [AllDebridMagnetFile] = []
         if let magnets = data["magnets"] as? [Any] {
@@ -173,6 +175,8 @@ actor AllDebridAPIClient {
             }
         } else if ids.count == 1, let entries = data["files"] as? [Any] {
             Self.flatten(entries, magnetID: ids[0], parentPath: "", into: &files)
+        } else {
+            throw APIError.invalidResponse
         }
         return files
     }

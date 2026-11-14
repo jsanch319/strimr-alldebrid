@@ -29,6 +29,12 @@
         "size": 1000,
         "status": "Error",
         "statusCode": 0
+      },
+      {
+        "id": 105,
+        "filename": "NumericStatus",
+        "size": 1000,
+        "status": 4
       }
     ]
   }

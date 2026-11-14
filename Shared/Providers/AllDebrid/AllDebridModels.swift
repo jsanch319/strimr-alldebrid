@@ -8,10 +8,7 @@ struct AllDebridMagnet: Identifiable, Sendable, Hashable {
     let statusCode: Int?
 
     var isReady: Bool {
-        if status.isEmpty {
-            return statusCode == 4
-        }
-        return status.caseInsensitiveCompare("ready") == .orderedSame
+        status.caseInsensitiveCompare("ready") == .orderedSame || statusCode == 4
     }
 }
 
