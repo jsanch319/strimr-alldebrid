@@ -833,6 +833,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Strimr-iOS/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Strimr;
+				INFOPLIST_KEY_DiscordApplicationClientID = "$(DISCORD_APPLICATION_CLIENT_ID)";
+				INFOPLIST_KEY_DiscordActivityURL = "$(DISCORD_ACTIVITY_URL)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr needs local network access to connect to your media server.";
@@ -884,6 +886,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "Strimr-iOS/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = Strimr;
+				INFOPLIST_KEY_DiscordApplicationClientID = "$(DISCORD_APPLICATION_CLIENT_ID)";
+				INFOPLIST_KEY_DiscordActivityURL = "$(DISCORD_ACTIVITY_URL)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr needs local network access to connect to your media server.";

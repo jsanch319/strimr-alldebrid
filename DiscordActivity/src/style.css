@@ -1,0 +1,91 @@
+:root {
+  color: #f3f4f6;
+  background: #111318;
+  font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, select, input { font: inherit; }
+button:disabled, input:disabled { cursor: not-allowed; opacity: 0.45; }
+
+.activity-shell { width: min(940px, 100%); margin: 0 auto; padding: 18px 22px 28px; }
+.topbar, .brand, .connection, .section-heading, .participant-list li, .transport, .timecodes {
+  display: flex;
+  align-items: center;
+}
+.topbar, .section-heading { justify-content: space-between; }
+.topbar { margin-bottom: 20px; color: #c6c8cf; font-size: 13px; }
+.brand { gap: 9px; font-size: 15px; font-weight: 700; }
+.brand > span:last-child { color: #9699a4; font-weight: 500; }
+.brand-mark { display: grid; width: 52px; height: 52px; place-items: center; border-radius: 17px; background: #e27b37; color: #fff; font-weight: 800; font-size: 24px; }
+.brand-mark.small { width: 26px; height: 26px; border-radius: 9px; font-size: 14px; }
+.connection { gap: 7px; color: #afb2bb; font-size: 12px; }
+.connection i { width: 7px; height: 7px; border-radius: 50%; background: #ebad45; }
+.connection.connected i { background: #62c893; }
+.connection.reconnecting i { background: #e27b37; }
+
+.watch-card, .participants-card { overflow: hidden; border: 1px solid #2a2c34; border-radius: 18px; background: #191b22; }
+.watch-card { display: grid; grid-template-columns: minmax(190px, 0.78fr) 1.4fr; }
+.artwork { display: flex; min-height: 320px; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: radial-gradient(ellipse at 48% 48%, #67472f 0, #352c2c 38%, #1b2028 77%); color: #c9a486; letter-spacing: 0.28em; font-size: 11px; }
+.artwork-symbol { display: grid; width: 70px; height: 70px; place-items: center; padding-left: 5px; border: 1px solid #ffffff42; border-radius: 50%; background: #0e101755; font-size: 24px; }
+.media-info { display: flex; flex-direction: column; justify-content: center; padding: 26px 30px; }
+.eyebrow { margin: 0 0 6px; color: #e29154; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; }
+h1 { margin: 0; font-size: clamp(22px, 4vw, 32px); line-height: 1.2; }
+.episode, .room-status { margin: 7px 0 0; color: #a7a9b2; }
+.room-status { font-size: 12px; }
+.timeline { margin-top: 21px; }
+.timeline input { display: block; width: 100%; accent-color: #e27b37; cursor: pointer; }
+.timecodes { justify-content: space-between; color: #9da0aa; font-size: 11px; font-variant-numeric: tabular-nums; }
+.transport { justify-content: center; gap: 12px; margin-top: 16px; }
+.transport button { cursor: pointer; color: #f7f7f8; }
+.play-button { display: grid; width: 45px; height: 45px; place-items: center; border: 0; border-radius: 50%; background: #e27b37; font-size: 18px; }
+.secondary-button, .invite-button { min-width: 45px; height: 38px; border: 1px solid #373a43; border-radius: 10px; background: #23252d; font-size: 12px; }
+.invite-button { margin-left: auto; padding: 0 14px; }
+.sync-note, .permission-note { margin: 16px 0 0; color: #8e929e; font-size: 11px; }
+
+.participants-card { margin-top: 16px; padding: 20px 22px 17px; }
+.section-heading { gap: 14px; }
+h2 { margin: 0; font-size: 15px; }
+.section-heading p { margin: 3px 0 0; color: #9699a4; font-size: 11px; }
+.toggle-control { display: flex; align-items: center; gap: 8px; color: #d7d8dd; font-size: 11px; cursor: pointer; }
+.toggle-control input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.switch { position: relative; width: 31px; height: 18px; border-radius: 10px; background: #41434b; transition: background 120ms ease; }
+.switch::after { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%; background: white; content: ""; transition: transform 120ms ease; }
+.toggle-control input:checked + .switch { background: #d77735; }
+.toggle-control input:checked + .switch::after { transform: translateX(13px); }
+.permission-settings { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; color: #a9abb4; font-size: 11px; }
+.permission-settings select { border: 1px solid #393b44; border-radius: 7px; background: #22242b; color: #f2f2f3; padding: 5px 8px; font-size: 11px; }
+.participant-list { display: grid; gap: 2px; margin: 14px 0 0; padding: 0; list-style: none; }
+.participant-list li { min-height: 42px; gap: 9px; border-bottom: 1px solid #ffffff0b; }
+.avatar { display: grid; width: 27px; height: 27px; flex: 0 0 27px; place-items: center; border-radius: 50%; background: #393541; color: #e1b793; font-size: 11px; font-weight: 700; }
+.participant-name { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.badge { border-radius: 9px; padding: 3px 7px; font-size: 9px; white-space: nowrap; }
+.host-badge { background: #493622; color: #efb16f; }
+.control-badge { background: #203b32; color: #85d3ae; }
+.muted-badge { background: #2a2c33; color: #9da0aa; }
+.permission-check { display: flex; align-items: center; gap: 4px; color: #a9abb4; font-size: 9px; white-space: nowrap; }
+.permission-check input { accent-color: #e27b37; }
+.source-permission { margin-left: 2px; }
+.permission-note { margin-top: 12px; }
+.muted { color: #9da0aa; }
+.error-message { color: #ff9a91; }
+.setup-state { display: grid; min-height: 100vh; place-content: center; justify-items: center; padding: 28px; text-align: center; }
+.setup-state h1 { margin-top: 14px; font-size: 21px; }
+.setup-state p { max-width: 440px; font-size: 13px; }
+
+@media (max-width: 600px) {
+  .activity-shell { padding: 14px 12px 20px; }
+  .watch-card { grid-template-columns: 1fr; }
+  .artwork { min-height: 130px; }
+  .media-info { padding: 20px; }
+  .participants-card { padding: 16px 14px; }
+  .section-heading { align-items: flex-start; flex-direction: column; }
+  .permission-settings { justify-content: flex-start; }
+  .participant-list li { gap: 6px; }
+  .permission-check { font-size: 8px; }
+  .badge { padding: 3px 5px; }
+}

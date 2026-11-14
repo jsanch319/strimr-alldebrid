@@ -6,6 +6,7 @@ struct DetailActionsRow: View {
     @Environment(OfflineCoordinator.self) private var offlineCoordinator
     @EnvironmentObject private var coordinator: MainCoordinator
     @Environment(MediaServices.self) private var mediaServices
+    @Environment(\.openURL) private var openURL
     @Bindable var viewModel: MediaDetailViewModel
     let isStartingSharePlay: Bool
     let onPlay: (String, MediaKind) -> Void
@@ -17,6 +18,7 @@ struct DetailActionsRow: View {
     let onStartSharePlay: () -> Void
     @State private var mediaToAddToPlaylist: MediaItem?
     @State private var manageController = MediaManageController()
+    @State private var discordWatchTogetherMessage: String?
 
     var body: some View {
         playButton
@@ -104,6 +106,12 @@ struct DetailActionsRow: View {
                         Label("sharePlay.action", systemImage: "shareplay")
                     }
                     .disabled(isStartingSharePlay)
+
+                    if [.movie, .episode, .series, .season].contains(viewModel.media.mediaItem.kind) {
+                        Button(action: startDiscordWatchTogether) {
+                            Label("Watch Together on Discord", systemImage: "person.2.wave.2")
+                        }
+                    }
                 }
 
                 if AddToPlaylistViewModel.canAdd(viewModel.media.mediaItem) {
@@ -148,6 +156,31 @@ struct DetailActionsRow: View {
         .accessibilityLabel(Text("common.actions.more"))
         .addToPlaylistPresentation(media: $mediaToAddToPlaylist, services: mediaServices)
         .mediaManagePresentation(manageController, quickActions: viewModel.quickActions)
+        .alert(
+            "Watch Together on Discord",
+            isPresented: Binding(
+                get: { discordWatchTogetherMessage != nil },
+                set: { if !$0 { discordWatchTogetherMessage = nil } },
+            ),
+        ) {
+            Button("OK", role: .cancel) { discordWatchTogetherMessage = nil }
+        } message: {
+            Text(discordWatchTogetherMessage ?? "")
+        }
+    }
+
+    private func startDiscordWatchTogether() {
+        guard let url = DiscordWatchTogetherConfiguration.activityLaunchURL(for: viewModel.media.mediaItem) else {
+            discordWatchTogetherMessage =
+                "Discord Watch Together is not configured. Set " +
+                "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig."
+            return
+        }
+        openURL(url) { accepted in
+            if !accepted {
+                discordWatchTogetherMessage = "Discord could not open the Watch Together Activity."
+            }
+        }
     }
 
     private var canPlayFromStart: Bool {

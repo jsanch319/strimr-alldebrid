@@ -43,6 +43,10 @@ watched history, not exact-position synchronization. Strimr does not integrate w
 ### Downloads
 - Downloads with optional transcoding, cellular control, and offline mode
 
+### Discord Watch Together
+- A separate Discord Activity foundation with timestamped shared playback controls and per-room host permissions
+- See [DiscordActivity/README.md](DiscordActivity/README.md) for Discord app setup and local development
+
 <small><sup>[1]</sup> Apple platforms do not support HDMI bitstream passthrough for Dolby TrueHD, DTS, DTS-HD MA, or DTS:X. These formats are decoded for playback and output either as **Dolby Digital Plus (compatibility mode, default)** or **lossless multichannel LPCM (lossless mode)**. Dolby Atmos (TrueHD) and DTS:X object metadata cannot be preserved due to tvOS limitations, while Dolby Atmos delivered as Dolby Digital Plus (E-AC3/JOC) is preserved via stream copy.</small>
 
 ## Platform Support
