@@ -643,6 +643,12 @@ struct PlayerView: View {
     private var playerControls: some View {
         let activeMarker = viewModel.activeSkipMarker
         let skipTitle = activeMarker?.skipTitle
+        let watchTogetherAction: (() -> Void)?
+        if canStartDiscordWatchTogether {
+            watchTogetherAction = startDiscordWatchTogether
+        } else {
+            watchTogetherAction = nil
+        }
 
         return PlayerControlsView(
             media: viewModel.media,
@@ -660,7 +666,7 @@ struct PlayerView: View {
             onDismiss: { dismissPlayer() },
             tracksMenu: tracksMenuModel,
             tracksMenuActions: tracksMenuActions,
-            onWatchTogether: canStartDiscordWatchTogether ? startDiscordWatchTogether : nil,
+            onWatchTogether: watchTogetherAction,
             onShowSettings: showSettings,
             chapters: viewModel.chapters,
             showsChaptersOnTimeline: settingsManager.playback.showChaptersOnTimeline,
