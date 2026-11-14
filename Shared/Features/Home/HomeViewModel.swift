@@ -732,7 +732,7 @@ final class HomeViewModel {
             let items = itemsToSort.enumerated().sorted { lhs, rhs in
                 let lhsDate = lhs.element.playableItem?.lastViewedAt
                 let rhsDate = rhs.element.playableItem?.lastViewedAt
-                switch (lhsDate, rhsDate) {
+                return switch (lhsDate, rhsDate) {
                 case let (left?, right?) where left != right:
                     left > right
                 case (_?, nil):
