@@ -122,6 +122,43 @@ nonisolated struct WatchStateRecord: Codable, FetchableRecord, PersistableRecord
     var source: String
 }
 
+nonisolated struct PlaybackProgressRecord: Codable, FetchableRecord, PersistableRecord {
+    static let databaseTableName = "playback_progress"
+
+    var ownerID: String
+    var itemID: String
+    var provider: String
+    var serverID: String
+    var mediaType: String
+    var seasonNumber: Int?
+    var episodeNumber: Int?
+    var position: Double
+    var duration: Double?
+    var lastWatchedAt: Date
+    var isCompleted: Bool
+    var mediaPayload: Data
+
+    static let databaseSelection: [any SQLSelectable] = [
+        Column("ownerID"),
+        Column("itemID"),
+        Column("provider"),
+        Column("serverID"),
+        Column("mediaType"),
+        Column("seasonNumber"),
+        Column("episodeNumber"),
+        Column("position"),
+        Column("duration"),
+        Column("lastWatchedAt"),
+        Column("isCompleted"),
+        Column("mediaPayload"),
+    ]
+
+    static let persistenceConflictPolicy = PersistenceConflictPolicy(
+        insert: .replace,
+        update: .replace,
+    )
+}
+
 nonisolated struct ProgressJournalRecord: Codable, FetchableRecord, MutablePersistableRecord {
     static let databaseTableName = "progress_journal"
 

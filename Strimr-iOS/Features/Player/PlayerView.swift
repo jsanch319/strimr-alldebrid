@@ -38,6 +38,7 @@ struct PlayerView: View {
     @State private var appliedPreferredAudio = false
     @State private var appliedPreferredSubtitle = false
     @State private var appliedResumeOffset = false
+    @State private var pendingStartPosition: Double?
     @State private var awaitingMediaLoad = false
     @State private var timelinePosition = 0.0
     @State private var showingTerminationAlert = false
@@ -1586,23 +1587,7 @@ struct PlayerView: View {
         jump(by: doubleTapSeekOffset(for: pending))
     }
 
-    private func applyResumeOffsetIfNeeded() {
-        guard !sharePlayCoordinator.isInSession, viewModel.shouldResumeFromOffset, !appliedResumeOffset,
-              let offset = viewModel.resumePosition, offset > 0 else { return }
-        appliedResumeOffset = true
-        playerController.seek(to: offset)
-    }
-
-    private func handleMediaLoaded() {
-        guard awaitingMediaLoad else { return }
-        awaitingMediaLoad = false
-        viewModel.confirmLiveChannelSwitch()
-        refreshTracks()
-        automaticSubtitleSearchKey = viewModel.currentRatingKey
-        if sharePlayCoordinator.isInSession {
-            sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
-        }
-        applyResumeOffsetIfNeeded()
+    private func finishMediaLoad() {
         if shouldPauseAfterMediaLoad {
             shouldPauseAfterMediaLoad = false
             shouldResumeAfterMediaLoad = false
@@ -1616,6 +1601,33 @@ struct PlayerView: View {
                 showControls(temporarily: false)
             }
         #endif
+    }
+
+    private func handleMediaLoaded() {
+        guard awaitingMediaLoad else { return }
+        awaitingMediaLoad = false
+        viewModel.confirmLiveChannelSwitch()
+        refreshTracks()
+        automaticSubtitleSearchKey = viewModel.currentRatingKey
+        if sharePlayCoordinator.isInSession {
+            sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
+        }
+        let resumePosition = pendingStartPosition
+            ?? (!sharePlayCoordinator.isInSession && viewModel.shouldResumeFromOffset && !appliedResumeOffset
+                ? viewModel.resumePosition
+                : nil)
+        pendingStartPosition = nil
+        if let resumePosition, resumePosition > 0 {
+            appliedResumeOffset = true
+            let loadedURL = activePlaybackURL
+            Task {
+                await playerController.seekAfterReady(to: resumePosition)
+                guard activePlaybackURL == loadedURL else { return }
+                finishMediaLoad()
+            }
+            return
+        }
+        finishMediaLoad()
     }
 
     private func dismissPlayer(force: Bool = false) {
@@ -1673,6 +1685,8 @@ struct PlayerView: View {
             shouldRestoreTracksAfterLoad = false
         }
         appliedResumeOffset = startPosition != nil
+        pendingStartPosition = startPosition
+        let seeksAfterLoad = (startPosition ?? 0) > 0
         awaitingMediaLoad = true
         let preferredAudioTrackID: Int? = if !resetTrackSelection, shouldRestoreTracksAfterLoad,
                                              !viewModel.isTranscoding
@@ -1686,7 +1700,7 @@ struct PlayerView: View {
         playerController.load(
             url: url,
             httpHeaders: viewModel.playbackHTTPHeaders,
-            startPosition: startPosition,
+            startPosition: nil,
             preferredAudioTrackID: preferredAudioTrackID,
             losslessAudio: settingsManager.playback.losslessAudio,
             readAhead: settingsManager.playback.readAhead,
@@ -1704,11 +1718,12 @@ struct PlayerView: View {
             live: viewModel.liveLoadOptions(routesAudioToAirPlay: LiveLoadOptions.routesAudioToAirPlay),
             audioDelayMilliseconds: settingsManager.playback.audioDelayMilliseconds,
             audioShaping: settingsManager.playback.audioShaping,
-            autoplay: !sharePlayCoordinator.isInSession,
+            autoplay: !sharePlayCoordinator.isInSession && !seeksAfterLoad,
             nowPlaying: viewModel.nowPlayingItem(settings: settingsManager.playback),
         )
         playerController.setPlaybackRate(playbackRate)
         shouldResumeAfterMediaLoad = shouldResumeAfterLoad
+            || (seeksAfterLoad && !shouldPauseAfterLoad && !sharePlayCoordinator.isInSession)
         shouldPauseAfterMediaLoad = shouldPauseAfterLoad
         showControls(temporarily: true)
     }
@@ -1760,6 +1775,7 @@ struct PlayerView: View {
     private func handleScenePhaseChange(_ scenePhase: ScenePhase) {
         switch scenePhase {
         case .background:
+            viewModel.saveProgress()
             pauseForBackgroundIfNeeded()
             preparePlaybackForBackground()
         case .active:

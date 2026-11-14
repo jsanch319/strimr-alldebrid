@@ -134,6 +134,31 @@ struct ProgressSynchronizerTests {
         #expect(state?.lastViewedAt == date(2001))
     }
 
+    @Test func `a newer server position replaces the saved local continue position`() async throws {
+        store.savePlaybackProgress(
+            media: MediaItem.make(id: "movie-1", server: owner.server, title: "Movie"),
+            owner: owner,
+            position: 120,
+            duration: 600,
+            lastWatchedAt: date(2000),
+            isCompleted: false,
+        )
+        service.serverState = serverState(viewedAt: 5000)
+        service.refreshedState = ServerItemWatchState(
+            viewOffset: 300,
+            viewCount: 0,
+            isPlayed: false,
+            lastViewedAt: date(5000),
+        )
+        append(.progress, position: 120, at: 2000)
+
+        await synchronize()
+
+        let progress = try #require(store.playbackProgress(owner: owner, itemID: "movie-1"))
+        #expect(progress.position == 300)
+        #expect(progress.lastWatchedAt == date(5000))
+    }
+
     @Test func `an item deleted on the server is dropped from the journal`() async {
         service.pushError = JellyfinAPIError.itemUnavailable
         append(.watched, position: 600, at: 2000)

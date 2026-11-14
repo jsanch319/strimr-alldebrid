@@ -18,6 +18,7 @@ Strimr is a third-party client for Plex and Jellyfin, built in Swift with native
 - Direct play or server transcoding with selectable quality, and multiple versions per title
 - Audio and subtitle track selection remembered across episodes, audio/subtitle sync offset, external subtitle search, and customizable subtitle appearance
 - Chapter navigation, scrubbing thumbnails, automatic intro and credits skipping, and autoplay of the next episode
+- Exact-position Continue Watching on iPhone, with Siri Shortcuts to open Strimr or resume the latest title
 - Picture in Picture, sleep timer, and detailed media info in the player
 
 ### Live TV
@@ -27,7 +28,11 @@ Strimr is a third-party client for Plex and Jellyfin, built in Swift with native
 - **Plex and Jellyfin**, with several servers at once in a unified home, libraries, and search
 - Strimr profiles with optional PIN, alongside Plex Home users, each with their own connections and settings
 - Seerr integration
-- Trakt and Simkl: playback progress and watched sync
+- Trakt and Simkl: playback scrobbling and watched sync
+
+Exact playback positions are stored locally and synchronized through the signed-in Plex or Jellyfin server. Offline
+positions are journaled and reconciled with server state by the latest timestamp. Simkl is used for scrobbling and
+watched history, not exact-position synchronization. Strimr does not integrate with Apple's Apple TV Up Next system.
 
 ### Browsing
 - Customizable home rows, library visibility, and navigation order

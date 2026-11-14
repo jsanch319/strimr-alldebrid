@@ -41,6 +41,7 @@ struct HomeRow: Identifiable, Hashable {
 
     /// Reprendre and Next Up are merged across servers, so their ids carry no server.
     static let continueWatchingID = "home:continueWatching"
+    static let localContinueWatchingID = "home:localContinueWatching"
     static let nextUpID = "home:nextUp"
 
     /// Server of a per-server row id (`home:<provider>:<serverID>:…`); `nil` for merged rows.

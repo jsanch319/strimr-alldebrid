@@ -107,6 +107,51 @@ struct OfflineStoreTests {
         #expect(store.search(query: "breaking", owner: owner).map(\.id) == ["episode-1"])
     }
 
+    @Test func `playback progress saves exact position and episode identity`() throws {
+        let watchedAt = Date(timeIntervalSince1970: 1234)
+        store.savePlaybackProgress(
+            media: episode("episode-1", season: 2, episode: 7),
+            owner: owner,
+            position: 321.75,
+            duration: 1800,
+            lastWatchedAt: watchedAt,
+            isCompleted: false,
+        )
+
+        let progress = try #require(store.playbackProgress(owner: owner, itemID: "episode-1"))
+        #expect(progress.media.identity.itemID == "episode-1")
+        #expect(progress.media.kind == .episode)
+        #expect(progress.media.parentIndex == 2)
+        #expect(progress.media.index == 7)
+        #expect(progress.position == 321.75)
+        #expect(progress.duration == 1800)
+        #expect(progress.lastWatchedAt == watchedAt)
+    }
+
+    @Test func `playback progress restores its exact position and completed titles restart`() {
+        let watchedAt = Date(timeIntervalSince1970: 1234)
+        store.savePlaybackProgress(
+            media: movie("movie-1"),
+            owner: owner,
+            position: 246.5,
+            duration: 1200,
+            lastWatchedAt: watchedAt,
+            isCompleted: false,
+        )
+        #expect(store.resumePosition(owner: owner, itemID: "movie-1") == 246.5)
+
+        store.savePlaybackProgress(
+            media: movie("movie-1"),
+            owner: owner,
+            position: 1200,
+            duration: 1200,
+            lastWatchedAt: watchedAt.addingTimeInterval(1),
+            isCompleted: true,
+        )
+        #expect(store.resumePosition(owner: owner, itemID: "movie-1") == nil)
+        #expect(store.playbackProgress(owner: owner).isEmpty)
+    }
+
     @Test func `a blank search finds nothing`() {
         store.store(media: [movie("movie-1")], owner: owner)
 

@@ -201,6 +201,28 @@ final nonisolated class OfflineDatabase: Sendable {
                 table.add(column: "versionLabel", .text)
             }
         }
+        migrator.registerMigration("v3") { db in
+            try db.create(table: "playback_progress") { table in
+                table.column("ownerID", .text).notNull()
+                table.column("itemID", .text).notNull()
+                table.column("provider", .text).notNull()
+                table.column("serverID", .text).notNull()
+                table.column("mediaType", .text).notNull()
+                table.column("seasonNumber", .integer)
+                table.column("episodeNumber", .integer)
+                table.column("position", .double).notNull()
+                table.column("duration", .double)
+                table.column("lastWatchedAt", .datetime).notNull()
+                table.column("isCompleted", .boolean).notNull()
+                table.column("mediaPayload", .blob).notNull()
+                table.primaryKey(["ownerID", "itemID"])
+            }
+            try db.create(
+                index: "playback_progress_recent",
+                on: "playback_progress",
+                columns: ["ownerID", "isCompleted", "lastWatchedAt"],
+            )
+        }
         return migrator
     }
 

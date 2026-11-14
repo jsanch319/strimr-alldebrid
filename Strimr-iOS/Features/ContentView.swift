@@ -7,7 +7,9 @@ struct ContentView: View {
     @Environment(LibraryStore.self) private var libraryStore
     @Environment(DownloadManager.self) private var downloadManager
     @Environment(OfflineCoordinator.self) private var offlineCoordinator
+    @Environment(ExternalPlaybackCallbackRouter.self) private var externalPlaybackCallbackRouter
     @Environment(\.scenePhase) private var scenePhase
+    @State private var pendingAppURL: URL?
 
     init() {
         ErrorReporter.start()
@@ -47,6 +49,7 @@ struct ContentView: View {
                             settingsManager: settingsManager,
                         ),
                         settingsManager: settingsManager,
+                        pendingAppURL: $pendingAppURL,
                     )
                     .id(registry.generation)
                 }
@@ -76,6 +79,10 @@ struct ContentView: View {
         }
         .onChange(of: registry.connectedServices.map(ObjectIdentifier.init), initial: true) { _, _ in
             downloadManager.activateSession(services: registry.connectedServices)
+        }
+        .onOpenURL { url in
+            guard !externalPlaybackCallbackRouter.receive(url), url.scheme?.lowercased() == "strimr" else { return }
+            pendingAppURL = url
         }
     }
 

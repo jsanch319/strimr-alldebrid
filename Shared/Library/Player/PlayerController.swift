@@ -422,6 +422,18 @@ final class PlayerController {
         performSeek(to: time)
     }
 
+    func seekAfterReady(to time: Double) async {
+        if isCoordinatedPlayback {
+            engine.playbackCoordinator.coordinateSeek(
+                to: CMTime(seconds: time, preferredTimescale: 600),
+                options: [],
+            )
+            return
+        }
+        pendingSeekTarget = time
+        await engine.seek(to: time)
+    }
+
     func seek(by delta: Double) {
         var target = max(0, seekOrigin + delta)
         if !isLive, let duration {

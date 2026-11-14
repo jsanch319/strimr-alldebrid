@@ -1,6 +1,6 @@
 import Foundation
 
-/// Records progress of a downloaded file: every event goes to the local journal and watch state first (so
+/// Records playback progress: every event goes to the local journal and watch state first (so
 /// "Continue watching" and progress bars are immediately right), then is pushed live when the owner's server is
 /// reachable. Unsynced entries are replayed by `ProgressSynchronizer`.
 @MainActor
@@ -9,8 +9,10 @@ final class PlaybackProgressRecorder {
 
     private let owner: MediaOwner
     private let itemID: String
+    private let media: MediaItem?
     private let store: OfflineStore
     private let coordinator: OfflineCoordinator
+    private let pushesImmediately: Bool
     private var duration: TimeInterval?
     private var hasStarted = false
     private var hasReportedWatched = false
@@ -20,12 +22,16 @@ final class PlaybackProgressRecorder {
         owner: MediaOwner,
         itemID: String,
         duration: TimeInterval?,
+        media: MediaItem? = nil,
+        pushesImmediately: Bool = true,
         store: OfflineStore,
         coordinator: OfflineCoordinator,
     ) {
         self.owner = owner
         self.itemID = itemID
+        self.media = media
         self.duration = duration
+        self.pushesImmediately = pushesImmediately
         self.store = store
         self.coordinator = coordinator
     }
@@ -37,22 +43,34 @@ final class PlaybackProgressRecorder {
         itemID: String,
         position: TimeInterval,
         duration: TimeInterval?,
+        media: MediaItem? = nil,
         store: OfflineStore,
     ) {
-        guard position > 0 else { return }
+        guard position.isFinite, position > 0 else { return }
         let now = Date()
         let previous = store.watchState(itemID: itemID, owner: owner)
-        store.setWatchState(
-            OfflineWatchState(
-                viewOffset: position,
-                viewCount: previous?.viewCount ?? 0,
-                played: previous?.played ?? false,
-                lastViewedAt: now,
-                source: .local,
-            ),
-            itemID: itemID,
-            owner: owner,
-        )
+        if let media {
+            store.savePlaybackProgress(
+                media: media,
+                owner: owner,
+                position: position,
+                duration: duration,
+                lastWatchedAt: now,
+                isCompleted: false,
+            )
+        } else {
+            store.setWatchState(
+                OfflineWatchState(
+                    viewOffset: position,
+                    viewCount: previous?.viewCount ?? 0,
+                    played: previous?.played ?? false,
+                    lastViewedAt: now,
+                    source: .local,
+                ),
+                itemID: itemID,
+                owner: owner,
+            )
+        }
         _ = store.appendJournal(
             itemID: itemID,
             owner: owner,
@@ -66,21 +84,20 @@ final class PlaybackProgressRecorder {
 
     /// Resume position using the same rules as streaming: finished items restart from the beginning.
     var resumePosition: TimeInterval? {
-        guard let state = store.watchState(itemID: itemID, owner: owner),
-              let offset = state.viewOffset, offset > 0
-        else { return nil }
-        if let duration, duration > 0, offset / duration >= Self.watchedThreshold {
-            return nil
-        }
-        return offset
+        store.resumePosition(owner: owner, itemID: itemID, fallbackDuration: duration)
     }
 
-    func record(position: TimeInterval, duration: TimeInterval?, isPaused: Bool) {
-        if let duration, duration > 0 {
+    @discardableResult
+    func record(position: TimeInterval, duration: TimeInterval?, isPaused: Bool) -> Int64? {
+        guard position.isFinite, position >= 0 else {
+            ErrorReporter.capture(PlaybackProgressPersistenceError.invalidRecord)
+            return nil
+        }
+        if let duration, duration.isFinite, duration > 0 {
             self.duration = duration
         }
         // The player reports position 0 before seeking to the resume point; do not let it erase local progress.
-        guard hasStarted || position >= 1 else { return }
+        guard hasStarted || position >= 1 else { return nil }
         let event: ProgressJournalEvent
         let reportState: ItemPlaybackReportState
         if !hasStarted {
@@ -91,22 +108,55 @@ final class PlaybackProgressRecorder {
             event = isPaused ? .pause : .progress
             reportState = .progress
         }
-        write(event: event, position: position, reportState: reportState, isPaused: isPaused)
+        let journalID = write(
+            event: event,
+            position: position,
+            reportState: reportState,
+            isPaused: isPaused,
+            pushesImmediately: pushesImmediately,
+        )
         checkWatchedThreshold(position: position)
+        return journalID
     }
 
-    func stop(position: TimeInterval) {
-        guard hasStarted else { return }
-        write(event: .stop, position: position, reportState: .stopped, isPaused: true)
+    @discardableResult
+    func stop(position: TimeInterval, pushesImmediately: Bool? = nil) -> Int64? {
+        guard position.isFinite, position >= 0 else {
+            ErrorReporter.capture(PlaybackProgressPersistenceError.invalidRecord)
+            return nil
+        }
+        guard hasStarted else { return nil }
+        let journalID = write(
+            event: .stop,
+            position: position,
+            reportState: .stopped,
+            isPaused: true,
+            pushesImmediately: pushesImmediately ?? self.pushesImmediately,
+        )
         checkWatchedThreshold(position: position)
+        return journalID
     }
 
-    func finish() {
+    @discardableResult
+    func finish(pushesImmediately: Bool? = nil) -> Int64? {
         let position = duration ?? 0
+        var journalID: Int64?
         if hasStarted {
-            write(event: .stop, position: position, reportState: .stopped, isPaused: true)
+            journalID = write(
+                event: .stop,
+                position: position,
+                reportState: .stopped,
+                isPaused: true,
+                pushesImmediately: pushesImmediately ?? self.pushesImmediately,
+            )
         }
         markWatched()
+        return journalID
+    }
+
+    func markSynced(_ journalID: Int64?) {
+        guard let journalID else { return }
+        store.markJournalSynced(ids: [journalID])
     }
 
     private func checkWatchedThreshold(position: TimeInterval) {
@@ -130,6 +180,16 @@ final class PlaybackProgressRecorder {
             itemID: itemID,
             owner: owner,
         )
+        if let media {
+            store.savePlaybackProgress(
+                media: media,
+                owner: owner,
+                position: duration ?? 0,
+                duration: duration,
+                lastWatchedAt: now,
+                isCompleted: true,
+            )
+        }
         let journalID = store.appendJournal(
             itemID: itemID,
             owner: owner,
@@ -150,20 +210,32 @@ final class PlaybackProgressRecorder {
         position: TimeInterval,
         reportState: ItemPlaybackReportState,
         isPaused: Bool,
-    ) {
+        pushesImmediately: Bool,
+    ) -> Int64? {
         let now = Date()
         let previous = store.watchState(itemID: itemID, owner: owner)
-        store.setWatchState(
-            OfflineWatchState(
-                viewOffset: position,
-                viewCount: previous?.viewCount ?? 0,
-                played: previous?.played ?? false,
-                lastViewedAt: now,
-                source: .local,
-            ),
-            itemID: itemID,
-            owner: owner,
-        )
+        if let media {
+            store.savePlaybackProgress(
+                media: media,
+                owner: owner,
+                position: position,
+                duration: duration,
+                lastWatchedAt: now,
+                isCompleted: false,
+            )
+        } else {
+            store.setWatchState(
+                OfflineWatchState(
+                    viewOffset: position,
+                    viewCount: previous?.viewCount ?? 0,
+                    played: previous?.played ?? false,
+                    lastViewedAt: now,
+                    source: .local,
+                ),
+                itemID: itemID,
+                owner: owner,
+            )
+        }
         let journalID = store.appendJournal(
             itemID: itemID,
             owner: owner,
@@ -173,6 +245,7 @@ final class PlaybackProgressRecorder {
             occurredAt: now,
             syncedAt: nil,
         )
+        guard pushesImmediately else { return journalID }
         let duration = duration
         push(journalID: journalID) { services, itemID in
             try await services.playback.reportItemPlayback(
@@ -183,6 +256,7 @@ final class PlaybackProgressRecorder {
                 isPaused: isPaused,
             )
         }
+        return journalID
     }
 
     private func push(

@@ -31,7 +31,12 @@ struct HomeRowSectionView: View {
     }
 
     private func select(_ media: MediaDisplayItem) {
-        if playsOnSelect,
+        if row.id == HomeRow.localContinueWatchingID,
+           let item = media.playableItem,
+           let mediaCardActions
+        {
+            mediaCardActions.resume(item)
+        } else if playsOnSelect,
            let item = media.playableItem,
            let mediaCardActions
         {

@@ -486,6 +486,187 @@ final class OfflineStore {
             .prefix(limit))
     }
 
+    func savePlaybackProgress(
+        media: MediaItem,
+        owner: MediaOwner,
+        position: TimeInterval,
+        duration: TimeInterval?,
+        lastWatchedAt: Date,
+        isCompleted: Bool,
+    ) {
+        guard media.identity.server == owner.server, !media.id.isEmpty,
+              position.isFinite, position >= 0,
+              duration.map({ $0.isFinite && $0 > 0 }) ?? true
+        else {
+            ErrorReporter.capture(PlaybackProgressPersistenceError.invalidRecord)
+            return
+        }
+        guard let payload = try? encoder.encode(media) else {
+            ErrorReporter.capture(PlaybackProgressPersistenceError.encodingFailed)
+            return
+        }
+        let record = PlaybackProgressRecord(
+            ownerID: owner.id,
+            itemID: media.id,
+            provider: media.identity.server.provider.rawValue,
+            serverID: media.identity.server.id,
+            mediaType: switch media.kind {
+            case .movie: "movie"
+            case .episode: "show"
+            default: media.kind.rawValue
+            },
+            seasonNumber: media.kind == .episode ? media.parentIndex : nil,
+            episodeNumber: media.kind == .episode ? media.index : nil,
+            position: position,
+            duration: duration ?? media.duration,
+            lastWatchedAt: lastWatchedAt,
+            isCompleted: isCompleted,
+            mediaPayload: payload,
+        )
+        let previous = watchState(itemID: media.id, owner: owner)
+        let watchState = OfflineWatchState(
+            viewOffset: isCompleted ? nil : position,
+            viewCount: previous?.viewCount ?? media.viewCount ?? 0,
+            played: isCompleted,
+            lastViewedAt: lastWatchedAt,
+            source: .local,
+        )
+        perform {
+            try self.offline.write { db in
+                try record.save(db)
+                let state = WatchStateRecord(
+                    ownerID: owner.id,
+                    itemID: media.id,
+                    viewOffset: watchState.viewOffset,
+                    viewCount: watchState.viewCount,
+                    played: watchState.played,
+                    lastViewedAt: watchState.lastViewedAt,
+                    source: watchState.source.rawValue,
+                )
+                try state.save(db)
+            }
+        }
+    }
+
+    func playbackProgress(owner: MediaOwner, limit: Int = 100) -> [SavedPlaybackProgress] {
+        let records: [PlaybackProgressRecord] = perform {
+            try self.offline.read { db in
+                try PlaybackProgressRecord
+                    .filter(Column("ownerID") == owner.id && Column("isCompleted") == false && Column("position") > 0)
+                    .order(Column("lastWatchedAt").desc)
+                    .limit(limit)
+                    .fetchAll(db)
+            }
+        } ?? []
+        return records.compactMap { record in
+            guard record.provider == owner.server.provider.rawValue,
+                  record.serverID == owner.server.id,
+                  let media = try? decoder.decode(MediaItem.self, from: record.mediaPayload),
+                  media.identity.server == owner.server,
+                  media.id == record.itemID
+            else { return nil }
+            let updatedMedia = media.applying(OfflineWatchState(
+                viewOffset: record.position,
+                viewCount: media.viewCount ?? 0,
+                played: false,
+                lastViewedAt: record.lastWatchedAt,
+                source: .local,
+            ))
+            return SavedPlaybackProgress(
+                media: updatedMedia,
+                position: record.position,
+                duration: record.duration,
+                lastWatchedAt: record.lastWatchedAt,
+                isCompleted: record.isCompleted,
+            )
+        }
+    }
+
+    func playbackProgress(owner: MediaOwner, itemID: String) -> SavedPlaybackProgress? {
+        let record: PlaybackProgressRecord? = perform {
+            try self.offline.read { db in
+                try PlaybackProgressRecord
+                    .filter(Column("ownerID") == owner.id && Column("itemID") == itemID)
+                    .fetchOne(db)
+            }
+        } ?? nil
+        guard let record,
+              record.provider == owner.server.provider.rawValue,
+              record.serverID == owner.server.id,
+              let media = try? decoder.decode(MediaItem.self, from: record.mediaPayload),
+              media.identity.server == owner.server,
+              media.id == record.itemID
+        else { return nil }
+        let updatedMedia = media.applying(OfflineWatchState(
+            viewOffset: record.isCompleted ? nil : record.position,
+            viewCount: media.viewCount ?? 0,
+            played: record.isCompleted,
+            lastViewedAt: record.lastWatchedAt,
+            source: .local,
+        ))
+        return SavedPlaybackProgress(
+            media: updatedMedia,
+            position: record.position,
+            duration: record.duration,
+            lastWatchedAt: record.lastWatchedAt,
+            isCompleted: record.isCompleted,
+        )
+    }
+
+    func resumePosition(
+        owner: MediaOwner,
+        itemID: String,
+        fallbackDuration: TimeInterval? = nil,
+    ) -> TimeInterval? {
+        if let saved = playbackProgress(owner: owner, itemID: itemID) {
+            guard !saved.isCompleted, saved.position > 0 else { return nil }
+            if let duration = saved.duration ?? fallbackDuration, duration > 0,
+               saved.position / duration >= PlaybackProgressRecorder.watchedThreshold
+            {
+                return nil
+            }
+            return saved.position
+        }
+        guard let state = watchState(itemID: itemID, owner: owner),
+              let offset = state.viewOffset, offset > 0
+        else { return nil }
+        if let fallbackDuration, fallbackDuration > 0,
+           offset / fallbackDuration >= PlaybackProgressRecorder.watchedThreshold
+        {
+            return nil
+        }
+        return offset
+    }
+
+    func refreshPlaybackProgressFromServer(
+        owner: MediaOwner,
+        itemID: String,
+        state: ServerItemWatchState,
+    ) {
+        guard let existing = playbackProgress(owner: owner, itemID: itemID),
+              let lastWatchedAt = state.lastViewedAt,
+              lastWatchedAt >= existing.lastWatchedAt,
+              let payload = try? encoder.encode(existing.media)
+        else { return }
+        let record = PlaybackProgressRecord(
+            ownerID: owner.id,
+            itemID: itemID,
+            provider: owner.server.provider.rawValue,
+            serverID: owner.server.id,
+            mediaType: existing.media.kind == .movie ? "movie" : "show",
+            seasonNumber: existing.media.kind == .episode ? existing.media.parentIndex : nil,
+            episodeNumber: existing.media.kind == .episode ? existing.media.index : nil,
+            position: state.viewOffset ?? 0,
+            duration: existing.duration,
+            lastWatchedAt: lastWatchedAt,
+            isCompleted: state.isPlayed,
+            mediaPayload: payload,
+        )
+        perform {
+            try self.offline.write { db in try record.save(db) }
+        }
+    }
+
     private func sortedByIndex(_ items: [MediaItem]) -> [MediaItem] {
         items.sorted { ($0.index ?? Int.max, $0.title) < ($1.index ?? Int.max, $1.title) }
     }
@@ -1041,7 +1222,10 @@ final class OfflineStore {
                         at: self.database.pinnedArtworkDirectory.appendingPathComponent(file),
                     )
                 }
-                for table in ["media", "library", "artwork", "watch_state", "progress_journal", "download_link"] {
+                for table in [
+                    "media", "library", "artwork", "watch_state", "playback_progress", "progress_journal",
+                    "download_link",
+                ] {
                     try db.execute(sql: "DELETE FROM \(table) WHERE ownerID = ?", arguments: [owner.id])
                 }
             }
@@ -1059,6 +1243,11 @@ final class OfflineStore {
             return nil
         }
     }
+}
+
+private enum PlaybackProgressPersistenceError: Error {
+    case invalidRecord
+    case encodingFailed
 }
 
 extension MediaItem {

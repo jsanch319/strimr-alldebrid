@@ -13,11 +13,19 @@ struct MainTabView: View {
     @StateObject var coordinator: MainCoordinator
     @State var homeViewModel: HomeViewModel
     @State var libraryViewModel: LibraryViewModel
+    @Binding private var pendingAppURL: URL?
+    @State private var shortcutFailure: String?
 
-    init(homeViewModel: HomeViewModel, libraryViewModel: LibraryViewModel, settingsManager: SettingsManager) {
+    init(
+        homeViewModel: HomeViewModel,
+        libraryViewModel: LibraryViewModel,
+        settingsManager: SettingsManager,
+        pendingAppURL: Binding<URL?> = .constant(nil),
+    ) {
         _coordinator = StateObject(wrappedValue: MainCoordinator(settingsManager: settingsManager))
         _homeViewModel = State(initialValue: homeViewModel)
         _libraryViewModel = State(initialValue: libraryViewModel)
+        _pendingAppURL = pendingAppURL
     }
 
     var body: some View {
@@ -38,6 +46,9 @@ struct MainTabView: View {
                 #if DEBUG
                     await DemoRoute.apply(coordinator: coordinator, registry: registry)
                 #endif
+            }
+            .task(id: AppURLTaskID(url: pendingAppURL, readyServers: registry.readyServers)) {
+                await handlePendingAppURL()
             }
             .onChange(of: scenePhase) { _, phase in
                 guard phase == .active else { return }
@@ -86,15 +97,96 @@ struct MainTabView: View {
                     PlayerWrapper(viewModel: PlayerViewModel(request: request))
                 }
             }
+            .alert("errors.selectServer.playMedia", isPresented: Binding(
+                get: { shortcutFailure != nil },
+                set: { if !$0 { shortcutFailure = nil } },
+            )) {
+                Button("common.actions.done", role: .cancel) { shortcutFailure = nil }
+            } message: {
+                Text(shortcutFailure ?? "")
+            }
     }
 
     /// Only the server of the item that was played is reloaded, to update Reprendre and Next Up.
     private func playerDidClose() {
         let server = coordinator.selectedMediaServices?.identity
         coordinator.resetPlayer()
+        homeViewModel.playbackProgressDidChange()
         if let server {
             Task { await homeViewModel.refresh(server: server) }
         }
+    }
+
+    private struct AppURLTaskID: Equatable {
+        let url: URL?
+        let readyServers: Set<ServerIdentity>
+    }
+
+    private func handlePendingAppURL() async {
+        guard let url = pendingAppURL, url.scheme?.lowercased() == "strimr" else { return }
+        switch url.host?.lowercased() {
+        case "open":
+            coordinator.tab = .home
+            pendingAppURL = nil
+        case "resume":
+            if await resumeMostRecentTitle() {
+                pendingAppURL = nil
+            }
+        case "media":
+            if await openSpecificMedia(from: url) {
+                pendingAppURL = nil
+            }
+        default:
+            shortcutFailure = String(localized: "common.empty.nothingToShow")
+            pendingAppURL = nil
+        }
+    }
+
+    private func resumeMostRecentTitle() async -> Bool {
+        await homeViewModel.reload()
+        guard let media = homeViewModel.availableRows
+            .first(where: { $0.kind == .continueWatching })?
+            .items
+            .compactMap(\.playableItem)
+            .first,
+            let services = registry.services(for: media.identity.server)
+        else {
+            shortcutFailure = String(localized: "common.empty.nothingToShow")
+            return true
+        }
+        await PlaybackLauncher(services: services, coordinator: coordinator)
+            .play(ratingKey: media.id, type: media.kind, allowsExternalPlayer: false)
+        return true
+    }
+
+    private func openSpecificMedia(from url: URL) async -> Bool {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let query = components.queryItems,
+              let providerValue = query.first(where: { $0.name == "provider" })?.value,
+              let provider = MediaProvider(rawValue: providerValue),
+              let serverID = query.first(where: { $0.name == "server" })?.value,
+              !serverID.isEmpty,
+              let itemID = query.first(where: { $0.name == "item" })?.value,
+              !itemID.isEmpty,
+              let typeValue = query.first(where: { $0.name == "type" })?.value,
+              let type = MediaKind(rawValue: typeValue),
+              [.movie, .episode, .series].contains(type)
+        else {
+            shortcutFailure = String(localized: "common.empty.nothingToShow")
+            return true
+        }
+        let server = ServerIdentity(provider: provider, id: serverID)
+        guard let services = registry.services(for: server) else {
+            guard registry.readyServers.contains(server) else { return false }
+            shortcutFailure = String(localized: "errors.selectServer.playMedia")
+            return true
+        }
+        await PlaybackLauncher(services: services, coordinator: coordinator).play(
+            ratingKey: itemID,
+            type: type,
+            allowsExternalPlayer: false,
+        )
+        return true
     }
 
     private func refreshLiveTVAvailability() async {

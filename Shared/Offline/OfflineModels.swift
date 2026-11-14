@@ -61,6 +61,14 @@ struct OfflineWatchState: Equatable, Sendable {
     var source: WatchStateSource
 }
 
+struct SavedPlaybackProgress {
+    let media: MediaItem
+    let position: TimeInterval
+    let duration: TimeInterval?
+    let lastWatchedAt: Date
+    let isCompleted: Bool
+}
+
 enum OfflineCacheLimit: Int, CaseIterable, Identifiable, Codable {
     case mb250 = 250
     case mb500 = 500

@@ -96,6 +96,7 @@ final class ProgressSynchronizer {
                 itemID: itemID,
                 owner: owner,
             )
+            store.refreshPlaybackProgressFromServer(owner: owner, itemID: itemID, state: refreshed)
         } catch {
             // The push succeeded; the local state is simply refreshed on the next online read.
             if !error.isCancellation, !error.isTransportFailure {

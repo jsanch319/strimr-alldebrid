@@ -3,6 +3,7 @@ import SwiftUI
 /// Playback and navigation the card menus hand back to the app.
 struct MediaCardActions {
     let play: (MediaItem, _ fromStart: Bool) -> Void
+    let resume: (MediaItem) -> Void
     let showMedia: (MediaItem) -> Void
 }
 
@@ -33,6 +34,16 @@ extension View {
                         ratingKey: item.id,
                         type: item.type,
                         shouldResumeFromOffset: !fromStart,
+                    )
+                }
+            },
+            resume: { item in
+                guard let services = registry.services(for: item.identity.server) else { return }
+                Task {
+                    await PlaybackLauncher(services: services, coordinator: presenter).play(
+                        ratingKey: item.id,
+                        type: item.type,
+                        allowsExternalPlayer: false,
                     )
                 }
             },

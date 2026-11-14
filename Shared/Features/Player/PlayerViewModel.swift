@@ -182,6 +182,7 @@ final class PlayerViewModel {
                 itemID: media.id,
                 position: position,
                 duration: duration ?? media.duration,
+                media: media,
                 store: store,
             )
             return DownloadManager.shared?.localPlaybackRequest(for: media.identity, kind: media.kind)
@@ -250,7 +251,6 @@ final class PlayerViewModel {
     @ObservationIgnored private var pendingLiveTimelineState: TimelineState?
     #if !os(tvOS)
         @ObservationIgnored private var progressRecorder: PlaybackProgressRecorder?
-        @ObservationIgnored private var localOwner: MediaOwner?
     #endif
 
     init(
@@ -270,7 +270,31 @@ final class PlayerViewModel {
         localMedia = nil
         localPlaybackURL = nil
         localExternalSubtitles = []
-        media = currentMedia
+        #if !os(tvOS)
+            let recorder = currentMedia.flatMap { media in
+                OfflineCoordinator.shared.makeRecorder(
+                    owner: services.owner,
+                    itemID: media.id,
+                    duration: media.duration,
+                    media: media,
+                    pushesImmediately: false,
+                )
+            }
+            progressRecorder = recorder
+            if let currentMedia,
+               let saved = OfflineCoordinator.shared.store?.playbackProgress(
+                   owner: services.owner,
+                   itemID: currentMedia.id,
+               ),
+               saved.lastWatchedAt >= (currentMedia.lastViewedAt ?? .distantPast)
+            {
+                self.media = saved.media
+            } else {
+                self.media = currentMedia
+            }
+        #else
+            media = currentMedia
+        #endif
     }
 
     #if !os(tvOS)
@@ -284,7 +308,12 @@ final class PlayerViewModel {
             resumes: Bool = true,
         ) {
             let recorder = owner.flatMap {
-                OfflineCoordinator.shared.makeRecorder(owner: $0, itemID: localMedia.id, duration: localMedia.duration)
+                OfflineCoordinator.shared.makeRecorder(
+                    owner: $0,
+                    itemID: localMedia.id,
+                    duration: localMedia.duration,
+                    media: localMedia,
+                )
             }
             let resumePosition = resumes ? recorder?.resumePosition : nil
             let media = resumePosition.map { position in
@@ -307,7 +336,6 @@ final class PlayerViewModel {
             playbackURL = localPlaybackURL
             selectedQuality = .original
             progressRecorder = recorder
-            localOwner = owner
         }
 
         convenience init(request: LocalPlaybackRequest) {
@@ -805,8 +833,17 @@ final class PlayerViewModel {
         }
     }
 
+    func saveProgress() {
+        guard !isLivePlayback else { return }
+        reportTimeline(state: playbackState, force: true)
+    }
+
     func handlePlaybackPosition(_ position: Double, isScrubbing: Bool) {
         guard !isScrubbing else { return }
+        guard position.isFinite, position >= 0 else {
+            ErrorReporter.capture(PlayerProgressInputError.invalidPosition)
+            return
+        }
         #if DEBUG
             // The demo clip lasts seconds; the timeline places it at a moment of the full film.
             self.position = DemoMode.isEnabled ? position + DemoMode.playerOffset : position
@@ -817,6 +854,10 @@ final class PlayerViewModel {
     }
 
     func handlePlaybackDuration(_ duration: Double?) {
+        guard duration.map({ $0.isFinite && $0 >= 0 }) ?? true else {
+            ErrorReporter.capture(PlayerProgressInputError.invalidDuration)
+            return
+        }
         #if DEBUG
             self.duration = DemoMode.isEnabled ? media?.duration ?? duration : duration
         #else
@@ -832,7 +873,26 @@ final class PlayerViewModel {
         trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
         #if !os(tvOS)
             if let progressRecorder {
-                progressRecorder.stop(position: position)
+                let journalID = progressRecorder.stop(
+                    position: position,
+                    pushesImmediately: isLocalPlayback,
+                )
+                guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
+                Task {
+                    do {
+                        try await mediaServices.playback.reportStopped(
+                            plan: playbackPlan,
+                            position: position,
+                            currentSelection: currentPlaybackStreamSelection,
+                        )
+                        progressRecorder.markSynced(journalID)
+                    } catch {
+                        if !Task.isCancelled, !error.isCancellation {
+                            ErrorReporter.capture(error)
+                        }
+                    }
+                    await mediaServices.playback.release(plan: playbackPlan)
+                }
                 return
             }
         #endif
@@ -895,7 +955,21 @@ final class PlayerViewModel {
         trackerSession?.finished()
         #if !os(tvOS)
             if let progressRecorder {
-                progressRecorder.finish()
+                let journalID = progressRecorder.finish(pushesImmediately: isLocalPlayback)
+                guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
+                do {
+                    try await mediaServices.playback.reportStopped(
+                        plan: playbackPlan,
+                        position: media?.duration ?? duration ?? position,
+                        currentSelection: currentPlaybackStreamSelection,
+                    )
+                    progressRecorder.markSynced(journalID)
+                } catch {
+                    if !Task.isCancelled, !error.isCancellation {
+                        LiveTVErrorReporting.capture(error)
+                    }
+                }
+                await mediaServices.playback.release(plan: playbackPlan)
                 return
             }
         #endif
@@ -1138,7 +1212,21 @@ final class PlayerViewModel {
 
     private func apply(plan: PlaybackPlan) {
         playbackPlan = plan
-        media = plan.media
+        #if !os(tvOS)
+            if let mediaServices,
+               let saved = OfflineCoordinator.shared.store?.playbackProgress(
+                   owner: mediaServices.owner,
+                   itemID: plan.media.id,
+               ),
+               saved.lastWatchedAt >= (plan.media.lastViewedAt ?? .distantPast)
+            {
+                media = saved.media
+            } else {
+                media = plan.media
+            }
+        #else
+            media = plan.media
+        #endif
         // A plan is applied again on a quality change or a recovery, which is still the same playback.
         if trackerSession == nil, let mediaServices {
             trackerSession = TrackerCoordinator.shared.beginPlayback(
@@ -1176,11 +1264,17 @@ final class PlayerViewModel {
         #if !os(tvOS)
             if let progressRecorder {
                 guard state != .buffering else { return }
-                progressRecorder.record(
+                let journalID = progressRecorder.record(
                     position: position,
                     duration: duration ?? media?.duration,
                     isPaused: state == .paused,
                 )
+                guard !isLocalPlayback else { return }
+                Task {
+                    if await sendTimeline(state: state) {
+                        progressRecorder.markSynced(journalID)
+                    }
+                }
                 return
             }
         #endif
@@ -1283,18 +1377,20 @@ final class PlayerViewModel {
         pendingLiveTimelineState = nil
     }
 
-    private func sendTimeline(state: TimelineState) async {
+    @discardableResult
+    private func sendTimeline(state: TimelineState) async -> Bool {
         if let liveSession {
-            guard !isLiveReportingSuspended else { return }
+            guard !isLiveReportingSuspended else { return false }
             do {
                 liveCaptureRange = try await liveSession.report(position: position, isPaused: state == .paused)
+                return true
             } catch {
-                guard !Task.isCancelled, !error.isCancellation else { return }
+                guard !Task.isCancelled, !error.isCancellation else { return false }
                 ErrorReporter.capture(error)
+                return false
             }
-            return
         }
-        guard let mediaServices, let playbackPlan else { return }
+        guard let mediaServices, let playbackPlan else { return false }
         do {
             if didReportPlaybackStarted {
                 try await mediaServices.playback.reportProgress(
@@ -1312,10 +1408,12 @@ final class PlayerViewModel {
                 )
                 didReportPlaybackStarted = true
             }
+            return true
         } catch {
-            guard !Task.isCancelled, !error.isCancellation else { return }
+            guard !Task.isCancelled, !error.isCancellation else { return false }
             serverAccessRecoveryError = mediaServices.playback.serverAccessRecoveryError(from: error)
             ErrorReporter.capture(error)
+            return false
         }
     }
 
@@ -1380,6 +1478,11 @@ private enum TimelineState: Equatable {
     case buffering
     case paused
     case playing
+}
+
+private enum PlayerProgressInputError: Error {
+    case invalidPosition
+    case invalidDuration
 }
 
 enum PlayerPlaybackError: LocalizedError {

@@ -151,10 +151,15 @@ final class HomeViewModel {
         #else
             let placed = Set(preferences.orderedRowIDs)
             let pinned = rows.filter { CachedHomeService.isOfflineDownloadsRow($0) && !placed.contains($0.id) }
+                + rows.filter { $0.id == HomeRow.localContinueWatchingID && !placed.contains($0.id) }
             guard !pinned.isEmpty else { return rows }
             let pinnedIDs = Set(pinned.map(\.id))
             return pinned + rows.filter { !pinnedIDs.contains($0.id) }
         #endif
+    }
+
+    func playbackProgressDidChange() {
+        rebuild()
     }
 
     func isRowVisible(_ rowID: String) -> Bool {
@@ -478,12 +483,13 @@ final class HomeViewModel {
         }
         let libraryOrder = libraryOrder
         builtLibraryOrder = libraryOrder
-        let rows = HomeAggregation.merge(
+        let mergedRows = HomeAggregation.merge(
             homes,
             libraryOrder: libraryOrder,
             showsServerNames: showsServerNames,
             localPlaybackDate: localPlaybackDate(for: homes),
         )
+        let rows = addingLocalContinueWatching(to: mergedRows)
         // An unchanged home is left as is, so a periodic refresh does not move the tvOS focus.
         if rows != availableRows {
             availableRows = rows
@@ -689,6 +695,69 @@ final class HomeViewModel {
                 }
             }
             return { dates[$0] }
+        #endif
+    }
+
+    private func addingLocalContinueWatching(to rows: [HomeRow]) -> [HomeRow] {
+        #if os(tvOS)
+            return rows
+        #else
+            guard let store = OfflineCoordinator.shared.store else { return rows }
+            let localProgress = registry.connectedServices
+                .flatMap { store.playbackProgress(owner: $0.owner) }
+                .filter { $0.media.kind == .movie || $0.media.kind == .episode }
+                .sorted { $0.lastWatchedAt > $1.lastWatchedAt }
+            guard !localProgress.isEmpty else { return rows }
+
+            let existing = rows.first { $0.kind == .continueWatching }
+            let remoteByIdentity = Dictionary(
+                (existing?.items ?? []).compactMap { item in
+                    item.playableItem.map { ($0.identity, $0) }
+                },
+                uniquingKeysWith: { first, _ in first },
+            )
+            let preferredLocalProgress = localProgress.filter { progress in
+                guard let remoteDate = remoteByIdentity[progress.media.identity]?.lastViewedAt else { return true }
+                return progress.lastWatchedAt >= remoteDate
+            }
+            let localIdentities = Set(preferredLocalProgress.map { $0.media.identity })
+            let remoteItems = (existing?.items ?? []).filter { item in
+                guard let playable = item.playableItem else { return true }
+                return !localIdentities.contains(playable.identity)
+            }
+            let items = (preferredLocalProgress.map { MediaDisplayItem.playable($0.media) } + remoteItems)
+                .enumerated()
+                .sorted { lhs, rhs in
+                    let lhsDate = lhs.element.playableItem?.lastViewedAt
+                    let rhsDate = rhs.element.playableItem?.lastViewedAt
+                    switch (lhsDate, rhsDate) {
+                    case let (left?, right?) where left != right:
+                        left > right
+                    case (_?, nil):
+                        true
+                    case (nil, _?):
+                        false
+                    default:
+                        lhs.offset < rhs.offset
+                    }
+                }
+                .map(\.element)
+            let title = existing?.title ?? String(localized: "offline.home.continueWatching")
+            let row = HomeRow(
+                id: HomeRow.localContinueWatchingID,
+                kind: .continueWatching,
+                style: .landscape,
+                hub: Hub(
+                    id: HomeRow.localContinueWatchingID,
+                    key: "",
+                    hubKey: nil,
+                    title: title,
+                    size: items.count,
+                    more: false,
+                    items: items,
+                ),
+            )
+            return [row] + rows.filter { $0.kind != .continueWatching }
         #endif
     }
 }

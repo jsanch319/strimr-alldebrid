@@ -169,12 +169,20 @@ final class OfflineCoordinator {
         store?.clearCache()
     }
 
-    func makeRecorder(owner: MediaOwner, itemID: String, duration: TimeInterval?) -> PlaybackProgressRecorder? {
+    func makeRecorder(
+        owner: MediaOwner,
+        itemID: String,
+        duration: TimeInterval?,
+        media: MediaItem? = nil,
+        pushesImmediately: Bool = true,
+    ) -> PlaybackProgressRecorder? {
         guard let store else { return nil }
         return PlaybackProgressRecorder(
             owner: owner,
             itemID: itemID,
             duration: duration,
+            media: media,
+            pushesImmediately: pushesImmediately,
             store: store,
             coordinator: self,
         )
