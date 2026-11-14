@@ -26,6 +26,8 @@ struct MediaHomeServiceTests {
             MediaPage(items: [], startIndex: 0, totalCount: 0)
         }
 
+        func removeFromContinueWatching(itemID _: String) async throws {}
+
         private func hub(_ id: String) -> Hub {
             Hub.make(id: id, title: id, items: [MediaItem.make(id: "\(id)-1", server: server)], server: server)
         }

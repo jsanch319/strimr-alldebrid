@@ -7,13 +7,15 @@ struct AllDebridAPIClientTests {
         let stub = HTTPStub { request in
             switch request.url?.path {
             case "/v4.1/pin/get":
-                return .json(#"{"status":"success","data":{"pin":"ABCD","check":"check-token","expires_in":600,"user_url":"https://alldebrid.com/pin/?pin=ABCD"}}"#)
+                .json(
+                    #"{"status":"success","data":{"pin":"ABCD","check":"check-token","expires_in":600,"user_url":"https://alldebrid.com/pin/?pin=ABCD"}}"#,
+                )
             case "/v4/pin/check":
-                return .json(#"{"status":"success","data":{"activated":true,"expires_in":570,"apikey":"user-api-key"}}"#)
+                .json(#"{"status":"success","data":{"activated":true,"expires_in":570,"apikey":"user-api-key"}}"#)
             case "/v4/user":
-                return .json(#"{"status":"success","data":{"user":{"username":"user"}}}"#)
+                .json(#"{"status":"success","data":{"user":{"username":"user"}}}"#)
             default:
-                return .status(404)
+                .status(404)
             }
         }
         let client = AllDebridAPIClient(session: stub.session)
@@ -34,7 +36,7 @@ struct AllDebridAPIClientTests {
         #expect(stub.requests[0].httpMethod == "GET")
         #expect(stub.requests[1].httpMethod == "POST")
         #expect(
-            String(data: try #require(stub.requests[1].httpBody), encoding: .utf8) == "pin=ABCD&check=check-token",
+            try String(data: #require(stub.requests[1].httpBody), encoding: .utf8) == "pin=ABCD&check=check-token",
         )
         #expect(stub.requests[2].httpMethod == "GET")
         #expect(stub.requests[2].value(forHTTPHeaderField: "Authorization") == "Bearer user-api-key")

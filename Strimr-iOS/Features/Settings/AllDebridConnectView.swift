@@ -65,12 +65,16 @@ struct AllDebridConnectView: View {
     }
 
     private var statusTitle: String {
-        if isChecking { return "Checking connection…" }
+        if isChecking {
+            return "Checking connection…"
+        }
         return isConnected ? "Connected" : "Disconnected"
     }
 
     private var statusSymbol: String {
-        if isChecking { return "ellipsis.circle" }
+        if isChecking {
+            return "ellipsis.circle"
+        }
         return isConnected ? "checkmark.circle.fill" : "xmark.circle"
     }
 

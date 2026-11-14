@@ -91,7 +91,7 @@ private struct FoldInputs: Equatable {
 }
 
 private extension PlayerHingeState {
-    init(hinge: Any?) {
+    init(hinge _: Any?) {
         self = .unavailable
     }
 }

@@ -1,5 +1,5 @@
-import SwiftUI
 import AVKit
+import SwiftUI
 
 /// Independent, experimental AllDebrid library. It does not impersonate a Plex server.
 struct AllDebridLibraryView: View {
@@ -13,17 +13,17 @@ struct AllDebridLibraryView: View {
 
     private var refreshToolbarPlacement: ToolbarItemPlacement {
         #if os(macOS)
-        .primaryAction
+            .primaryAction
         #else
-        .topBarTrailing
+            .topBarTrailing
         #endif
     }
 
     private var signOutToolbarPlacement: ToolbarItemPlacement {
         #if os(macOS)
-        .automatic
+            .automatic
         #else
-        .topBarLeading
+            .topBarLeading
         #endif
     }
 
@@ -40,14 +40,22 @@ struct AllDebridLibraryView: View {
                                 .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isLoading)
                         }
                         Section {
-                            Text("Your key is saved in the iOS Keychain, not in the project files. This experimental screen reads saved links; magnet history is not supported yet.")
-                                .font(.footnote)
+                            Text(
+                                "Your key is saved in the iOS Keychain, not in the project files. This experimental screen reads saved links; magnet history is not supported yet.",
+                            )
+                            .font(.footnote)
                         }
                     }
                 } else {
                     List {
-                        if links.isEmpty && !isLoading {
-                            ContentUnavailableView("No video links found", systemImage: "film", description: Text("Saved links may be empty. Magnet history is not supported in this version."))
+                        if links.isEmpty, !isLoading {
+                            ContentUnavailableView(
+                                "No video links found",
+                                systemImage: "film",
+                                description: Text(
+                                    "Saved links may be empty. Magnet history is not supported in this version.",
+                                ),
+                            )
                         }
                         ForEach(links.filter(\.isVideo)) { link in
                             Button {
@@ -89,8 +97,19 @@ struct AllDebridLibraryView: View {
                     }
                 }
             }
-            .overlay { if isLoading { ProgressView("Loading…") } }
-            .alert("AllDebrid", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
+            .overlay {
+                if isLoading {
+                    ProgressView("Loading…")
+                }
+            }
+            .alert(
+                "AllDebrid",
+                isPresented: Binding(get: { errorMessage != nil }, set: {
+                    if !$0 {
+                        errorMessage = nil
+                    }
+                }),
+            ) {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "Unknown error") }
             .sheet(isPresented: $showPlayer, onDismiss: { playerURL = nil }) {
@@ -163,8 +182,11 @@ private struct AllDebridVideoPlayer: View {
 
     var body: some View {
         Group {
-            if let player { VideoPlayer(player: player).ignoresSafeArea() }
-            else { ProgressView() }
+            if let player {
+                VideoPlayer(player: player).ignoresSafeArea()
+            } else {
+                ProgressView()
+            }
         }
         .onAppear {
             let player = AVPlayer(url: url)

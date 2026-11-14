@@ -39,6 +39,10 @@ class FakeMediaService: MediaHomeService, MediaLibraryService, MediaSearchServic
         throw NotStubbed(function: #function)
     }
 
+    func removeFromContinueWatching(itemID _: String) async throws {
+        throw NotStubbed(function: #function)
+    }
+
     // MARK: - Library
 
     func libraries() async throws -> [Library] {

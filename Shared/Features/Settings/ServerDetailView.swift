@@ -81,11 +81,10 @@ struct ServerDetailView: View {
         let save: (URL) async throws -> Void = { url in
             try await registry.setCustomAddress(url, server: server)
         }
-        let remove: (() async throws -> Void)?
-        if customAddress == nil {
-            remove = nil
+        let remove: (() async throws -> Void)? = if customAddress == nil {
+            nil
         } else {
-            remove = {
+            {
                 try await registry.setCustomAddress(nil, server: server)
             }
         }

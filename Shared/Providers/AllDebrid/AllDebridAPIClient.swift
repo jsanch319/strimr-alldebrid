@@ -13,12 +13,12 @@ actor AllDebridAPIClient {
 
         var errorDescription: String? {
             switch self {
-            case .invalidAPIKey: return "An AllDebrid API key is required."
-            case .invalidResponse: return "AllDebrid returned an unexpected response."
-            case .pinExpired: return "The AllDebrid PIN expired. Start a new connection."
-            case .serviceError(let message): return message
-            case .httpStatus(let status): return "AllDebrid HTTP error: \(status)"
-            case .invalidLink: return "The playback link is invalid."
+            case .invalidAPIKey: "An AllDebrid API key is required."
+            case .invalidResponse: "AllDebrid returned an unexpected response."
+            case .pinExpired: "The AllDebrid PIN expired. Start a new connection."
+            case let .serviceError(message): message
+            case let .httpStatus(status): "AllDebrid HTTP error: \(status)"
+            case .invalidLink: "The playback link is invalid."
             }
         }
     }
@@ -54,7 +54,8 @@ actor AllDebridAPIClient {
               let rawUserURL = data["user_url"] as? String,
               let userURL = URL(string: rawUserURL),
               userURL.scheme == "https",
-              userURL.host == "alldebrid.com" else {
+              userURL.host == "alldebrid.com"
+        else {
             throw APIError.invalidResponse
         }
         return AllDebridPIN(pin: pin, check: check, expiresIn: expiresIn, userURL: userURL)
@@ -80,7 +81,8 @@ actor AllDebridAPIClient {
         guard payload["status"] as? String == "success",
               let data = payload["data"] as? [String: Any],
               let activated = data["activated"] as? Bool,
-              let expiresIn = data["expires_in"] as? Int else {
+              let expiresIn = data["expires_in"] as? Int
+        else {
             throw APIError.invalidResponse
         }
         return AllDebridPINStatus(
@@ -101,7 +103,8 @@ actor AllDebridAPIClient {
 
         guard payload["status"] as? String == "success",
               let data = payload["data"] as? [String: Any],
-              let user = data["user"] as? [String: Any] else {
+              let user = data["user"] as? [String: Any]
+        else {
             throw APIError.invalidResponse
         }
         return user["username"] as? String
@@ -136,12 +139,13 @@ actor AllDebridAPIClient {
     private func request(_ path: String, parameters: [URLQueryItem] = []) async throws -> [String: Any] {
         guard let apiKey else { throw APIError.invalidAPIKey }
         guard let endpoint = URL(string: path, relativeTo: baseURL)?.absoluteURL,
-              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        else {
             throw APIError.invalidResponse
         }
         components.queryItems = [
             URLQueryItem(name: "agent", value: "StrimrAllDebridPrototype"),
-            URLQueryItem(name: "apikey", value: apiKey)
+            URLQueryItem(name: "apikey", value: apiKey),
         ] + parameters
         guard let url = components.url else { throw APIError.invalidResponse }
         var request = URLRequest(url: url)
@@ -156,7 +160,7 @@ actor AllDebridAPIClient {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (responseData, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200...299).contains(response.statusCode) else { throw APIError.httpStatus(response.statusCode) }
+        guard (200 ... 299).contains(response.statusCode) else { throw APIError.httpStatus(response.statusCode) }
         guard let payload = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
             throw APIError.invalidResponse
         }
