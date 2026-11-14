@@ -86,6 +86,7 @@ struct PlayerView: View {
     @State private var tapAreaWidth = 0.0
     @State private var showsPlaybackStatistics = false
     @State private var discordWatchTogetherMessage: String?
+    @State private var isShowingDiscordWatchTogetherAlert = false
 
     private let controlsHideDelay: TimeInterval = 3.0
     private var seekBackwardInterval: Double {
@@ -359,18 +360,8 @@ struct PlayerView: View {
                 } message: {
                     Text(subtitleSearchErrorMessage)
                 },
-                .alert(
-                    "Watch Together on Discord",
-                    isPresented: Binding(
-                        get: { discordWatchTogetherMessage != nil },
-                        set: {
-                            if !$0 {
-                                discordWatchTogetherMessage = nil
-                            }
-                        },
-                    ),
-                ) {
-                    Button("OK", role: .cancel) { discordWatchTogetherMessage = nil }
+                .alert("Watch Together on Discord", isPresented: $isShowingDiscordWatchTogetherAlert) {
+                    Button("OK", role: .cancel) {}
                 } message: {
                     Text(discordWatchTogetherMessage ?? "")
                 },
@@ -727,9 +718,10 @@ struct PlayerView: View {
                   duration: playerController.duration ?? viewModel.duration,
                   selectedSourceIdentifier: viewModel.currentVersionID,
               ) else {
-            discordWatchTogetherMessage =
+            showDiscordWatchTogetherMessage(
                 "Discord Watch Together is not configured. Set " +
-                "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig."
+                    "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig.",
+            )
             return
         }
         DiscordWatchTogetherConfiguration.openActivityURL(url) { result in
@@ -737,11 +729,16 @@ struct PlayerView: View {
             case .opened:
                 break
             case .discordNotInstalled:
-                discordWatchTogetherMessage = "Install Discord to start a Watch Together Activity."
+                showDiscordWatchTogetherMessage("Install Discord to start a Watch Together Activity.")
             case .activityUnavailable:
-                discordWatchTogetherMessage = "Discord could not open the Watch Together Activity."
+                showDiscordWatchTogetherMessage("Discord could not open the Watch Together Activity.")
             }
         }
+    }
+
+    private func showDiscordWatchTogetherMessage(_ message: String) {
+        discordWatchTogetherMessage = message
+        isShowingDiscordWatchTogetherAlert = true
     }
 
     private var areControlsShown: Bool {

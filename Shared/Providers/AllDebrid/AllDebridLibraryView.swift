@@ -503,14 +503,13 @@ private struct AllDebridSourcePicker: View {
                 }
             }
             .navigationTitle("Select Source")
-            #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-            #endif
+            .allDebridSourcePickerTitleDisplayMode()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
                 }
             }
+
         }
         .accessibilityIdentifier("AllDebridSourcePicker")
         .overlay {
@@ -522,5 +521,16 @@ private struct AllDebridSourcePicker: View {
                 )
             }
         }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func allDebridSourcePickerTitleDisplayMode() -> some View {
+        #if os(iOS)
+            navigationBarTitleDisplayMode(.inline)
+        #else
+            self
+        #endif
     }
 }
