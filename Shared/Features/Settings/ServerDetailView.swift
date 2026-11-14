@@ -78,10 +78,22 @@ struct ServerDetailView: View {
     }
 
     private func editCustomAddress(_: PlexCloudResource) {
+        let save: (URL) async throws -> Void = { url in
+            try await registry.setCustomAddress(url, server: server)
+        }
+        let remove: (() async throws -> Void)?
+        if customAddress == nil {
+            remove = nil
+        } else {
+            remove = {
+                try await registry.setCustomAddress(nil, server: server)
+            }
+        }
+
         addressModel = CustomServerAddressModel(
             address: customAddress,
-            save: { url in try await registry.setCustomAddress(url, server: server) },
-            remove: customAddress == nil ? nil : { try await registry.setCustomAddress(nil, server: server) },
+            save: save,
+            remove: remove,
             onDone: {
                 addressModel = nil
                 loadCustomAddress()

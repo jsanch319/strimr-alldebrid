@@ -1,6 +1,5 @@
 import SwiftUI
 import AVKit
-import Security
 
 /// Independent, experimental AllDebrid library. It does not impersonate a Plex server.
 struct AllDebridLibraryView: View {
@@ -77,11 +76,15 @@ struct AllDebridLibraryView: View {
                     }
                     ToolbarItem(placement: signOutToolbarPlacement) {
                         Button("Sign out") {
-                            AllDebridKeychain.delete()
-                            apiKey = ""
-                            links = []
-                            isConfigured = false
-                            playerURL = nil
+                            do {
+                                try AllDebridCredentialStore().delete()
+                                apiKey = ""
+                                links = []
+                                isConfigured = false
+                                playerURL = nil
+                            } catch {
+                                errorMessage = error.localizedDescription
+                            }
                         }
                     }
                 }
@@ -96,10 +99,14 @@ struct AllDebridLibraryView: View {
                 }
             }
             .task {
-                if let key = AllDebridKeychain.load() {
-                    apiKey = key
-                    isConfigured = true
-                    await refresh()
+                do {
+                    if let key = try AllDebridCredentialStore().load() {
+                        apiKey = key
+                        isConfigured = true
+                        await refresh()
+                    }
+                } catch {
+                    errorMessage = error.localizedDescription
                 }
             }
         }
@@ -108,11 +115,12 @@ struct AllDebridLibraryView: View {
     private func connect() async {
         await refresh()
         if errorMessage == nil {
-            guard AllDebridKeychain.save(apiKey) else {
-                errorMessage = "Could not save your API key securely."
-                return
+            do {
+                try AllDebridCredentialStore().save(apiKey)
+                isConfigured = true
+            } catch {
+                errorMessage = error.localizedDescription
             }
-            isConfigured = true
         }
     }
 
@@ -167,46 +175,5 @@ private struct AllDebridVideoPlayer: View {
             player?.pause()
             player = nil
         }
-    }
-}
-
-private enum AllDebridKeychain {
-    private static let service = "com.strimr.experimental.alldebrid"
-    private static let account = "api-key"
-
-    static func save(_ key: String) -> Bool {
-        guard let data = key.data(using: .utf8) else { return false }
-        delete()
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueData as String: data
-        ]
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
-    }
-
-    static func load() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func delete() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
     }
 }

@@ -17,6 +17,12 @@ struct UserMenuView: View {
                     Label("settings.title", systemImage: "gearshape.fill")
                 }
 
+                NavigationLink {
+                    AllDebridConnectView()
+                } label: {
+                    Label("Connect AllDebrid", systemImage: "play.tv")
+                }
+
                 if !settingsManager.interface.displayDownloadsTab {
                     NavigationLink {
                         DownloadsView()
