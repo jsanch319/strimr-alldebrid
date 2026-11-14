@@ -34,10 +34,22 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Validate built iOS app bundle
+        shell: bash
+        run: |
+          products_dir="build/DerivedData/Build/Products/Release-iphoneos"
+          app_bundle="$products_dir/Strimr-iOS.app"
+          echo "Contents of $products_dir:"
+          ls -la "$products_dir"
+          if [[ ! -d "$app_bundle" ]]; then
+            echo "::error::Expected iOS app bundle not found: $app_bundle"
+            exit 1
+          fi
+
       - name: Package unsigned IPA
         run: |
           mkdir -p build/ipa/Payload
-          cp -R build/DerivedData/Build/Products/Release-iphoneos/Strimr.app build/ipa/Payload/Strimr.app
+          cp -R build/DerivedData/Build/Products/Release-iphoneos/Strimr-iOS.app build/ipa/Payload/Strimr-iOS.app
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent build/ipa/Payload Strimr-unsigned.ipa
 
       - name: Upload SideStore IPA
