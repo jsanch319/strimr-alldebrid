@@ -1,8 +1,11 @@
 import Foundation
+import OSLog
 import Security
 
 /// AllDebrid v4 HTTP transport. Never embed an API key in source control or include request URLs in logs.
 actor AllDebridAPIClient {
+    private static let logger = Logger(subsystem: "com.strimr", category: "AllDebridPlayback")
+
     enum APIError: LocalizedError, Equatable {
         case invalidAPIKey
         case invalidResponse
@@ -10,6 +13,8 @@ actor AllDebridAPIClient {
         case serviceError(String)
         case httpStatus(Int)
         case invalidLink
+        case playbackHTTPStatus(Int)
+        case nonMediaContentType(String)
 
         var errorDescription: String? {
             switch self {
@@ -19,6 +24,9 @@ actor AllDebridAPIClient {
             case let .serviceError(message): message
             case let .httpStatus(status): "AllDebrid HTTP error: \(status)"
             case .invalidLink: "The playback link is invalid."
+            case let .playbackHTTPStatus(status): "The resolved playback URL returned HTTP \(status)."
+            case let .nonMediaContentType(contentType):
+                "AllDebrid returned \(contentType) instead of a video file. The playback link could not be resolved."
             }
         }
     }
@@ -181,18 +189,74 @@ actor AllDebridAPIClient {
         return files
     }
 
-    /// Resolves an AllDebrid link to a streamable URL. Resolve again when expired.
+    /// Resolves an AllDebrid link to a streamable URL and confirms the result is not an API or web page.
     func unlock(_ link: String) async throws -> URL {
         guard let candidate = URL(string: link),
               ["https", "http"].contains(candidate.scheme?.lowercased() ?? ""),
               candidate.host != nil else { throw APIError.invalidLink }
-        let payload = try await request("link/unlock", parameters: [URLQueryItem(name: "link", value: link)])
+        let payload = try await request(
+            "link/unlock",
+            parameters: [URLQueryItem(name: "link", value: link)],
+            method: "POST",
+            parametersInBody: true,
+        )
         guard let data = payload["data"] as? [String: Any],
               let rawURL = data["link"] as? String,
               let url = URL(string: rawURL),
               ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
               url.host != nil else { throw APIError.invalidResponse }
         return url
+    }
+
+    func resolvePlaybackURL(_ link: String, filename: String) async throws -> AllDebridPlaybackResolution {
+        Self.logger.debug(
+            "Resolving playback source: filename=\(filename, privacy: .public), originalURL=\(Self.logSafeURL(link), privacy: .public)",
+        )
+        let unlockedURL = try await unlock(link)
+        var request = URLRequest(url: unlockedURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 30
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (_, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+
+        let contentType = response.value(forHTTPHeaderField: "Content-Type")
+        let finalURL = response.url ?? unlockedURL
+        let resolution = AllDebridPlaybackResolution(
+            url: finalURL,
+            statusCode: response.statusCode,
+            contentType: contentType,
+            followedRedirect: finalURL != unlockedURL,
+        )
+        Self.logger.debug(
+            "Playback resolved: filename=\(filename, privacy: .public), originalURL=\(Self.logSafeURL(link), privacy: .public), finalURL=\(Self.logSafeURL(finalURL.absoluteString), privacy: .public), status=\(resolution.statusCode), contentType=\(contentType ?? "missing", privacy: .public), redirected=\(resolution.followedRedirect)",
+        )
+        guard (200 ... 299).contains(response.statusCode) else {
+            throw APIError.playbackHTTPStatus(response.statusCode)
+        }
+        if let contentType, Self.isNonMediaContentType(contentType) {
+            throw APIError.nonMediaContentType(contentType)
+        }
+        return resolution
+    }
+
+    private static func isNonMediaContentType(_ contentType: String) -> Bool {
+        let normalizedType = contentType
+            .split(separator: ";", maxSplits: 1)
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return normalizedType.hasPrefix("text/")
+            || normalizedType.contains("json")
+            || normalizedType.contains("html")
+            || normalizedType.contains("xml")
+    }
+
+    nonisolated static func logSafeURL(_ string: String) -> String {
+        guard let url = URL(string: string), let host = url.host else { return "<invalid-url>" }
+        let pathExtension = (url.path as NSString).pathExtension
+        let pathSuffix = pathExtension.isEmpty ? "" : "/<redacted>.\(pathExtension)"
+        return "\(url.scheme ?? "https")://\(host)/<redacted>\(pathSuffix)"
     }
 
     private func request(
@@ -312,6 +376,13 @@ actor AllDebridAPIClient {
         }
         return payload
     }
+}
+
+struct AllDebridPlaybackResolution: Sendable {
+    let url: URL
+    let statusCode: Int
+    let contentType: String?
+    let followedRedirect: Bool
 }
 
 struct AllDebridPIN: Sendable {

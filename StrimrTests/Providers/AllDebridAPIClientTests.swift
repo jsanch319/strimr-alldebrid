@@ -55,6 +55,60 @@ struct AllDebridAPIClientTests {
         }
     }
 
+    @Test func `playback resolution posts magnet link to unlock and validates media response`() async throws {
+        let stub = HTTPStub { request in
+            switch request.url?.path {
+            case "/v4/link/unlock":
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.query == nil)
+                let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+                #expect(body.contains("link=https%3A%2F%2Falldebrid.com%2Ff%2Fsource"))
+                #expect(body.contains("apikey=private-key"))
+                return .json(
+                    #"{"status":"success","data":{"link":"https://media.example/download/Movie.mkv"}}"#,
+                )
+            case "/download/Movie.mkv":
+                #expect(request.httpMethod == "HEAD")
+                return .init(statusCode: 200, headers: ["Content-Type": "video/x-matroska"])
+            default:
+                .status(404)
+            }
+        }
+        let client = try AllDebridAPIClient(apiKey: "private-key", session: stub.session)
+
+        let resolution = try await client.resolvePlaybackURL(
+            "https://alldebrid.com/f/source",
+            filename: "Movie.mkv",
+        )
+
+        #expect(resolution.url.absoluteString == "https://media.example/download/Movie.mkv")
+        #expect(resolution.statusCode == 200)
+        #expect(resolution.contentType == "video/x-matroska")
+        #expect(!resolution.followedRedirect)
+        #expect(stub.requests.map(\.httpMethod) == ["POST", "HEAD"])
+    }
+
+    @Test func `playback resolution rejects HTML and JSON responses`() async throws {
+        for contentType in ["text/html", "application/json"] {
+            let stub = HTTPStub { request in
+                if request.url?.path == "/v4/link/unlock" {
+                    return .json(
+                        #"{"status":"success","data":{"link":"https://media.example/download/Movie.mkv"}}"#,
+                    )
+                }
+                return .init(statusCode: 200, headers: ["Content-Type": contentType])
+            }
+            let client = try AllDebridAPIClient(apiKey: "private-key", session: stub.session)
+
+            await #expect(throws: AllDebridAPIClient.APIError.nonMediaContentType(contentType)) {
+                try await client.resolvePlaybackURL(
+                    "https://alldebrid.com/f/source",
+                    filename: "Movie.mkv",
+                )
+            }
+        }
+    }
+
     @Test func `magnet status parses numeric and string ready statuses and retains pending magnets`() async throws {
         let stub = HTTPStub { request in
             #expect(request.url?.path == "/v4.1/magnet/status")

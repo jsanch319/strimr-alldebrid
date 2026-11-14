@@ -20,13 +20,13 @@ struct AllDebridLibraryView: View {
 
     private enum ActiveSheet: Identifiable {
         case player(URL)
-        case magnetPlayer(AllDebridMagnetFile)
+        case magnetPlayer(file: AllDebridMagnetFile, url: URL)
         case sources(AllDebridMagnetFile)
 
         var id: String {
             switch self {
             case let .player(url): "player:\(url.absoluteString)"
-            case let .magnetPlayer(file): "magnet-player:\(file.id)"
+            case let .magnetPlayer(file, _): "magnet-player:\(file.id)"
             case let .sources(file): "sources:\(file.id)"
             }
         }
@@ -146,14 +146,11 @@ struct AllDebridLibraryView: View {
                 Button("OK", role: .cancel) { errorMessage = nil }
             } message: { Text(errorMessage ?? "Unknown error") }
             .sheet(item: $activeSheet) { sheet in
-                switch sheet {
-                case let .player(playerURL):
-                    AllDebridVideoPlayer(url: playerURL)
-                case let .magnetPlayer(file):
-                    if let url = URL(string: file.link),
-                       ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
-                       url.host != nil
-                    {
+                Group {
+                    switch sheet {
+                    case let .player(playerURL):
+                        AllDebridVideoPlayer(url: playerURL)
+                    case let .magnetPlayer(file, url):
                         #if os(iOS)
                             AllDebridMagnetPlayer(
                                 file: file,
@@ -163,16 +160,14 @@ struct AllDebridLibraryView: View {
                         #else
                             AllDebridVideoPlayer(url: url)
                         #endif
-                    } else {
-                        ContentUnavailableView("The playback link is invalid.", systemImage: "film")
-                    }
-                case let .sources(file):
-                    AllDebridSourcePicker(
-                        magnetTitle: Self.cleanTitle(file.filename),
-                        sources: Self.sources(for: file.magnetID, in: magnetFiles),
-                        subtitleFiles: magnetFiles.filter { $0.magnetID == file.magnetID && $0.isSubtitle },
-                    ) { source in
-                        play(source)
+                    case let .sources(file):
+                        AllDebridSourcePicker(
+                            magnetTitle: Self.cleanTitle(file.filename),
+                            sources: Self.sources(for: file.magnetID, in: magnetFiles),
+                            subtitleFiles: magnetFiles.filter { $0.magnetID == file.magnetID && $0.isSubtitle },
+                        ) { source in
+                            Task { await play(source) }
+                        }
                     }
                 }
             }
@@ -237,27 +232,30 @@ struct AllDebridLibraryView: View {
         defer { isLoading = false }
         do {
             let client = try AllDebridAPIClient(apiKey: apiKey)
-            activeSheet = try await .player(client.unlock(link.link))
+            let resolution = try await client.resolvePlaybackURL(link.link, filename: link.filename)
+            activeSheet = .player(resolution.url)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
-    private func play(_ file: AllDebridMagnetFile) {
-        guard let url = URL(string: file.link),
-              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
-              url.host != nil
-        else {
-            errorMessage = "The playback link is invalid."
-            return
+    private func play(_ file: AllDebridMagnetFile) async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let client = try AllDebridAPIClient(apiKey: apiKey)
+            let resolution = try await client.resolvePlaybackURL(file.link, filename: file.filename)
+            activeSheet = .magnetPlayer(file: file, url: resolution.url)
+        } catch {
+            activeSheet = nil
+            errorMessage = error.localizedDescription
         }
-        activeSheet = .magnetPlayer(file)
     }
 
     private func magnetRow(_ file: AllDebridMagnetFile) -> some View {
         HStack(spacing: 12) {
             Button {
-                play(file)
+                Task { await play(file) }
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "film").foregroundStyle(.orange)
@@ -419,16 +417,21 @@ struct AllDebridLibraryView: View {
 }
 
 private struct AllDebridVideoPlayer: View {
+    @Environment(\.dismiss) private var dismiss
+
     let url: URL
     @State private var player: AVPlayer?
 
     var body: some View {
-        Group {
-            if let player {
-                VideoPlayer(player: player).ignoresSafeArea()
-            } else {
-                ProgressView()
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let player {
+                    VideoPlayer(player: player).ignoresSafeArea()
+                } else {
+                    ProgressView()
+                }
             }
+            closeButton
         }
         .onAppear {
             let player = AVPlayer(url: url)
@@ -440,10 +443,23 @@ private struct AllDebridVideoPlayer: View {
             player = nil
         }
     }
+
+    private var closeButton: some View {
+        Button("Done", systemImage: "xmark") {
+            dismiss()
+        }
+        .labelStyle(.iconOnly)
+        .font(.headline)
+        .padding(12)
+        .background(.regularMaterial, in: Circle())
+        .padding()
+        .accessibilityLabel("Close player")
+    }
 }
 
 #if os(iOS)
     private struct AllDebridMagnetPlayer: View {
+        @Environment(\.dismiss) private var dismiss
         @State private var viewModel: PlayerViewModel
 
         init(file: AllDebridMagnetFile, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
@@ -456,6 +472,19 @@ private struct AllDebridVideoPlayer: View {
 
         var body: some View {
             PlayerWrapper(viewModel: viewModel)
+                .overlay(alignment: .topTrailing) {
+                    Button("Done", systemImage: "xmark") {
+                        dismiss()
+                    }
+                    .labelStyle(.iconOnly)
+                    .font(.headline)
+                    .padding(12)
+                    .background(.regularMaterial, in: Circle())
+                    .padding()
+                    .safeAreaPadding(.top)
+                    .zIndex(1)
+                    .accessibilityLabel("Close player")
+                }
         }
 
         private static func media(for file: AllDebridMagnetFile) -> MediaItem {
