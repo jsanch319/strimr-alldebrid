@@ -62,8 +62,9 @@ struct AllDebridAPIClientTests {
                 #expect(request.httpMethod == "POST")
                 #expect(request.url?.query == nil)
                 let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
-                #expect(body.contains("link=https%3A%2F%2Falldebrid.com%2Ff%2Fsource"))
-                #expect(body.contains("apikey=private-key"))
+                let parameters = URLComponents(string: "https://stub.local/?\(body)")?.queryItems ?? []
+                #expect(parameters.first(where: { $0.name == "link" })?.value == "https://alldebrid.com/f/source")
+                #expect(parameters.first(where: { $0.name == "apikey" })?.value == "private-key")
                 return .json(
                     #"{"status":"success","data":{"link":"https://media.example/download/Movie.mkv"}}"#,
                 )
