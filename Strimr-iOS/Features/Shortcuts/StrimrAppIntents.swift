@@ -31,7 +31,7 @@ struct OpenStrimrIntent: AppIntent {
         guard let url = StrimrAppLink.url(host: "open") else {
             throw StrimrShortcutError.invalidLink
         }
-        return .result(opensIntent: OpenURLIntent(url: url))
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 
@@ -43,7 +43,7 @@ struct ResumeWatchingIntent: AppIntent {
         guard let url = StrimrAppLink.url(host: "resume") else {
             throw StrimrShortcutError.invalidLink
         }
-        return .result(opensIntent: OpenURLIntent(url: url))
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 
@@ -78,26 +78,24 @@ struct OpenMediaByIdentifierIntent: AppIntent {
         else {
             throw StrimrShortcutError.invalidMediaIdentifier
         }
-        return .result(opensIntent: OpenURLIntent(url: url))
+        return .result(opensIntent: OpenURLIntent(url))
     }
 }
 
 struct StrimrAppShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
-        [
-            AppShortcut(
-                intent: OpenStrimrIntent(),
-                phrases: ["Open \(.applicationName)"],
-                shortTitle: "Open Strimr",
-                systemImageName: "play.rectangle",
-            ),
-            AppShortcut(
-                intent: ResumeWatchingIntent(),
-                phrases: ["Resume watching with \(.applicationName)"],
-                shortTitle: "Resume Watching",
-                systemImageName: "play.fill",
-            ),
-        ]
+        AppShortcut(
+            intent: OpenStrimrIntent(),
+            phrases: ["Open \(.applicationName)"],
+            shortTitle: "Open Strimr",
+            systemImageName: "play.rectangle",
+        )
+        AppShortcut(
+            intent: ResumeWatchingIntent(),
+            phrases: ["Resume watching with \(.applicationName)"],
+            shortTitle: "Resume Watching",
+            systemImageName: "play.fill",
+        )
     }
 }
 

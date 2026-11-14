@@ -505,16 +505,21 @@ final class OfflineStore {
             ErrorReporter.capture(PlaybackProgressPersistenceError.encodingFailed)
             return
         }
+        let mediaType: String
+        switch media.kind {
+        case .movie:
+            mediaType = "movie"
+        case .episode:
+            mediaType = "show"
+        default:
+            mediaType = media.kind.rawValue
+        }
         let record = PlaybackProgressRecord(
             ownerID: owner.id,
             itemID: media.id,
             provider: media.identity.server.provider.rawValue,
             serverID: media.identity.server.id,
-            mediaType: switch media.kind {
-            case .movie: "movie"
-            case .episode: "show"
-            default: media.kind.rawValue
-            },
+            mediaType: mediaType,
             seasonNumber: media.kind == .episode ? media.parentIndex : nil,
             episodeNumber: media.kind == .episode ? media.index : nil,
             position: position,
@@ -1245,7 +1250,7 @@ final class OfflineStore {
     }
 }
 
-private enum PlaybackProgressPersistenceError: Error {
+enum PlaybackProgressPersistenceError: Error {
     case invalidRecord
     case encodingFailed
 }
