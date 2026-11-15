@@ -169,6 +169,13 @@ final class TrackerPlaybackSession {
         }
     }
 
+    /// Local observation only; never sends a heartbeat or a seek scrobble.
+    func observePosition(_ position: TimeInterval) {
+        if position.isFinite, position >= 1 {
+            hasObservedPosition = true
+        }
+    }
+
     func updateInitialResumeOffset(_ position: TimeInterval?) {
         guard !hasStarted else { return }
         resumeOffset = position

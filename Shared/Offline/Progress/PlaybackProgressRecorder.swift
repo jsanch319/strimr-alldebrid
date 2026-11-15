@@ -303,8 +303,6 @@ final class PlaybackProgressRecorder {
               let services = coordinator.reachableServices(for: owner) else { return }
         let previousTask = pushTask
         let itemID = itemID
-        let store = store
-        let owner = owner
         pushTask = Task { @MainActor in
             await previousTask?.value
             do {

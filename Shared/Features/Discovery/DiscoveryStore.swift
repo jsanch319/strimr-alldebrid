@@ -54,12 +54,13 @@ final class CatalogProgressStore {
         finished: Bool,
         scope: String,
         event: String = "stop",
+        protectInitialZero: Bool = true,
     ) {
         guard position.isFinite, position >= 0 else { return }
         let validDuration = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
         let previous = progress(title: title, episode: episode, scope: scope)
         // A transient zero before the engine seeks must not erase a saved resume point.
-        if position < 1, previous?.position ?? 0 > 1, !finished {
+        if protectInitialZero, position < 1, previous?.position ?? 0 > 1, !finished {
             return
         }
         let record = CatalogProgress(
@@ -127,6 +128,7 @@ final class CatalogProgressStore {
                         finished: event == .watched,
                         scope: scope,
                         event: event.rawValue,
+                        protectInitialZero: false,
                     )
                     if event == .stop || event == .watched {
                         self?.activeKeys.remove(scope + "|" + key)

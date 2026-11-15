@@ -250,6 +250,7 @@ private struct CatalogPlayerView: View {
                     queue: .main,
                 ) { time in
                     Task { @MainActor in
+                        tracker?.observePosition(time.seconds)
                         let duration = player.currentItem?.duration.seconds
                         #if !os(tvOS)
                             recorder.record(position: time.seconds, duration: duration, isPaused: player.rate == 0)

@@ -873,6 +873,7 @@ final class PlayerViewModel {
         #else
             self.position = position
         #endif
+        trackerSession?.observePosition(self.position)
         reportTimeline(state: playbackState)
     }
 
