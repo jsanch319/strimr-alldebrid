@@ -326,6 +326,8 @@ private struct StreamingProviderView: View {
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("catalog.provider.content")
         .catalogBackdrop(media: titles.first.map { CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil) })
         .navigationTitle(service.name)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
