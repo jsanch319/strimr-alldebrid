@@ -41,7 +41,9 @@ enum DiscordWatchTogetherConfiguration {
               configuredActivityURL.user == nil,
               configuredActivityURL.password == nil,
               var components = URLComponents(string: "https://discord.com/activities/\(applicationID)")
-        else { return nil }
+        else {
+            return nil
+        }
 
         let mediaType: String? = switch media.kind {
         case .movie: "movie"
@@ -78,7 +80,8 @@ enum DiscordWatchTogetherConfiguration {
         @MainActor
         static func openActivityURL(_ url: URL, completion: @escaping (LaunchResult) -> Void) {
             guard let discordURL = URL(string: "discord://"),
-                  UIApplication.shared.canOpenURL(discordURL) else {
+                  UIApplication.shared.canOpenURL(discordURL)
+            else {
                 completion(.discordNotInstalled)
                 return
             }
@@ -86,6 +89,7 @@ enum DiscordWatchTogetherConfiguration {
                 completion(opened ? .opened : .activityUnavailable)
             }
         }
+
     #endif
 
     private static func safeIdentifier(_ value: String) -> String? {

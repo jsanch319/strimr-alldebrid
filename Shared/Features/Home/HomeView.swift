@@ -132,10 +132,23 @@ struct HomeView: View {
                     }
                 }
             case let .allDebrid(item):
+                let initialFile: AllDebridMagnetFile? = {
+                    if case let .magnetFile(file) = item {
+                        return file
+                    }
+                    return nil
+                }()
+                let initialLink: AllDebridSavedLink? = {
+                    if case let .savedLink(link) = item {
+                        return link
+                    }
+                    return nil
+                }()
+
                 AllDebridLibraryView(
                     navigationTitle: "AllDebrid",
-                    initialFile: if case let .magnetFile(file) = item { file } else { nil },
-                    initialLink: if case let .savedLink(link) = item { link } else { nil },
+                    initialFile: initialFile,
+                    initialLink: initialLink,
                     onAuthenticated: { selectedSheet = nil },
                     onSignedOut: { selectedSheet = nil },
                 )

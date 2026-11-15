@@ -128,7 +128,9 @@ struct AllDebridConnectView: View {
 
                 let result = try await client.checkPIN(pin: pin.pin, check: pin.check)
                 expiresIn = result.expiresIn
-                guard result.activated else { continue }
+                guard result.activated else {
+                    continue
+                }
                 guard let apiKey = result.apiKey else {
                     throw AllDebridAPIClient.APIError.invalidResponse
                 }

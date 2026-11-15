@@ -98,7 +98,11 @@ struct ContentView: View {
             "AllDebrid",
             isPresented: Binding(
                 get: { allDebridCredentialError != nil },
-                set: { if !$0 { allDebridCredentialError = nil } },
+                set: {
+                    if !$0 {
+                        allDebridCredentialError = nil
+                    }
+                },
             ),
         ) {
             Button("OK", role: .cancel) { allDebridCredentialError = nil }
