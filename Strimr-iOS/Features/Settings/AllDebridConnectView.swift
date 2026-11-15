@@ -33,7 +33,7 @@ struct AllDebridConnectView: View {
                         Text(pin.pin)
                             .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                             .frame(maxWidth: .infinity)
-                            .accessibilityLabel("AllDebrid PIN: \(pin.pin)")
+                            .accessibilityLabel("AllDebrid PIN: \\(pin.pin)")
 
                         Link("Open AllDebrid PIN page", destination: pin.userURL)
                         Text("Keep this screen open while Strimr checks the PIN.")
@@ -128,7 +128,9 @@ struct AllDebridConnectView: View {
 
                 let result = try await client.checkPIN(pin: pin.pin, check: pin.check)
                 expiresIn = result.expiresIn
-                guard result.activated else { continue }
+                guard result.activated else {
+                    continue
+                }
                 guard let apiKey = result.apiKey else {
                     throw AllDebridAPIClient.APIError.invalidResponse
                 }
