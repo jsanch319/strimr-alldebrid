@@ -78,18 +78,18 @@ enum DiscordWatchTogetherConfiguration {
         }
 
         
-@MainActor
-static func openActivityURL(_ url: URL, completion: @escaping (LaunchResult) -> Void) {
-    guard let discordURL = URL(string: "discord://"),
-          UIApplication.shared.canOpenURL(discordURL)
-    else {
-        completion(.discordNotInstalled)
-        return
-    }
-    UIApplication.shared.open(url) { opened in
-        completion(opened ? .opened : .activityUnavailable)
-    }
-}
+        @MainActor
+        static func openActivityURL(_ url: URL, completion: @escaping (LaunchResult) -> Void) {
+            guard let discordURL = URL(string: "discord://"),
+                  UIApplication.shared.canOpenURL(discordURL)
+            else {
+                 completion(.discordNotInstalled)
+                 return
+            }
+            UIApplication.shared.open(url) { opened in
+                completion(opened ? .opened : .activityUnavailable)
+            }
+        }
 
     #endif
 
