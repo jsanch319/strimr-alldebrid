@@ -100,7 +100,22 @@ jobs:
         shell: bash
         run: |
           if [[ -d build/CatalogVisualTests.xcresult ]]; then
+            xcrun xcresulttool get test-results summary --path build/CatalogVisualTests.xcresult > build/visual-test-summary.json
+            cat build/visual-test-summary.json
             xcrun xcresulttool export attachments --path build/CatalogVisualTests.xcresult --output-path build/screenshots
+            python3 - <<'PYPHOTOS'
+          import json, pathlib
+          root = pathlib.Path("build/screenshots")
+          manifest = root / "manifest.json"
+          rows = json.loads(manifest.read_text())
+          for row in rows:
+              row["attachments"] = [entry for entry in row["attachments"] if entry["exportedFileName"].endswith(".png")]
+          keep = {entry["exportedFileName"] for row in rows for entry in row["attachments"]}
+          for path in root.iterdir():
+              if path.is_file() and path.name not in keep and path.name != "manifest.json":
+                  path.unlink()
+          manifest.write_text(json.dumps(rows, indent=2))
+          PYPHOTOS
           fi
       - name: Upload visual screenshots
         if: always()
@@ -110,6 +125,7 @@ jobs:
           path: |
             build/screenshots
             build/simulator.json
+            build/visual-test-summary.json
           if-no-files-found: ignore
           retention-days: 14
       - name: Upload visual test results
@@ -119,6 +135,7 @@ jobs:
           name: ios-catalog-visual-tests
           path: |
             build/visual-tests.log
+            build/visual-test-summary.json
             build/CatalogVisualTests.xcresult
           if-no-files-found: ignore
           retention-days: 14

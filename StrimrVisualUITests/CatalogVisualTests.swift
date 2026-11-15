@@ -58,7 +58,7 @@ final class CatalogVisualTests: XCTestCase {
     }
 
     private func assertLoadedBackdrop() {
-        let state = app.staticTexts["visual.backdrop"].firstMatch
+        let state = app.descendants(matching: .any).matching(identifier: "visual.backdrop").firstMatch
         XCTAssertTrue(state.waitForExistence(timeout: 20), app.debugDescription)
         let loaded = NSPredicate(format: "value != %@", "none")
         expectation(for: loaded, evaluatedWith: state)
@@ -165,7 +165,7 @@ final class CatalogVisualTests: XCTestCase {
         app.navigationBars.buttons["More"].tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 15), app.debugDescription)
-        XCTAssertFalse(app.staticTexts["visual.backdrop"].exists)
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "visual.backdrop").firstMatch.exists)
         capture("14-Settings")
     }
 }
