@@ -199,6 +199,8 @@ struct TMDBSettingsView: View {
                     }
                 }
                 Section {
+                    Image("tmdb").renderingMode(.original).resizable().scaledToFit()
+                        .frame(width: 100, height: 44).accessibilityLabel("The Movie Database")
                     Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
                     Link("The Movie Database", destination: URL(string: "https://www.themoviedb.org")!)
                 }
