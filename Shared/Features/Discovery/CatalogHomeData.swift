@@ -18,7 +18,12 @@ final class CatalogHomeData {
     private(set) var links: [AllDebridSavedLink] = []
     private(set) var errorMessage: String?
     private(set) var searchResults: [TMDBTitle] = []
-    private(set) var recommendations: [TMDBTitle] = []
+    private var recommendationResults: [TMDBTitle] = []
+    private var recommendationScope: String?
+    var recommendations: [TMDBTitle] {
+        recommendationScope == discovery.scope ? recommendationResults : []
+    }
+
     private(set) var isSearching = false
     private(set) var hasMoreSearchResults = false
     private var searchPage = 0
@@ -203,7 +208,13 @@ final class CatalogHomeData {
     private func performLoad(force: Bool) async {
         errorMessage = nil
         await discovery.sync(force: force)
-        recommendations = []
+        let scope = discovery.scope
+        if recommendationScope != scope {
+            recommendationResults = []
+            recommendationScope = scope
+        }
+        var nextRecommendations: [TMDBTitle] = []
+        var recommendationsLoaded = true
         // Personalization comes only from this account's actual watch history, never synthetic seeds.
         let seeds = discovery.entries.filter { $0.status == "completed" || $0.last_watched_at != nil }
             .sorted { ($0.last_watched_at ?? "") > ($1.last_watched_at ?? "") }.prefix(2)
@@ -213,8 +224,13 @@ final class CatalogHomeData {
             guard let title = discovery.title(for: entry) else { continue }
             do {
                 let results = try await TMDBClient.shared.recommendations(title)
-                recommendations += results.filter { seen.insert($0.catalogID).inserted }
-            } catch { errorMessage = error.localizedDescription }
+                nextRecommendations += results.filter { seen.insert($0.catalogID).inserted }
+            } catch { errorMessage = error.localizedDescription; recommendationsLoaded = false }
+        }
+        guard scope == discovery.scope else { return }
+        // Keep the recommendation row (and its detail navigation) mounted during tab refreshes.
+        if recommendationsLoaded {
+            recommendationResults = nextRecommendations
         }
         if !loaded || force {
             do {

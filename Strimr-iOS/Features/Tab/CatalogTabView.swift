@@ -118,7 +118,11 @@ private struct CatalogBrowseTab: View {
         }
         .navigationTitle(tab.title)
         .tabRootChrome()
-        .task { await data.load() }
+        .task {
+            if tab.feeds.contains(where: { data.feeds[$0] == nil }) {
+                await data.load()
+            }
+        }
         .refreshable { await data.load(force: true) }
     }
 }

@@ -5,6 +5,7 @@ struct HomeView: View {
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(SeerrStore.self) private var seerrStore
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.isCatalogNavigation) private var isCatalogNavigation
     @Environment(\.mediaCardActions) private var mediaCardActions
     @State var viewModel: HomeViewModel
     @State private var selectedSheet: HomeSheet?
@@ -130,7 +131,9 @@ struct HomeView: View {
         .toolbar {
             if viewModel.isServerFree {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button("tabs.search", systemImage: "magnifyingglass") { selectedSheet = .catalogSearch }
+                    if !isCatalogNavigation {
+                        Button("tabs.search", systemImage: "magnifyingglass") { selectedSheet = .catalogSearch }
+                    }
                     Menu {
                         NavigationLink("Simkl Account") { TrackerSettingsView(service: .simkl) }
                         Button("Sync Simkl") { Task { await DiscoveryStore.shared.sync(force: true) } }
