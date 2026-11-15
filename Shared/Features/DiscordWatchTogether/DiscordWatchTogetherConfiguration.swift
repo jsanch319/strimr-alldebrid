@@ -43,7 +43,7 @@ enum DiscordWatchTogetherConfiguration {
               var components = URLComponents(string: "https://discord.com/activities/\(applicationID)")
         else {
             return nil
-         }
+          }
 
         let mediaType: String? = switch media.kind {
         case .movie: "movie"
@@ -82,8 +82,8 @@ enum DiscordWatchTogetherConfiguration {
             guard let discordURL = URL(string: "discord://"),
                   UIApplication.shared.canOpenURL(discordURL)
             else {
-                 completion(.discordNotInstalled)
-                 return
+                completion(.discordNotInstalled)
+                return
             }
         }
     #endif
