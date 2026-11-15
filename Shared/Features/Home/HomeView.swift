@@ -284,10 +284,21 @@ private struct CatalogSearchView: View {
     let onSelect: (MediaDisplayItem) -> Void
     @State private var query = ""
     var body: some View {
-        CatalogHubView(hub: data.searchRow.hub, onSelect: onSelect)
-            .id(data.searchRow.hub)
-            .navigationTitle("tabs.search")
-            .searchable(text: $query, prompt: "Search movies and TV shows")
-            .task(id: query) { await data.search(query) }
+        VStack {
+            CatalogHubView(hub: data.searchRow.hub, onSelect: onSelect)
+                .id(data.searchRow.hub)
+            if data.isSearching {
+                ProgressView()
+            }
+            if data.hasMoreSearchResults, !data.isSearching {
+                Button("Load More") { Task { await data.searchMore() } }.padding()
+            }
+            if let error = data.errorMessage {
+                Text(error).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("tabs.search")
+        .searchable(text: $query, prompt: "Search movies and TV shows")
+        .task(id: query) { await data.search(query) }
     }
 }

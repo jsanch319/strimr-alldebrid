@@ -10,7 +10,7 @@
 
 My List uses Simkl's Plan to Watch bucket. Add/remove actions use the same token provider and write gate as existing scrobbling. Removing from Simkl uses its canonical history/remove endpoint, which also clears history and rating: the UI requires confirmation and describes this effect. Adding an existing watched title to Plan to Watch changes its Simkl status; no second watch-history write is made.
 
-Continue Watching Movies and Continue Watching TV Shows use Simkl saved-playback percentages, with local checkpoints as an offline cache. See the cross-device update below. Simkl next unwatched episodes appear in a separate Next Episodes row, without invented resume times. Watched episode indicators use Simkl's per-episode history. iOS catalog playback uses the existing PlayerWrapper/PlayerViewModel and a single TrackerPlaybackSession, including its existing watched-write retry queue. Server playback and the original AllDebrid library path remain available.
+The combined Continue Watching row uses Simkl saved-playback percentages, with local checkpoints as an offline cache. See the cross-device update below. Simkl next unwatched episodes appear in a separate Next Episodes row, without invented resume times. Watched episode indicators use Simkl's per-episode history. iOS catalog playback uses the existing PlayerWrapper/PlayerViewModel and a single TrackerPlaybackSession, including its existing watched-write retry queue. Server playback and the original AllDebrid library path remain available.
 
 ## Sync, matching, and persistence
 
@@ -29,7 +29,7 @@ HTTP-stub tests cover watchlist request shape, unresolved IDs, activity-gated sy
 
 The accessible checkout has only the two original PR #2 commits (`782b6b8`, `4aed664`) beyond base `121d700`. PR #2 originally changed seven files. All available local/remote branches and reflogs were inspected and `git fsck --full --no-reflogs --unreachable` found no additional commit objects. Workspace directories contained no other usable checkout, patch, or Git bundle. The repository's older build-check ZIP is a source archive, not the missing commit.
 
-At the initial audit, no SHA, patch, or accessible workspace for the reported 31-file commit was supplied. The later SHA check is recorded below. It could not be compared file-by-file or transferred. **The original changes were not recovered.** The missing capabilities reimplemented here are Simkl library read/sync and My List mutation, server-free Simkl account access, separate Continue Watching rails, strict catalog-to-AllDebrid matching, source selection, local resume persistence and player callbacks, and catalog scrobbling. No files were added to meet a count. If the original commit later becomes available, compare it against this branch before transferring any additional changes.
+At the initial audit, no SHA, patch, or accessible workspace for the reported 31-file commit was supplied. The later SHA check is recorded below. It could not be compared file-by-file or transferred. **The original changes were not recovered.** The missing capabilities reimplemented here are Simkl library read/sync and My List mutation, server-free Simkl account access, Continue Watching progress, strict catalog-to-AllDebrid matching, source selection, local resume persistence and player callbacks, and catalog scrobbling. No files were added to meet a count. If the original commit later becomes available, compare it against this branch before transferring any additional changes.
 
 ## Cross-device resume update
 
@@ -72,4 +72,32 @@ The only new Home controls are native search and account actions needed to confi
 
 AllDebrid saved links and magnet files also use the original native player; the catalog-specific AVPlayer screen and additional close-button overlay are removed. tvOS shares the existing recorder destination for local catalog streams without adding offline-server storage to tvOS. macOS receives a close-presentation callback so closing an AllDebrid sheet does not reset an unrelated player window. No playback settings, theme assets, control styling or layout metrics are changed.
 
-Validation compares the component tree and source against main: `CardProgressBar` is byte-for-byte unchanged, and player control, timeline styling, theme and layout-metric files are unchanged. Adapter tests verify separate native movie/TV rows, remaining-time fields, hero identities/preferences and direct artwork without a media server. Simulator screenshots and real-device visual/playback comparisons have not been performed in this Linux workspace; compilation/tests do not establish pixel-level or real-account behavior.
+Validation compares the component tree and source against main: `CardProgressBar` is byte-for-byte unchanged, and player control, timeline styling, theme and layout-metric files are unchanged. Adapter tests verify the combined native movie/TV row, remaining-time fields, hero identities/preferences and direct artwork without a media server. Simulator screenshots and real-device visual/playback comparisons have not been performed in this Linux workspace; compilation/tests do not establish pixel-level or real-account behavior.
+
+
+## Current requirements audit (combined Home and Streaming Services)
+
+The unavailable original commit cannot establish a file-by-file checklist. This audit instead compares the supplied original specification and later requirements with the accessible PR implementation. **None of the original 31-file commit is claimed recovered.**
+
+| Requirement | Current implementation |
+| --- | --- |
+| Original Home, hero, poster rows, colors, spacing and navigation | Shared original Home with a catalog data adapter; only Streaming Services has custom cards |
+| Continue Watching | One mixed movie/episode row, newest progress first, above Trending Movies; completed sessions excluded; original landscape cards, remaining-time labels and progress styling |
+| Remote resume and tracking | Simkl paused-playback snapshots, existing recorder/channel/player; local pending cache/outbox; pause/stop synchronization |
+| TMDb discovery | Trending/popular/top-rated movies and TV, upcoming movies, full details/seasons/episodes, recommendations and paginated multi-search |
+| Personalized rows | Recommended For You from up to two actual watched Simkl seeds, excluding existing library titles; unwatched movie/show rows from real non-completed Simkl entries; no synthetic personalization for an empty history |
+| My List and history | Simkl Plan to Watch read/add/remove, watched movie/episode state, next episodes, account-scoped delta/history sync |
+| AllDebrid | Existing authentication, library access, exact title/ID/year/episode matching, variant selection, fresh URL resolution, explicit unavailable state, original native player |
+| Streaming Services | Nine requested services; TMDb provider-list IDs/logos; real regional subscription discovery, Movies/TV filters, paginated native poster grid, existing details/source/player flow |
+| Credentials and rate limits | Device Keychain and existing secure tracker store; existing TMDb/Simkl cooldowns and error handling; no embedded keys |
+| Original media servers and Discord | Existing paths preserved; existing build variables/setup documentation retained |
+
+### Streaming Services setup and behavior
+
+Configure the TMDb read token using Home's accounts menu. Streaming Services exposes a country picker, initially using the device's region (US only when the device has none). That choice is stored on the device. The API uses `watch_region`, provider IDs returned by TMDb, `with_watch_monetization_types=flatrate`, and popularity sorting. Provider aliases include renamed brands and subscription tiers; IDs, poster titles and logos are not fabricated. Region-specific empty results are shown honestly. Catalog availability does not authorize playback from a streaming platform: playback still requires matching files already available in the user's AllDebrid library. TMDb/JustWatch attribution is visible below the cards.
+
+The previous Recently Added row has been removed from server-free Home; its files remain available in AllDebrid Library. Separate movie/TV Continue Watching rows have been replaced, per the latest requirement. Recommendations and unwatched rows use the unchanged native row components. Search supports explicit Load More; provider grids support Load More up to TMDb's 500-page limit.
+
+### Remaining verification and limits
+
+The referenced StreamUp screenshot was not attached to this workspace, so the custom cards follow the written description; a screenshot-level comparison remains unverified. Physical-device layout, real service logos/catalog availability, real-account authorization, actual AllDebrid playback, and two-Apple-device Simkl resume require live manual verification. Automated request/model/player tests and compilation cannot establish those outcomes. Simkl's percentage/retention/mapping limitations above remain applicable. Unmapped anime and unfinished titles absent from Simkl's paused-playback API cannot receive invented cross-device timestamps. TMDb branding currently uses textual attribution; approval of a final TMDb logo asset remains unfinished.

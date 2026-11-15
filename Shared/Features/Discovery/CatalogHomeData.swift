@@ -18,6 +18,11 @@ final class CatalogHomeData {
     private(set) var links: [AllDebridSavedLink] = []
     private(set) var errorMessage: String?
     private(set) var searchResults: [TMDBTitle] = []
+    private(set) var recommendations: [TMDBTitle] = []
+    private(set) var isSearching = false
+    private(set) var hasMoreSearchResults = false
+    private var searchPage = 0
+    private var searchQuery = ""
     private let discovery: DiscoveryStore
     private let progress: CatalogProgressStore
     init(
@@ -82,6 +87,21 @@ final class CatalogHomeData {
                 resume: nil,
             ) },
         ))
+        rows.append(Self.row(id: "catalog:recommended", title: "Recommended For You", items: recommendations.map {
+            CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil)
+        }))
+        for kind in [TMDBTitle.Kind.movie, .tv] {
+            let unwatched = discovery.entries.filter { entry in
+                entry.kind == kind && entry.status != "completed" && entry.status != "dropped"
+                    && (kind == .movie || (entry.watched_episodes_count ?? 0) == 0)
+            }.compactMap { discovery.title(for: $0) }
+            rows.append(Self.row(
+                id: "catalog:unwatched:\(kind.rawValue)",
+                title: kind == .movie ? "Unwatched Movies" : "Unwatched TV Shows",
+                items: unwatched
+                    .map { CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil) },
+            ))
+        }
         for feed in TMDBClient.Feed.allCases {
             rows.append(Self.row(
                 id: "catalog:\(feed.id)",
@@ -127,7 +147,7 @@ final class CatalogHomeData {
                 episode: record.episode,
             )
         }
-        for title in feeds.values.flatMap(\.self) + searchResults + discovery.entries
+        for title in feeds.values.flatMap(\.self) + searchResults + recommendations + discovery.entries
             .compactMap({ discovery.title(for: $0) })
         {
             if title.catalogID == media.id {
@@ -168,6 +188,19 @@ final class CatalogHomeData {
     func load(force: Bool = false) async {
         errorMessage = nil
         await discovery.sync(force: force)
+        recommendations = []
+        // Personalization comes only from this account's actual watch history, never synthetic seeds.
+        let seeds = discovery.entries.filter { $0.status == "completed" || $0.last_watched_at != nil }
+            .sorted { ($0.last_watched_at ?? "") > ($1.last_watched_at ?? "") }.prefix(2)
+        let known = Set(discovery.entries.compactMap(\.catalogID))
+        var seen = known
+        for entry in seeds {
+            guard let title = discovery.title(for: entry) else { continue }
+            do {
+                let results = try await TMDBClient.shared.recommendations(title)
+                recommendations += results.filter { seen.insert($0.catalogID).inserted }
+            } catch { errorMessage = error.localizedDescription }
+        }
         if !loaded || force {
             do {
                 for feed in TMDBClient.Feed.allCases {
@@ -185,14 +218,41 @@ final class CatalogHomeData {
     }
 
     func search(_ query: String) async {
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { searchResults = []; return }
+        searchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchResults = []; searchPage = 0; hasMoreSearchResults = false
+        guard !searchQuery.isEmpty else { isSearching = false; return }
+        let requested = searchQuery
         do {
+            isSearching = true
             try await Task.sleep(for: .milliseconds(350))
-            let results = try await TMDBClient.shared.search(query)
             try Task.checkCancellation()
-            searchResults = results
+            await searchMore(query: requested)
         } catch {
-            if !Task.isCancelled {
+            if requested == searchQuery {
+                isSearching = false
+            }
+        }
+    }
+
+    func searchMore(query: String? = nil) async {
+        let requested = query ?? searchQuery
+        guard !requested.isEmpty, requested == searchQuery else { return }
+        isSearching = true
+        defer {
+            if requested == searchQuery {
+                isSearching = false
+            }
+        }
+        do {
+            let result = try await TMDBClient.shared.search(requested, page: searchPage + 1)
+            try Task.checkCancellation()
+            guard requested == searchQuery else { return }
+            var seen = Set(searchResults.map(\.catalogID))
+            searchResults += result.filter { seen.insert($0.catalogID).inserted }
+            searchPage += 1
+            hasMoreSearchResults = !result.isEmpty && searchPage < 500
+        } catch {
+            if !Task.isCancelled, requested == searchQuery {
                 errorMessage = error.localizedDescription
             }
         }
