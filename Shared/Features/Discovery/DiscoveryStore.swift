@@ -92,9 +92,9 @@ final class DiscoveryStore {
     private let coordinator: TrackerCoordinator
     private let tmdb: TMDBClient
     private var syncTask: Task<Void, Never>?
-    init(defaults: UserDefaults = .standard, coordinator: TrackerCoordinator = .shared, tmdb: TMDBClient = .shared) {
+    init(defaults: UserDefaults = .standard, coordinator: TrackerCoordinator? = nil, tmdb: TMDBClient = .shared) {
         self.defaults = defaults
-        self.coordinator = coordinator
+        self.coordinator = coordinator ?? .shared
         self.tmdb = tmdb
     }
 

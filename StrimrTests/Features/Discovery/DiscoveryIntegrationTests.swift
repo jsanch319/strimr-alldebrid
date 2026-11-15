@@ -112,14 +112,15 @@ struct DiscoveryIntegrationTests {
         let coordinator = TrackerCoordinator(
             store: accounts,
             queue: TrackerWriteQueue(userDefaults: defaults),
-        ) { _, session, updated, invalidated in
-            SimklClient(
-                session: session,
-                http: TrackerHTTP(session: stub.session),
-                onUpdated: updated,
-                onInvalidated: invalidated,
-            )
-        }
+            makeClient: { _, session, updated, invalidated in
+                SimklClient(
+                    session: session,
+                    http: TrackerHTTP(session: stub.session),
+                    onUpdated: updated,
+                    onInvalidated: invalidated,
+                )
+            },
+        )
         coordinator.activate(profileID: "alice")
         await coordinator.connect(.simkl, session: TrackerFixtures.session)
         let tmdb = TMDBClient(session: stub.session, tokenProvider: { nil })
@@ -129,9 +130,20 @@ struct DiscoveryIntegrationTests {
         let pulls = stub.requests.filter { $0.url?.path.contains("all-items") == true }.count
         await store.sync(force: true)
         #expect(stub.requests.filter { $0.url?.path.contains("all-items") == true }.count == pulls)
+        stub.respond { request in
+            if request.url?
+                .path == "/sync/add-to-list"
+            {
+                return .json(#"{"added":{"movies":[{}]},"not_found":{"movies":[]}}"#)
+            }
+            return .json(#"{"all":"2026-11-15T00:00:00Z","movies":{"all":"2026-11-15T00:00:00Z"}}"#)
+        }
+        try await store.setPlanned(.reference(id: 13, kind: .movie, title: "Another Movie"), planned: true)
+        #expect(store.planned.count == 2)
+        #expect(stub.requests.filter { $0.url?.path.contains("all-items") == true }.count == pulls)
         stub.respond { _ in .status(503) }
         await store.sync(force: true)
-        #expect(store.planned.count == 1)
+        #expect(store.planned.count == 2)
         #expect(store.errorMessage != nil)
         coordinator.activate(profileID: "bob")
         await store.sync(force: true)
