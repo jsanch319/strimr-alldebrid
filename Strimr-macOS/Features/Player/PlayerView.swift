@@ -47,6 +47,7 @@ struct PlayerWindowView: View {
 }
 
 struct PlayerView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismissWindow) private var dismissWindow
     @Environment(\.openWindow) private var openWindow
     @Environment(SessionManager.self) private var sessionManager
@@ -271,6 +272,11 @@ struct PlayerView: View {
             TapGesture(count: 2)
                 .onEnded { toggleFullScreen() },
         )
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                viewModel.saveProgress()
+            }
+        }
         .background(.black)
         .background {
             PlayerWindowReader { window in
@@ -1513,7 +1519,7 @@ struct PlayerView: View {
             fallBackToServerTranscode(after: error)
         }
         playerController.onMediaLoaded = {
-            if viewModel.resumesFromRemotePercentage {
+            if viewModel.awaitsCatalogResume {
                 viewModel.handlePlaybackDuration(playerController.duration)
                 applyCatalogResumeIfReady()
             }
@@ -1581,10 +1587,15 @@ struct PlayerView: View {
     }
 
     private func applyCatalogResumeIfReady() {
-        guard viewModel.resumesFromRemotePercentage, !appliedCatalogResume,
+        guard viewModel.awaitsCatalogResume, !appliedCatalogResume,
               let position = viewModel.resumePosition, position > 0, loadedURL != nil else { return }
         appliedCatalogResume = true
-        Task { await playerController.seekAfterReady(to: position) }
+        let currentURL = loadedURL
+        Task {
+            await playerController.seekAfterReady(to: position)
+            guard loadedURL == currentURL else { return }
+            viewModel.completeInitialCatalogResume()
+        }
     }
 
     private func startPlaybackIfNeeded(_ url: URL?) {
@@ -1801,6 +1812,7 @@ struct PlayerView: View {
     }
 
     private func handlePlaybackError(_ message: String) async {
+        viewModel.saveProgress()
         // The engine can fail on a read from the lost server before the buffer runs out, while it is not stalled yet.
         if isStreamingServerMarkedUnreachable, handleStreamingServerLost() {
             return

@@ -60,7 +60,7 @@ struct SimklResumeTests {
         #expect(PlaybackProgressConflict.position(percentage: 40, duration: nil) == nil)
     }
 
-    @Test func `remote rewind replaces acknowledged cache and remote clear removes Continue Watching`() async throws {
+    @Test func `older remote pause and expiry preserve acknowledged exact local seconds`() async throws {
         let cache = CatalogProgressStore(defaults: TestDefaults.make())
         let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
         cache.save(title: title, episode: nil, position: 700, duration: 1000, finished: false, scope: "a")
@@ -75,7 +75,7 @@ struct SimklResumeTests {
             tmdb: metadata(),
             replay: { _, _, _ in Issue.record("Synchronized cache must not be uploaded"); return false },
         )
-        #expect(cache.records(scope: "a").first?.position == 200)
+        #expect(cache.records(scope: "a").first?.position == 700)
         _ = try await cache.reconcile(
             paused: [],
             entries: [],
@@ -84,7 +84,7 @@ struct SimklResumeTests {
             tmdb: metadata(),
             replay: { _, _, _ in false },
         )
-        #expect(cache.records(scope: "a").isEmpty)
+        #expect(cache.records(scope: "a").first?.position == 700)
     }
 
     @Test func `newer offline checkpoint is replayed once and newer remote wins without upload`() async throws {
@@ -135,7 +135,7 @@ struct SimklResumeTests {
             tmdb: metadata(),
             replay: { _, _, _ in Issue.record("Newer watched history must win"); return false },
         )
-        #expect(cache.records(scope: "a").isEmpty)
+        #expect(cache.records(scope: "a").first?.completed == true)
     }
 
     @Test func `shared recorder supplies checkpoints and preserves late partial playback until completion`() {
@@ -189,6 +189,180 @@ struct SimklResumeTests {
         #expect(model.resumePosition == 2880)
         model.handlePlaybackDuration(6000)
         #expect(model.resumePosition == 2400)
+    }
+
+    @Test func `exact fractional seconds survive acknowledgement relaunch and expired Simkl sessions`() async throws {
+        let defaults = TestDefaults.make()
+        let cache = CatalogProgressStore(defaults: defaults)
+        let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        let recorder = cache.makeRecorder(title: title, episode: nil, scope: "a")
+        recorder.record(position: 125.75, duration: 1000.5, isPaused: false)
+        recorder.stop(position: 126.125)
+        cache.acknowledge(
+            TrackerPlaybackReport(
+                event: .stop,
+                item: TrackerItem(kind: .movie, ids: title.matchingIDs),
+                progress: 12.6,
+                date: Date(),
+            ),
+            scope: "a",
+        )
+        let relaunched = CatalogProgressStore(defaults: defaults)
+        _ = try await relaunched.reconcile(
+            paused: [],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in Issue.record("Acknowledged progress must not replay"); return false },
+        )
+        let record = try #require(relaunched.progress(title: title, episode: nil, scope: "a"))
+        #expect(record.resumeOffset == 126.125)
+        #expect(record.duration == 1000.5)
+        #expect(record.resumePercentage == nil)
+        #expect(record.fraction == 126.125 / 1000.5)
+        #expect(record.localCheckpoint?.updatedAt == record.updatedAt)
+        #expect(relaunched.records(scope: "other-account").isEmpty)
+    }
+
+    @Test func `Simkl is a duration-based fallback until this device actually plays`() async throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        _ = try await cache.reconcile(
+            paused: [pause(percent: 32.5)],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in false },
+        )
+        let saved = try #require(cache.records(scope: "a").first)
+        #expect(saved.resumeOffset == nil)
+        #expect(saved.resumePercentage == 32.5)
+        let model = try PlayerViewModel(
+            localMedia: CatalogMediaAdapter.make(title: saved.title, episode: nil, resume: nil),
+            localPlaybackURL: #require(URL(string: "https://example.com/movie.mp4")),
+            catalogRecorder: cache.makeRecorder(title: saved.title, episode: nil, scope: "a"),
+            catalogResumePercentage: saved.resumePercentage,
+        )
+        model.handlePlaybackDuration(2000)
+        #expect(model.resumePosition == 650)
+        model.handlePlaybackPosition(1, isScrubbing: false)
+        #expect(cache.progress(title: saved.title, episode: nil, scope: "a")?.resumeOffset == nil)
+        model.completeInitialCatalogResume()
+        model.handlePlaybackPosition(650.25, isScrubbing: false)
+        model.saveProgress()
+        #expect(cache.progress(title: saved.title, episode: nil, scope: "a")?.resumeOffset == 650.25)
+    }
+
+    @Test func `exact resume waits for readiness and checkpoints buffering interruptions`() throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        cache.save(title: title, episode: nil, position: 600.125, duration: 2000, finished: false, scope: "a")
+        let model = try PlayerViewModel(
+            localMedia: CatalogMediaAdapter.make(title: title, episode: nil, resume: 600.125),
+            localPlaybackURL: #require(URL(string: "https://example.com/movie.mp4")),
+            catalogRecorder: cache.makeRecorder(title: title, episode: nil, scope: "a"),
+        )
+        #expect(model.resumePosition == 600.125)
+        model.handlePlaybackPosition(2, isScrubbing: false)
+        model.saveProgress()
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.position == 600.125)
+        model.handlePlaybackDuration(2000)
+        model.completeInitialCatalogResume()
+        model.handlePlaybackPosition(610.375, isScrubbing: false)
+        model.handlePlaybackState(isPaused: false, isBuffering: true)
+        model.saveProgress()
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 610.375)
+        model.handleStop()
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 610.375)
+    }
+
+    @Test func `completion clear and restart fence off stale pauses without sharing episode positions`() async throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let movie = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        let show = TMDBTitle.reference(id: 12, kind: .tv, title: "Show")
+        let episode = try decode(TMDBEpisode.self, #"{"id":1,"season_number":2,"episode_number":3,"name":"Episode"}"#)
+        let next = try decode(TMDBEpisode.self, #"{"id":2,"season_number":2,"episode_number":4,"name":"Next"}"#)
+        cache.save(title: show, episode: episode, position: 200.5, duration: 1000, finished: false, scope: "a")
+        cache.save(title: show, episode: next, position: 300.25, duration: 1000, finished: false, scope: "a")
+        cache.save(title: movie, episode: nil, position: 1000, duration: 1000, finished: true, scope: "a")
+        _ = try await cache.reconcile(
+            paused: [pause(date: "2000-01-01T00:00:00Z")],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in true },
+        )
+        #expect(cache.progress(title: movie, episode: nil, scope: "a")?.completed == true)
+        cache.restart(title: movie, episode: nil, scope: "a")
+        _ = try await cache.reconcile(
+            paused: [pause(date: "2000-01-01T00:00:00Z")],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in true },
+        )
+        #expect(cache.progress(title: movie, episode: nil, scope: "a")?.resumeOffset == 0)
+        #expect(cache.progress(title: show, episode: episode, scope: "a")?.resumeOffset == 200.5)
+        #expect(cache.progress(title: show, episode: next, scope: "a")?.resumeOffset == 300.25)
+        cache.clear(title: movie, episode: nil, scope: "a")
+        _ = try await cache.reconcile(
+            paused: [pause(date: "2000-01-01T00:00:00Z")],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in Issue.record("Cleared progress must not upload"); return false },
+        )
+        #expect(cache.progress(title: movie, episode: nil, scope: "a")?.locallyCleared == true)
+        #expect(cache.progress(title: movie, episode: nil, scope: "a")?.resumeOffset == nil)
+    }
+
+    @Test func `progress recorded during a network replay cannot be overwritten by its acknowledgement`() async throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        cache.save(title: title, episode: nil, position: 100, duration: 1000, finished: false, scope: "a")
+        _ = try await cache.reconcile(
+            paused: [],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in
+                cache.save(title: title, episode: nil, position: 200.125, duration: 1000, finished: false, scope: "a")
+                return true
+            },
+        )
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 200.125)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.pendingSync == true)
+    }
+
+    @Test func `unfinished checkpoints are not evicted by a library size cap`() throws {
+        let defaults = TestDefaults.make()
+        let cache = CatalogProgressStore(defaults: defaults)
+        cache.save(
+            title: .reference(id: 1, kind: .movie),
+            episode: nil,
+            position: 5.5,
+            duration: 100,
+            finished: false,
+            scope: "a",
+        )
+        let seed = try #require(cache.records(scope: "a").first)
+        cache.replace((1 ... 1005).map { id in
+            CatalogProgress(
+                title: .reference(id: id, kind: .movie),
+                episode: nil,
+                position: seed.position,
+                duration: seed.duration,
+                completed: false,
+                updatedAt: seed.updatedAt,
+                localCheckpoint: seed.localCheckpoint,
+            )
+        }, scope: "a")
+        #expect(CatalogProgressStore(defaults: defaults).records(scope: "a").count == 1005)
     }
 
     @Test func `Simkl saved playback reads are authenticated and catalog min_progress is in URL`() async throws {

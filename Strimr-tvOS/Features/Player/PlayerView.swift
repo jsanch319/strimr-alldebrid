@@ -1258,7 +1258,12 @@ struct PlayerView: View {
         guard !sharePlayCoordinator.isInSession, viewModel.shouldResumeFromOffset, !appliedResumeOffset,
               let offset = viewModel.resumePosition, offset > 0 else { return }
         appliedResumeOffset = true
-        playerController.seek(to: offset)
+        let loadedURL = activePlaybackURL
+        Task {
+            await playerController.seekAfterReady(to: offset)
+            guard activePlaybackURL == loadedURL else { return }
+            viewModel.completeInitialCatalogResume()
+        }
     }
 
     private func handleMediaLoaded() {
@@ -1423,11 +1428,12 @@ struct PlayerView: View {
     private func handleScenePhaseChange(_ scenePhase: ScenePhase) {
         switch scenePhase {
         case .background:
+            viewModel.saveProgress()
             preparePlaybackForBackground()
         case .active:
             reloadPlaybackAfterBackgroundIfNeeded()
         case .inactive:
-            break
+            viewModel.saveProgress()
         @unknown default:
             break
         }
@@ -1796,6 +1802,7 @@ struct PlayerView: View {
     }
 
     private func handlePlaybackError(_ message: String) async {
+        viewModel.saveProgress()
         guard !isRecoveringServerAccess else { return }
         isRecoveringServerAccess = true
         defer { isRecoveringServerAccess = false }

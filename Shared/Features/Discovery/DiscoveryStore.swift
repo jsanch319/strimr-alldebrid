@@ -11,6 +11,40 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
     var pendingSync: Bool?
     var checkpointEvent: String?
     var updatedAt: Date
+    /// Last device-recorded timestamp, retained even when a newer remote session is selected.
+    struct ExactCheckpoint: Codable, Sendable {
+        let position: Double
+        let duration: Double?
+        let updatedAt: Date
+    }
+
+    var localCheckpoint: ExactCheckpoint?
+    var locallyCleared: Bool?
+
+    var exactCheckpoint: ExactCheckpoint? {
+        if let localCheckpoint {
+            return localCheckpoint
+        }
+        // Migrate checkpoints written before source provenance was recorded.
+        guard checkpointEvent != nil || remotePercentage == nil else { return nil }
+        return ExactCheckpoint(position: position, duration: duration, updatedAt: updatedAt)
+    }
+
+    var usesExactPosition: Bool {
+        guard let checkpoint = exactCheckpoint else { return false }
+        return checkpoint.position.isFinite && checkpoint.position >= 0 && checkpoint.updatedAt >= updatedAt
+    }
+
+    var resumeOffset: Double? {
+        guard !completed, locallyCleared != true, usesExactPosition else { return nil }
+        return exactCheckpoint?.position
+    }
+
+    var resumePercentage: Double? {
+        guard !completed, locallyCleared != true, !usesExactPosition else { return nil }
+        return remotePercentage
+    }
+
     var id: String {
         Self.key(title: title, episode: episode)
     }
@@ -20,7 +54,7 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
     }
 
     var fraction: Double {
-        if let remotePercentage, pendingSync != true {
+        if let remotePercentage, !usesExactPosition {
             return remotePercentage / 100
         }
         guard let duration, duration > 0 else { return 0 }; return min(1, position / duration)
@@ -63,6 +97,7 @@ final class CatalogProgressStore {
         if protectInitialZero, position < 1, previous?.position ?? 0 > 1, !finished {
             return
         }
+        let now = Date()
         let record = CatalogProgress(
             title: title,
             episode: episode,
@@ -72,12 +107,38 @@ final class CatalogProgressStore {
             remotePercentage: nil,
             pendingSync: true,
             checkpointEvent: event,
-            updatedAt: Date(),
+            updatedAt: now,
+            localCheckpoint: .init(position: position, duration: validDuration ?? previous?.duration, updatedAt: now),
+            locallyCleared: false,
         )
         var records = records(scope: scope).filter { $0.id != record.id }
         records.insert(record, at: 0)
-        defaults.set(try? JSONEncoder().encode(Array(records.prefix(1000))), forKey: "strimr.catalog.progress.\(scope)")
+        defaults.set(try? JSONEncoder().encode(records), forKey: "strimr.catalog.progress.\(scope)")
         revision += 1
+    }
+
+    /// A zero-position checkpoint fences off older remote pauses before a deliberate replay begins.
+    func restart(title: TMDBTitle, episode: TMDBEpisode?, scope: String) {
+        save(
+            title: title,
+            episode: episode,
+            position: 0,
+            duration: progress(title: title, episode: episode, scope: scope)?.duration,
+            finished: false,
+            scope: scope,
+            event: "restart",
+            protectInitialZero: false,
+        )
+    }
+
+    func clear(title: TMDBTitle, episode: TMDBEpisode?, scope: String) {
+        restart(title: title, episode: episode, scope: scope)
+        var all = records(scope: scope)
+        guard let index = all.firstIndex(where: { $0.id == CatalogProgress.key(title: title, episode: episode) })
+        else { return }
+        all[index].locallyCleared = true
+        all[index].pendingSync = false
+        replace(all, scope: scope)
     }
 
     private var activeKeys: Set<String> = []
@@ -91,7 +152,7 @@ final class CatalogProgressStore {
 
     func replace(_ records: [CatalogProgress], scope: String) {
         defaults.set(
-            try? JSONEncoder().encode(Array(records.sorted { $0.updatedAt > $1.updatedAt }.prefix(1000))),
+            try? JSONEncoder().encode(records.sorted { $0.updatedAt > $1.updatedAt }),
             forKey: "strimr.catalog.progress.\(scope)",
         )
         revision += 1
@@ -116,7 +177,7 @@ final class CatalogProgressStore {
             resumePosition: { [weak self] in
                 guard let record = self?.progress(title: title, episode: episode, scope: scope),
                       !record.completed else { return nil }
-                return record.position > 0 ? record.position : nil
+                return record.resumeOffset
             },
             checkpoint: { [weak self] position, duration, event in
                 self?.save(
@@ -351,11 +412,11 @@ final class DiscoveryStore {
 }
 
 extension CatalogProgressStore {
-    /// Reconciles a complete Simkl snapshot. An acknowledged local cache never outranks the remote service.
-    /// Only newer unsent checkpoints can be replayed; remote clears and rewinds replace synchronized cache.
+    /// Shares the server journal's newest-change conflict rule, while retaining device checkpoints
+    /// when Simkl expires a paused session. Remote absence is not an instruction to delete local progress.
     func reconcile(
         paused: [SimklPausedPlayback], entries: [SimklListEntry], scope: String,
-        activities: SimklActivities, tmdb: TMDBClient,
+        activities _: SimklActivities, tmdb: TMDBClient,
         isCurrent: () -> Bool = { true },
         replay: (TrackerItem, Double, Date) async -> Bool,
     ) async -> (replayed: Bool, unmapped: Int) {
@@ -428,13 +489,15 @@ extension CatalogProgressStore {
                 pendingSync: false,
                 checkpointEvent: nil,
                 updatedAt: date,
+                localCheckpoint: cached?.completed == false ? cached?.exactCheckpoint : nil,
+                locallyCleared: false,
             )
             if resolved[record.id].map({ $0.updatedAt < date }) ?? true {
                 resolved[record.id] = record
             }
         }
         var replayed = false
-        for record in local {
+        for record in records(scope: scope) {
             guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
             if isActive(record, scope: scope) {
                 resolved[record.id] = record; continue
@@ -450,15 +513,34 @@ extension CatalogProgressStore {
                 watchedDate = (library?.status == "completed" ? library?.last_watched_at : nil)
                     .flatMap(PlaybackProgressConflict.date)
             }
-            let activityDate = (record.title.kind == .movie ? activities.movies?.playback : activities.tv_shows?
-                .playback).flatMap(PlaybackProgressConflict.date)
-            let remoteDate = resolved[record.id]?.updatedAt ?? [activityDate, watchedDate].compactMap(\.self).max()
+            let remoteDate = resolved[record.id]?.updatedAt
+            // Only explicit watched history completes a title. Global playback activity and a
+            // missing pause cannot distinguish expiry, another title, or a completed session.
+            if let watchedDate, watchedDate > record.updatedAt,
+               remoteDate.map({ watchedDate >= $0 }) ?? true
+            {
+                var completed = record
+                completed.completed = true; completed.pendingSync = false
+                completed.remotePercentage = 100; completed.updatedAt = watchedDate
+                completed.checkpointEvent = "watched"
+                resolved[record.id] = completed
+                continue
+            }
+            if let remoteDate, remoteDate > record.updatedAt {
+                // Keep the precise checkpoint as provenance, but select this newer cross-device session.
+                continue
+            }
+            let hasLocalState = record.exactCheckpoint != nil || record.completed || record.locallyCleared == true
+            guard hasLocalState || remoteDate != nil else { continue }
+            if record.locallyCleared == true || record.completed && record.pendingSync != true {
+                resolved[record.id] = record; continue
+            }
             guard PlaybackProgressConflict.prefersLocal(
-                localDate: record.updatedAt,
-                isPending: record.pendingSync ?? !record.completed,
-                remoteDate: remoteDate,
-            ) else { continue }
-            guard let item = record.title.trackerItem(episode: record.episode),
+                      localDate: record.updatedAt,
+                      isPending: record.pendingSync ?? !record.completed,
+                      remoteDate: remoteDate,
+                  ),
+                  let item = record.title.trackerItem(episode: record.episode),
                   record.completed || record.duration.map({ $0 > 0 }) == true
             else {
                 resolved[record.id] = record; continue
@@ -469,7 +551,14 @@ extension CatalogProgressStore {
             if delivered {
                 updated.pendingSync = false; updated.remotePercentage = percent; replayed = true
             }
-            resolved[record.id] = updated
+            // Recording can continue while the shared network channel is awaited.
+            if let current = progress(title: record.title, episode: record.episode, scope: scope),
+               current.updatedAt > record.updatedAt
+            {
+                resolved[record.id] = current
+            } else {
+                resolved[record.id] = updated
+            }
         }
         guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
         replace(Array(resolved.values), scope: scope)

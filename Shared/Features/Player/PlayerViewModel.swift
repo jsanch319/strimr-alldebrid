@@ -238,6 +238,13 @@ final class PlayerViewModel {
     @ObservationIgnored private var trackerSession: TrackerPlaybackSession?
     @ObservationIgnored private var catalogResumePercentage: Double?
     @ObservationIgnored private var isCatalogPlayback = false
+    private(set) var awaitsCatalogResume = false
+
+    /// Called by the original platform player after its ready-to-seek operation completes.
+    func completeInitialCatalogResume() {
+        awaitsCatalogResume = false
+    }
+
     @ObservationIgnored private var lastTimelineSentAt: Date?
     @ObservationIgnored private var lastTimelineState: TimelineState?
     @ObservationIgnored private let ratingKey: String
@@ -358,6 +365,8 @@ final class PlayerViewModel {
         progressRecorder = recorder
         self.catalogResumePercentage = resumes ? catalogResumePercentage : nil
         isCatalogPlayback = catalogRecorder != nil
+        awaitsCatalogResume = isCatalogPlayback && resumes &&
+            ((resumePosition ?? 0) > 0 || (catalogResumePercentage ?? 0) > 0)
         if let catalogTrackerItem {
             trackerSession = TrackerCoordinator.shared.beginCatalogPlayback(
                 item: catalogTrackerItem,
@@ -863,12 +872,17 @@ final class PlayerViewModel {
     }
 
     func saveProgress() {
-        guard !isLivePlayback else { return }
+        guard !isLivePlayback, !awaitsCatalogResume else { return }
+        if isCatalogPlayback {
+            // A lifecycle checkpoint must also persist while buffering or interrupted.
+            progressRecorder?.record(position: position, duration: duration ?? media?.duration, isPaused: isPaused)
+            return
+        }
         reportTimeline(state: playbackState, force: true)
     }
 
     func handlePlaybackPosition(_ position: Double, isScrubbing: Bool) {
-        guard !isScrubbing else { return }
+        guard !isScrubbing, !awaitsCatalogResume else { return }
         guard position.isFinite, position >= 0 else {
             ErrorReporter.capture(PlayerProgressInputError.invalidPosition)
             return
@@ -906,7 +920,9 @@ final class PlayerViewModel {
 
     func handleStop() {
         if isCatalogPlayback {
-            progressRecorder?.stop(position: position, pushesImmediately: false)
+            if !awaitsCatalogResume {
+                progressRecorder?.stop(position: position, pushesImmediately: false)
+            }
             trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
             return
         }
@@ -991,6 +1007,7 @@ final class PlayerViewModel {
 
     func markPlaybackFinished() async {
         if isCatalogPlayback {
+            guard !awaitsCatalogResume else { return }
             progressRecorder?.finish(pushesImmediately: false)
             trackerSession?.finished()
             return
@@ -1291,7 +1308,8 @@ final class PlayerViewModel {
     }
 
     private func reportTimeline(state: TimelineState, force: Bool = false) {
-        guard liveSession != nil || (mediaServices != nil && playbackPlan != nil) || hasProgressRecorder else { return }
+        guard !awaitsCatalogResume,
+              liveSession != nil || (mediaServices != nil && playbackPlan != nil) || hasProgressRecorder else { return }
         let now = Date()
         let stateChanged = lastTimelineState != state
         let intervalElapsed = lastTimelineSentAt.map {

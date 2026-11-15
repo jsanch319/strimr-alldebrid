@@ -1334,7 +1334,7 @@ struct PlayerView: View {
             }
             restoresAutomaticRotationOnReturn = false
         case .inactive:
-            break
+            viewModel.saveProgress()
         @unknown default:
             break
         }
@@ -1666,6 +1666,7 @@ struct PlayerView: View {
         Task {
             await playerController.seekAfterReady(to: resume)
             guard activePlaybackURL == loadedURL else { return }
+            viewModel.completeInitialCatalogResume()
             finishMediaLoad()
         }
     }
@@ -1693,6 +1694,7 @@ struct PlayerView: View {
             Task {
                 await playerController.seekAfterReady(to: resumePosition)
                 guard activePlaybackURL == loadedURL else { return }
+                viewModel.completeInitialCatalogResume()
                 finishMediaLoad()
             }
             return
@@ -1851,7 +1853,7 @@ struct PlayerView: View {
         case .active:
             reloadPlaybackAfterBackgroundIfNeeded()
         case .inactive:
-            break
+            viewModel.saveProgress()
         @unknown default:
             break
         }
@@ -2166,6 +2168,7 @@ struct PlayerView: View {
     }
 
     private func handlePlaybackError(_ message: String) async {
+        viewModel.saveProgress()
         // The engine can fail on a read from the lost server before the buffer runs out, while it is not stalled yet.
         if isStreamingServerMarkedUnreachable, handleStreamingServerLost() {
             return

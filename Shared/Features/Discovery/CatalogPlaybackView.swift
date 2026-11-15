@@ -26,7 +26,9 @@ struct CatalogSourcesView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let progress, !progress.completed, progress.fraction > 0 || progress.position > 0 {
+                if let progress, !progress.completed, progress.locallyCleared != true,
+                   progress.fraction > 0 || progress.position > 0
+                {
                     Toggle(isOn: $resumes) {
                         Text("Resume playback")
                         if let remaining = RemainingTimeFormatter.text(
@@ -58,6 +60,16 @@ struct CatalogSourcesView: View {
                 {
                     Text(warning).font(.footnote).foregroundStyle(.secondary)
                 }
+                if progress != nil {
+                    Button("Clear Saved Resume Position", role: .destructive) {
+                        CatalogProgressStore.shared.clear(
+                            title: title,
+                            episode: episode,
+                            scope: DiscoveryStore.shared.scope,
+                        )
+                        resumes = false
+                    }.disabled(loading)
+                }
                 Button("Refresh Available Files") { Task { await load() } }.disabled(loading)
             }
             .navigationTitle("Select Source")
@@ -71,9 +83,9 @@ struct CatalogSourcesView: View {
                 CatalogPlayerView(
                     title: title,
                     episode: episode,
+                    scope: request.scope,
                     url: request.url,
                     subtitles: request.subtitles,
-                    scope: request.scope,
                     resumes: resumes,
                 )
             }
@@ -125,6 +137,10 @@ struct CatalogSourcesView: View {
                 []
             }
             guard DiscoveryStore.shared.scope == scope else { throw TrackerAPIError.unavailable }
+            try Task.checkCancellation()
+            if !resumes || progress?.completed == true {
+                CatalogProgressStore.shared.restart(title: title, episode: episode, scope: scope)
+            }
             request = Request(url: resolved.url, subtitles: subtitles, scope: scope)
         } catch { self.error = error.localizedDescription }
     }
@@ -135,33 +151,33 @@ private struct CatalogPlayerView: View {
     let title: TMDBTitle
     let episode: TMDBEpisode?
     let scope: String
-    @State private var viewModel: PlayerViewModel
-
-    init(
-        title: TMDBTitle,
-        episode: TMDBEpisode?,
-        url: URL,
-        subtitles: [ExternalSubtitleTrack],
-        scope: String,
-        resumes: Bool,
-    ) {
-        self.title = title; self.episode = episode; self.scope = scope
-        let saved = CatalogProgressStore.shared.progress(title: title, episode: episode, scope: scope)
-        let offset = resumes && saved?.completed != true ? saved?.position ?? 0 : 0
-        let percentage = resumes && saved?.completed != true && saved?.pendingSync == false ? saved?
-            .remotePercentage : nil
-        _viewModel = State(initialValue: PlayerViewModel(
-            localMedia: CatalogMediaAdapter.make(title: title, episode: episode, resume: offset > 0 ? offset : nil),
-            localPlaybackURL: url, localExternalSubtitles: subtitles, resumes: resumes,
-            catalogTrackerItem: title.trackerItem(episode: episode),
-            catalogRecorder: CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope),
-            catalogResumePercentage: percentage,
-        ))
-    }
+    let url: URL
+    let subtitles: [ExternalSubtitleTrack]
+    let resumes: Bool
+    @State private var viewModel: PlayerViewModel?
 
     var body: some View {
-        NativePlaybackView(viewModel: viewModel)
-            .onDisappear { CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope) }
+        Group {
+            if let viewModel {
+                NativePlaybackView(viewModel: viewModel)
+            } else {
+                ProgressView()
+            }
+        }
+        .task {
+            // A SwiftUI value-view reconstruction must not start another tracking session.
+            guard viewModel == nil else { return }
+            let saved = CatalogProgressStore.shared.progress(title: title, episode: episode, scope: scope)
+            let offset = resumes ? saved?.resumeOffset ?? 0 : 0
+            viewModel = PlayerViewModel(
+                localMedia: CatalogMediaAdapter.make(title: title, episode: episode, resume: offset > 0 ? offset : nil),
+                localPlaybackURL: url, localExternalSubtitles: subtitles, resumes: resumes,
+                catalogTrackerItem: title.trackerItem(episode: episode),
+                catalogRecorder: CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope),
+                catalogResumePercentage: resumes ? saved?.resumePercentage : nil,
+            )
+        }
+        .onDisappear { CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope) }
     }
 }
 

@@ -97,8 +97,10 @@ final class StreamingServicesData {
                     region: region,
                 )
                 try Task.checkCancellation()
-                posters[service.id] = Array((Array(movie.results.prefix(1)) + Array(tv.results.prefix(1))
-                        + movie.results.dropFirst().prefix(1) + tv.results.dropFirst().prefix(1)).prefix(2))
+                let filmPosters = movie.results.filter { $0.poster_path != nil }
+                let tvPosters = tv.results.filter { $0.poster_path != nil }
+                posters[service.id] = Array((Array(filmPosters.prefix(1)) + Array(tvPosters.prefix(1))
+                        + filmPosters.dropFirst().prefix(1) + tvPosters.dropFirst().prefix(1)).prefix(2))
             }
         } catch {
             if !Task.isCancelled {
@@ -112,6 +114,7 @@ struct StreamingServicesSection: View {
     @AppStorage("tmdb.watchRegion") private var region = Locale.current.region?.identifier ?? "US"
     @State private var data = StreamingServicesData()
     @State private var selection: StreamingService?
+    @State private var availableWidth: CGFloat = 390
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -131,14 +134,18 @@ struct StreamingServicesSection: View {
                         Button { selection = service } label: {
                             StreamingServiceCard(
                                 service: service,
+                                width: min(560, max(280, availableWidth * 0.94)),
                                 logo: (data.providers(service, kind: .movie)
                                     + data.providers(service, kind: .tv)).first?.logo_path,
                                 posters: data.posters[service.id] ?? [],
                             )
                         }.buttonStyle(.plain)
                     }
-                }
+                }.scrollTargetLayout()
+                    .padding(.vertical, 8)
             }
+            .scrollTargetBehavior(.viewAligned)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
             if let error = data.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
                 Button("Retry") { Task { await data.load(region: region) } }
@@ -162,12 +169,19 @@ struct StreamingServicesSection: View {
 
 private struct StreamingServiceCard: View {
     let service: StreamingService
+    let width: CGFloat
     let logo: String?
     let posters: [TMDBTitle]
+    @ScaledMetric(relativeTo: .body) private var minimumHeight: CGFloat = 235
+    private var height: CGFloat {
+        max(minimumHeight, width * 0.64)
+    }
+
     private var tint: Color {
         switch service.id {
         case "netflix": .red
-        case "disney", "prime", "paramount": .blue
+        case "disney": .cyan
+        case "prime", "paramount": .blue
         case "hulu", "peacock": .green
         case "crunchyroll": .orange
         case "max": .purple
@@ -178,43 +192,67 @@ private struct StreamingServiceCard: View {
     var body: some View {
         ZStack(alignment: .leading) {
             LinearGradient(
-                colors: [tint.opacity(0.35), Color(white: 0.07), .black],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing,
+                colors: [Color(white: 0.055), tint.opacity(0.3), Color(white: 0.09)],
+                startPoint: .bottomLeading,
+                endPoint: .topTrailing,
             )
-            HStack {
-                Spacer()
-                ZStack {
-                    ForEach(Array(posters.enumerated()), id: \.element.catalogID) { index, title in
-                        TMDBArtwork(path: title.poster_path)
-                            .frame(width: 104, height: 156).clipShape(RoundedRectangle(cornerRadius: 10))
-                            .rotationEffect(.degrees(index == 0 ? -10 : 9))
-                            .offset(x: index == 0 ? -28 : 27, y: index == 0 ? -12 : 17)
-                            .shadow(color: .black.opacity(0.6), radius: 10, y: 6)
+            ZStack {
+                ForEach(Array(posters.enumerated()), id: \.element.catalogID) { index, title in
+                    TMDBArtwork(path: title.poster_path)
+                        .frame(width: width * 0.29, height: width * 0.435)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .rotationEffect(.degrees(index == 0 ? -11 : 8))
+                        .offset(
+                            x: index == 0 ? -width * 0.065 : width * 0.075,
+                            y: index == 0 ? -height * 0.045 : height * 0.06,
+                        )
+                        .shadow(color: .black.opacity(0.65), radius: 14, y: 8)
+                }
+            }
+            .frame(width: width * 0.46, height: height)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(0.4), location: 0),
+                    .init(color: .black.opacity(0.15), location: 0.45),
+                    .init(color: .clear, location: 0.67),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing,
+            )
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center, spacing: 10) {
+                    AsyncImage(url: TMDBImageService.imageURL(path: logo, size: .w500)) { image in
+                        image.resizable().scaledToFit()
+                    } placeholder: {
+                        Text(service.name).font(.caption.bold()).minimumScaleFactor(0.6)
                     }
-                }.frame(width: 155, height: 210)
-            }.padding(.trailing, 14)
-            VStack(alignment: .leading, spacing: 7) {
-                AsyncImage(url: TMDBImageService.imageURL(path: logo, size: .w500)) { image in
-                    image.resizable().scaledToFit()
-                } placeholder: { Text(service.name).font(.headline) }
-                    .frame(width: 54, height: 42, alignment: .leading)
-                Text(service.name).font(.title3.bold())
-                Text("Streaming").font(.subheadline.weight(.medium))
-                Text("Movies · Series").font(.caption).foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                HStack(spacing: 8) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(service.name).font(.subheadline.bold())
-                        Text(service.description).font(.caption).lineLimit(2)
+                    .frame(width: 46, height: 46)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(service.name).font(.subheadline.weight(.semibold))
+                        Text("Streaming").font(.caption.weight(.medium))
+                        Text("Movies · Series").font(.caption2).foregroundStyle(.white.opacity(0.6))
                     }
-                    Image(systemName: "arrow.right")
-                }.frame(width: 162, alignment: .leading)
-            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Spacer(minLength: 20)
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(service.name).font(.title2.bold())
+                    Text(service.description).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(2)
+                    Image(systemName: "arrow.right").font(.subheadline.weight(.semibold)).padding(.top, 3)
+                }
+                .frame(width: width * 0.45, alignment: .leading)
+            }
+            .padding(22)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .foregroundStyle(.white)
-        .frame(width: 350, height: 254)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.1), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.2), radius: 6, y: 4)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(service.name), streaming movies and series")
     }

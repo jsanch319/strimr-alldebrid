@@ -39,14 +39,15 @@ final class CatalogHomeData {
 
     var progressRecords: [CatalogProgress] {
         _ = progress.revision
-        return progress.records(scope: discovery.scope).filter { !$0.completed && ($0.fraction > 0 || $0.position > 0) }
+        return progress.records(scope: discovery.scope)
+            .filter { !$0.completed && $0.locallyCleared != true && ($0.fraction > 0 || $0.position > 0) }
     }
 
     var rows: [HomeRow] {
         var rows: [HomeRow] = []
         let items = progressRecords.sorted { $0.updatedAt > $1.updatedAt }.map { record in
             let duration = record.duration ?? (record.episode?.runtime ?? record.title.runtime).map { Double($0) * 60 }
-            let offset = record.pendingSync == false && record.remotePercentage != nil
+            let offset = !record.usesExactPosition && record.remotePercentage != nil
                 ? duration.map { $0 * record.fraction } : record.position
             return CatalogMediaAdapter.make(
                 title: record.title,
