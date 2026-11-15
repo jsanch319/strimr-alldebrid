@@ -4,7 +4,13 @@ struct ProviderSelectionView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedProvider: MediaProvider?
     let onSelect: (MediaProvider) -> Void
+    let onAllDebridAuthenticated: () -> Void
     @State private var showAllDebrid = false
+
+    init(onSelect: @escaping (MediaProvider) -> Void, onAllDebridAuthenticated: @escaping () -> Void = {}) {
+        self.onSelect = onSelect
+        self.onAllDebridAuthenticated = onAllDebridAuthenticated
+    }
 
     var body: some View {
         ScrollView {
@@ -25,7 +31,12 @@ struct ProviderSelectionView: View {
                         .padding(18)
                 }
                 .buttonStyle(.borderedProminent)
-                .sheet(isPresented: $showAllDebrid) { AllDebridLibraryView() }
+                .sheet(isPresented: $showAllDebrid) {
+                    AllDebridLibraryView(onAuthenticated: {
+                        showAllDebrid = false
+                        onAllDebridAuthenticated()
+                    })
+                }
             }
             .frame(maxWidth: contentMaxWidth)
             .frame(maxWidth: .infinity)

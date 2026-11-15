@@ -10,6 +10,8 @@ struct ContentView: View {
     @Environment(ExternalPlaybackCallbackRouter.self) private var externalPlaybackCallbackRouter
     @Environment(\.scenePhase) private var scenePhase
     @State private var pendingAppURL: URL?
+    @State private var hasAllDebridCredentials = false
+    @State private var allDebridCredentialError: String?
 
     init() {
         ErrorReporter.start()
@@ -33,7 +35,13 @@ struct ContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 case .needsAccount:
-                    AccountSetupView(purpose: .firstLaunch, sessionManager: sessionManager)
+                    if hasAllDebridCredentials {
+                        AllDebridOnlyHomeView {
+                            refreshAllDebridCredentialState()
+                        }
+                    } else {
+                        AccountSetupView(purpose: .firstLaunch, sessionManager: sessionManager)
+                    }
                 case .needsProfileSelection:
                     NavigationStack {
                         ProfileSwitcherView(viewModel: ProfileSwitcherViewModel(sessionManager: sessionManager))
@@ -80,6 +88,23 @@ struct ContentView: View {
         .onChange(of: registry.connectedServices.map(ObjectIdentifier.init), initial: true) { _, _ in
             downloadManager.activateSession(services: registry.connectedServices)
         }
+        .task {
+            refreshAllDebridCredentialState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
+            refreshAllDebridCredentialState()
+        }
+        .alert(
+            "AllDebrid",
+            isPresented: Binding(
+                get: { allDebridCredentialError != nil },
+                set: { if !$0 { allDebridCredentialError = nil } },
+            ),
+        ) {
+            Button("OK", role: .cancel) { allDebridCredentialError = nil }
+        } message: {
+            Text(allDebridCredentialError ?? "Unable to read AllDebrid credentials.")
+        }
         .onOpenURL { url in
             guard !externalPlaybackCallbackRouter.receive(url), url.scheme?.lowercased() == "strimr" else { return }
             pendingAppURL = url
@@ -94,6 +119,16 @@ struct ContentView: View {
             return true
         case .hydrating, .needsProfileSelection, .ready:
             return false
+        }
+    }
+
+    private func refreshAllDebridCredentialState() {
+        do {
+            hasAllDebridCredentials = try AllDebridCredentialStore().load() != nil
+            allDebridCredentialError = nil
+        } catch {
+            hasAllDebridCredentials = false
+            allDebridCredentialError = error.localizedDescription
         }
     }
 }

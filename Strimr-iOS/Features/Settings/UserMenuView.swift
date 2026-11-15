@@ -18,7 +18,7 @@ struct UserMenuView: View {
                 }
 
                 NavigationLink {
-                    AllDebridConnectView()
+                    AllDebridConnectView(onConnected: { dismiss() })
                 } label: {
                     Label("Connect AllDebrid", systemImage: "play.tv")
                 }

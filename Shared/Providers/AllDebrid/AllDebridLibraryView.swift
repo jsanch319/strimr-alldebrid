@@ -7,6 +7,11 @@ import SwiftUI
 struct AllDebridLibraryView: View {
     private static let logger = Logger(subsystem: "com.strimr", category: "AllDebrid")
 
+    private let onAuthenticated: (() -> Void)?
+    private let onSignedOut: (() -> Void)?
+    private let initialFile: AllDebridMagnetFile?
+    private let initialLink: AllDebridSavedLink?
+    private let navigationTitle: String
     @State private var apiKey = ""
     @State private var links: [AllDebridSavedLink] = []
     @State private var magnetFiles: [AllDebridMagnetFile] = []
@@ -17,6 +22,20 @@ struct AllDebridLibraryView: View {
     @State private var errorMessage: String?
     @State private var activeSheet: ActiveSheet?
     @State private var isConfigured = false
+
+    init(
+        navigationTitle: String = "AllDebrid Movies",
+        initialFile: AllDebridMagnetFile? = nil,
+        initialLink: AllDebridSavedLink? = nil,
+        onAuthenticated: (() -> Void)? = nil,
+        onSignedOut: (() -> Void)? = nil,
+    ) {
+        self.navigationTitle = navigationTitle
+        self.initialFile = initialFile
+        self.initialLink = initialLink
+        self.onAuthenticated = onAuthenticated
+        self.onSignedOut = onSignedOut
+    }
 
     private enum ActiveSheet: Identifiable {
         case player(URL)
@@ -105,7 +124,7 @@ struct AllDebridLibraryView: View {
                     .refreshable { await refresh() }
                 }
             }
-            .navigationTitle("AllDebrid Movies")
+            .navigationTitle(navigationTitle)
             .toolbar {
                 if isConfigured {
                     ToolbarItem(placement: refreshToolbarPlacement) {
@@ -123,6 +142,7 @@ struct AllDebridLibraryView: View {
                                 hasLoadedLibrary = false
                                 isConfigured = false
                                 activeSheet = nil
+                                onSignedOut?()
                             } catch {
                                 errorMessage = error.localizedDescription
                             }
@@ -177,6 +197,11 @@ struct AllDebridLibraryView: View {
                         apiKey = key
                         isConfigured = true
                         try await refresh(using: key)
+                        if let initialFile {
+                            await play(initialFile)
+                        } else if let initialLink {
+                            await play(initialLink)
+                        }
                     }
                 } catch {
                     errorMessage = error.localizedDescription
@@ -188,11 +213,16 @@ struct AllDebridLibraryView: View {
     private func connect() async {
         let authenticatedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            try await refresh(using: authenticatedKey)
             try AllDebridCredentialStore().save(authenticatedKey)
             apiKey = authenticatedKey
             isConfigured = true
             Self.logger.debug("AllDebrid login succeeded and credentials were saved")
+            do {
+                try await refresh(using: authenticatedKey)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            onAuthenticated?()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -211,19 +241,15 @@ struct AllDebridLibraryView: View {
         defer { isLoading = false }
         errorMessage = nil
         let client = try AllDebridAPIClient(apiKey: key)
-        async let savedLinksTask = client.savedLinks()
-        async let magnetsTask = client.magnets()
-        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
-        let readyMagnets = magnets.filter(\.isReady)
-        let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
+        let snapshot = try await client.librarySnapshot()
 
-        links = savedLinks.filter(\.isVideo)
-        magnetFiles = files
-        totalMagnetCount = magnets.count
-        readyMagnetCount = readyMagnets.count
+        links = snapshot.savedLinks.filter(\.isVideo)
+        magnetFiles = snapshot.magnetFiles
+        totalMagnetCount = snapshot.magnets.count
+        readyMagnetCount = snapshot.readyMagnetCount
         hasLoadedLibrary = true
         Self.logger.debug(
-            "AllDebrid refresh complete: savedLinksReturned=\(savedLinks.count), videoLinks=\(links.count), magnetsReturned=\(magnets.count), readyMagnets=\(readyMagnets.count), magnetFilesReturned=\(files.count), playableVideoCandidates=\(files.filter(\.isVideo).count)",
+            "AllDebrid refresh complete: savedLinksReturned=\(snapshot.savedLinks.count), videoLinks=\(links.count), magnetsReturned=\(snapshot.magnets.count), readyMagnets=\(snapshot.readyMagnetCount), magnetFilesReturned=\(snapshot.magnetFiles.count), playableVideoCandidates=\(snapshot.magnetFiles.filter(\.isVideo).count)",
         )
     }
 

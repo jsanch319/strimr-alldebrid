@@ -2,12 +2,17 @@ import SwiftUI
 
 @MainActor
 struct AllDebridConnectView: View {
+    private let onConnected: () -> Void
     @State private var isConnected = false
     @State private var isChecking = true
     @State private var isConnecting = false
     @State private var pin: AllDebridPIN?
     @State private var errorMessage: String?
     @State private var authorizationTask: Task<Void, Never>?
+
+    init(onConnected: @escaping () -> Void = {}) {
+        self.onConnected = onConnected
+    }
 
     var body: some View {
         Form {
@@ -134,6 +139,7 @@ struct AllDebridConnectView: View {
                 isConnected = true
                 self.pin = nil
                 errorMessage = nil
+                onConnected()
                 return
             }
             throw AllDebridAPIClient.APIError.pinExpired

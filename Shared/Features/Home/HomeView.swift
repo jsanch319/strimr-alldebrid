@@ -7,9 +7,22 @@ struct HomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.mediaCardActions) private var mediaCardActions
     @State var viewModel: HomeViewModel
-    @State private var selectedHub: Hub?
+    @State private var selectedSheet: HomeSheet?
+    @State private var hasAllDebridAccount = false
     @State private var scrollInteractionCount = 0
     let onSelectMedia: (MediaDisplayItem) -> Void
+
+    private enum HomeSheet: Identifiable {
+        case hub(Hub)
+        case allDebrid(AllDebridHomeItem)
+
+        var id: String {
+            switch self {
+            case let .hub(hub): "hub:\(hub.id)"
+            case let .allDebrid(item): "alldebrid:\(item.id)"
+            }
+        }
+    }
 
     init(
         viewModel: HomeViewModel,
@@ -31,11 +44,16 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 24) {
+                AllDebridHomeSection(
+                    onSelect: { selectedSheet = .allDebrid($0) },
+                    onAccountAvailabilityChange: { hasAllDebridAccount = $0 },
+                )
+
                 ForEach(viewModel.rows) { row in
                     HomeRowSectionView(
                         row: row,
                         showsLabels: settingsManager.interface.showsCardLabels,
-                        onViewAll: { selectedHub = $0 },
+                        onViewAll: { selectedSheet = .hub($0) },
                         onSelectMedia: onSelectMedia,
                     )
                 }
@@ -47,7 +65,7 @@ struct HomeView: View {
                 if let errorMessage = viewModel.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
-                } else if !viewModel.hasContent, !viewModel.isLoading {
+                } else if !viewModel.hasContent, !hasAllDebridAccount, !viewModel.isLoading {
                     Text("common.empty.nothingToShow")
                         .foregroundStyle(.secondary)
                 }
@@ -92,24 +110,35 @@ struct HomeView: View {
         .refreshable {
             await viewModel.reload()
         }
-        .sheet(item: $selectedHub) { hub in
-            NavigationStack {
-                ServerScopedView(server: hub.server) { services in
-                    HubDetailView(
-                        viewModel: HubDetailViewModel(hub: hub, services: services),
-                        onSelectMedia: { media in
-                            selectedHub = nil
-                            onSelectMedia(media)
-                        },
-                    )
-                }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("hub.close") {
-                            selectedHub = nil
+        .sheet(item: $selectedSheet) { sheet in
+            switch sheet {
+            case let .hub(hub):
+                NavigationStack {
+                    ServerScopedView(server: hub.server) { services in
+                        HubDetailView(
+                            viewModel: HubDetailViewModel(hub: hub, services: services),
+                            onSelectMedia: { media in
+                                selectedSheet = nil
+                                onSelectMedia(media)
+                            },
+                        )
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("hub.close") {
+                                selectedSheet = nil
+                            }
                         }
                     }
                 }
+            case let .allDebrid(item):
+                AllDebridLibraryView(
+                    navigationTitle: "AllDebrid",
+                    initialFile: if case let .magnetFile(file) = item { file } else { nil },
+                    initialLink: if case let .savedLink(link) = item { link } else { nil },
+                    onAuthenticated: { selectedSheet = nil },
+                    onSignedOut: { selectedSheet = nil },
+                )
             }
         }
         .onChange(of: viewModel.contentRevisions) {

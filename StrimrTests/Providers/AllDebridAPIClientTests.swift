@@ -168,7 +168,7 @@ struct AllDebridAPIClientTests {
         #expect(bodyItems.first { $0.name == "apikey" }?.value == "private-key")
     }
 
-    @Test func `initial library requests use the supplied key and fetch links magnets then ready files`() async throws {
+    @Test func `library snapshot uses the supplied key to fetch links magnets and ready files`() async throws {
         let stub = HTTPStub { request in
             switch request.url?.path {
             case "/v4/user/links":
@@ -185,16 +185,12 @@ struct AllDebridAPIClientTests {
         }
         let client = try AllDebridAPIClient(apiKey: "newly-authenticated-key", session: stub.session)
 
-        async let savedLinksTask = client.savedLinks()
-        async let magnetsTask = client.magnets()
-        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
-        let readyMagnets = magnets.filter(\.isReady)
-        let files = try await client.magnetFiles(for: readyMagnets.map(\.id))
+        let snapshot = try await client.librarySnapshot()
 
-        #expect(savedLinks.count == 1)
-        #expect(magnets.count == 5)
-        #expect(readyMagnets.count == 3)
-        #expect(files.filter(\.isVideo).count == 2)
+        #expect(snapshot.savedLinks.count == 1)
+        #expect(snapshot.magnets.count == 5)
+        #expect(snapshot.readyMagnetCount == 3)
+        #expect(snapshot.magnetFiles.filter(\.isVideo).count == 2)
         #expect(Set(stub.requests.compactMap { $0.url?.path }) == [
             "/v4/user/links",
             "/v4.1/magnet/status",

@@ -189,6 +189,20 @@ actor AllDebridAPIClient {
         return files
     }
 
+    func librarySnapshot() async throws -> AllDebridLibrarySnapshot {
+        async let savedLinksTask = savedLinks()
+        async let magnetsTask = magnets()
+        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
+        let readyMagnets = magnets.filter(\.isReady)
+        let files = try await magnetFiles(for: readyMagnets.map(\.id))
+        return AllDebridLibrarySnapshot(
+            savedLinks: savedLinks,
+            magnets: magnets,
+            readyMagnetCount: readyMagnets.count,
+            magnetFiles: files,
+        )
+    }
+
     /// Resolves an AllDebrid link to a streamable URL and confirms the result is not an API or web page.
     func unlock(_ link: String) async throws -> URL {
         guard let candidate = URL(string: link),
@@ -385,6 +399,13 @@ struct AllDebridPlaybackResolution: Sendable {
     let followedRedirect: Bool
 }
 
+struct AllDebridLibrarySnapshot: Sendable {
+    let savedLinks: [AllDebridSavedLink]
+    let magnets: [AllDebridMagnet]
+    let readyMagnetCount: Int
+    let magnetFiles: [AllDebridMagnetFile]
+}
+
 struct AllDebridPIN: Sendable {
     let pin: String
     let check: String
@@ -442,6 +463,7 @@ struct AllDebridCredentialStore {
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
         }
+        NotificationCenter.default.post(name: .allDebridCredentialsDidChange, object: nil)
     }
 
     func delete() throws {
@@ -454,7 +476,12 @@ struct AllDebridCredentialStore {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainError.unexpectedStatus(status)
         }
+        NotificationCenter.default.post(name: .allDebridCredentialsDidChange, object: nil)
     }
+}
+
+extension Notification.Name {
+    static let allDebridCredentialsDidChange = Notification.Name("com.strimr.alldebrid.credentialsDidChange")
 }
 
 struct AllDebridSavedLink: Sendable, Identifiable, Hashable {
