@@ -155,16 +155,14 @@ struct AllDebridOnlyHomeView: View {
                 let initialFile: AllDebridMagnetFile? = {
                     if case let .magnetFile(file) = item {
                         return file
-                    } else {
-                        return nil
                     }
+                    return nil
                 }()
                 let initialLink: AllDebridSavedLink? = {
                     if case let .savedLink(link) = item {
                         return link
-                    } else {
-                        return nil
                     }
+                    return nil
                 }()
 
                 AllDebridLibraryView(
