@@ -144,6 +144,7 @@ final class DiscoveryStore {
         }
         guard let client = coordinator.simklLibraryClient else {
             entries = []; snapshot = nil; artwork = [:]
+            loadedScope = nil; lastSync = nil; retryAt = nil
             return
         }
         if let syncTask {
