@@ -1,0 +1,205 @@
+import Foundation
+
+/// A catalog identity is always the media type plus TMDb ID (movie and TV IDs can overlap).
+nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
+    enum Kind: String, Codable, Sendable { case movie, tv }
+    let id: Int
+    var media_type: String?
+    let title: String?
+    let name: String?
+    let overview: String?
+    let poster_path: String?
+    let backdrop_path: String?
+    let release_date: String?
+    let first_air_date: String?
+    let vote_average: Double?
+    let genres: [Genre]?
+    let seasons: [Season]?
+    let external_ids: ExternalIDs?
+
+    struct Genre: Decodable, Hashable, Sendable { let id: Int; let name: String }
+    struct Season: Decodable, Identifiable, Hashable, Sendable {
+        let id: Int
+        let season_number: Int
+        let name: String
+        let episode_count: Int
+    }
+
+    struct ExternalIDs: Decodable, Hashable, Sendable { let imdb_id: String?; let tvdb_id: Int? }
+    var kind: Kind {
+        media_type == "tv" ? .tv : .movie
+    }
+
+    var catalogID: String {
+        "\(kind.rawValue):\(id)"
+    }
+
+    var displayTitle: String {
+        title ?? name ?? "Untitled"
+    }
+
+    var date: String {
+        release_date ?? first_air_date ?? ""
+    }
+}
+
+nonisolated struct TMDBEpisode: Decodable, Identifiable, Sendable {
+    let id: Int
+    let episode_number: Int
+    let season_number: Int
+    let name: String
+    let overview: String?
+    let air_date: String?
+    let still_path: String?
+    let runtime: Int?
+    let vote_average: Double?
+}
+
+nonisolated enum TMDBError: LocalizedError {
+    case missingToken, unauthorized, rateLimited(Date), response(Int)
+    var errorDescription: String? {
+        switch self {
+        case .missingToken: "Add your TMDb API Read Access Token in TMDb settings."
+        case .unauthorized: "TMDb rejected this token. Check your API Read Access Token."
+        case let .rateLimited(date): "TMDb request limit reached. Try again after \(date.formatted(date: .omitted, time: .standard))."
+        case let .response(code): "TMDb is unavailable (HTTP \(code)). Please retry."
+        }
+    }
+}
+
+/// Direct TMDb v3 access; never depends on a media server or Seerr.
+actor TMDBClient {
+    static let shared = TMDBClient()
+    nonisolated enum Feed: String, CaseIterable, Identifiable {
+        case trendingMovies, trendingTV, popularMovies, popularTV, upcoming, topMovies, topTV
+        var id: String {
+            rawValue
+        }
+
+        var title: String {
+            switch self {
+            case .trendingMovies: "Trending Movies"
+            case .trendingTV: "Trending TV Shows"
+            case .popularMovies: "Popular Movies"
+            case .popularTV: "Popular TV Shows"
+            case .upcoming: "Upcoming Movies"
+            case .topMovies: "Top Rated Movies"
+            case .topTV: "Top Rated TV Shows"
+            }
+        }
+
+        var path: String {
+            switch self {
+            case .trendingMovies: "trending/movie/week"
+            case .trendingTV: "trending/tv/week"
+            case .popularMovies: "movie/popular"
+            case .popularTV: "tv/popular"
+            case .upcoming: "movie/upcoming"
+            case .topMovies: "movie/top_rated"
+            case .topTV: "tv/top_rated"
+            }
+        }
+
+        var kind: TMDBTitle.Kind {
+            [.trendingTV, .popularTV, .topTV].contains(self) ? .tv : .movie
+        }
+    }
+
+    private nonisolated struct Page: Decodable { var results: [TMDBTitle] }
+    private nonisolated struct Episodes: Decodable { let episodes: [TMDBEpisode] }
+    private var cache: [String: (Date, Data)] = [:]
+    private var retryAt: Date?
+    private let session: URLSession
+    private let tokenProvider: @Sendable () throws -> String?
+    init(
+        session: URLSession = .shared,
+        tokenProvider: @escaping @Sendable () throws -> String? = { try TMDBCredentialStore().load() },
+    ) {
+        self.session = session
+        self.tokenProvider = tokenProvider
+    }
+
+    func reset() {
+        cache.removeAll(); retryAt = nil
+    }
+
+    func feed(_ feed: Feed, page: Int = 1) async throws -> [TMDBTitle] {
+        try await titles(path: feed.path, kind: feed.kind, page: page)
+    }
+
+    func search(_ query: String, page: Int = 1) async throws -> [TMDBTitle] {
+        let result: Page = try await get(
+            "search/multi",
+            query: [URLQueryItem(name: "query", value: query), URLQueryItem(name: "page", value: String(page))],
+        )
+        return result.results.filter { $0.media_type == "movie" || $0.media_type == "tv" }
+    }
+
+    func details(_ title: TMDBTitle) async throws -> TMDBTitle {
+        var result: TMDBTitle = try await get(
+            "\(title.kind.rawValue)/\(title.id)",
+            query: [URLQueryItem(name: "append_to_response", value: "external_ids")],
+        )
+        result.media_type = title.kind.rawValue
+        return result
+    }
+
+    func recommendations(_ title: TMDBTitle, page: Int = 1) async throws -> [TMDBTitle] {
+        try await titles(path: "\(title.kind.rawValue)/\(title.id)/recommendations", kind: title.kind, page: page)
+    }
+
+    func episodes(tvID: Int, season: Int) async throws -> [TMDBEpisode] {
+        let result: Episodes = try await get("tv/\(tvID)/season/\(season)")
+        return result.episodes
+    }
+
+    private func titles(path: String, kind: TMDBTitle.Kind, page: Int) async throws -> [TMDBTitle] {
+        let result: Page = try await get(path, query: [URLQueryItem(name: "page", value: String(page))])
+        return result.results.map { var title = $0; title.media_type = kind.rawValue; return title }
+    }
+
+    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        guard let token = try tokenProvider(), !token.isEmpty else { throw TMDBError.missingToken }
+        var components = URLComponents(string: "https://api.themoviedb.org/3/\(path)")!
+        components.queryItems = query + [
+            URLQueryItem(name: "language", value: Locale.preferredLanguages.first ?? "en-US"),
+            URLQueryItem(name: "include_adult", value: "false"),
+        ]
+        let url = components.url!
+        let key = url.absoluteString
+        if let (expiry, data) = cache[key], expiry > Date() {
+            return try JSONDecoder().decode(T.self, from: data)
+        }
+        if let retryAt, retryAt > Date() {
+            throw TMDBError.rateLimited(retryAt)
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation()
+        guard let response = response as? HTTPURLResponse else { throw TMDBError.response(0) }
+        switch response.statusCode {
+        case 200 ... 299: break
+        case 401, 403: throw TMDBError.unauthorized
+        case 429:
+            let header = response.value(forHTTPHeaderField: "Retry-After") ?? ""
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+            let date = TimeInterval(header).map { Date().addingTimeInterval(max(1, $0)) } ?? formatter
+                .date(from: header) ?? Date().addingTimeInterval(60)
+            retryAt = date
+            throw TMDBError.rateLimited(date)
+        default: throw TMDBError.response(response.statusCode)
+        }
+        let decoded = try JSONDecoder().decode(T.self, from: data)
+        if cache.count >= 150 {
+            cache.removeAll()
+        }
+        cache[key] = (Date().addingTimeInterval(300), data)
+        return decoded
+    }
+}

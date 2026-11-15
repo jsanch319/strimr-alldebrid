@@ -144,8 +144,11 @@ struct AllDebridOnlyHomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                AllDebridHomeSection { item in
-                    selectedItem = item
+                VStack(alignment: .leading, spacing: 24) {
+                    TMDBDiscoveryView()
+                    AllDebridHomeSection { item in
+                        selectedItem = item
+                    }
                 }
                 .padding(.horizontal, LayoutMetrics.pageMargin)
                 .padding(.vertical, 20)

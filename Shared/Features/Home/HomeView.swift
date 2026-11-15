@@ -44,6 +44,8 @@ struct HomeView: View {
             }
 
             VStack(alignment: .leading, spacing: 24) {
+                TMDBDiscoveryView()
+
                 AllDebridHomeSection(
                     onSelect: { selectedSheet = .allDebrid($0) },
                     onAccountAvailabilityChange: { hasAllDebridAccount = $0 },
