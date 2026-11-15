@@ -152,6 +152,9 @@ final class PlaybackProgressRecorder {
             return nil
         }
         guard hasStarted else { return nil }
+        if destination != nil, hasReportedWatched {
+            return nil
+        }
         let journalID = write(
             event: .stop,
             position: position,

@@ -441,10 +441,20 @@ extension CatalogProgressStore {
             if isActive(record, scope: scope) {
                 resolved[record.id] = record; continue
             }
-            let remoteDate = resolved[record.id]?
-                .updatedAt ??
-                (record.title.kind == .movie ? activities.movies?.playback : activities.tv_shows?.playback)
-                .flatMap(PlaybackProgressConflict.date)
+            let library = entries.first { $0.catalogID == record.title.catalogID }
+            let watchedDate: Date?
+            if let episode = record.episode {
+                let stamp = library?.seasons?.first { $0.number == episode.season_number }?.episodes?
+                    .first { $0.number == episode.episode_number }?.watched_at
+                watchedDate = (stamp ?? (library?.status == "completed" ? library?.last_watched_at : nil))
+                    .flatMap(PlaybackProgressConflict.date)
+            } else {
+                watchedDate = (library?.status == "completed" ? library?.last_watched_at : nil)
+                    .flatMap(PlaybackProgressConflict.date)
+            }
+            let activityDate = (record.title.kind == .movie ? activities.movies?.playback : activities.tv_shows?
+                .playback).flatMap(PlaybackProgressConflict.date)
+            let remoteDate = resolved[record.id]?.updatedAt ?? [activityDate, watchedDate].compactMap(\.self).max()
             guard PlaybackProgressConflict.prefersLocal(
                 localDate: record.updatedAt,
                 isPending: record.pendingSync ?? !record.completed,

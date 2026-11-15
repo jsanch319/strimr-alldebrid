@@ -113,6 +113,31 @@ struct SimklResumeTests {
         #expect(cache.records(scope: "a").first?.fraction == 0.3)
     }
 
+    @Test func `newer watched history prevents an old offline checkpoint from reopening a title`() async throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        cache.save(
+            title: .reference(id: 12, kind: .movie, title: "Movie"),
+            episode: nil,
+            position: 100,
+            duration: 1000,
+            finished: false,
+            scope: "a",
+        )
+        let entry = try decode(
+            SimklListEntry.self,
+            #"{"status":"completed","last_watched_at":"2099-01-01T00:00:00Z","movie":{"title":"Movie","ids":{"tmdb":"12"}}}"#,
+        )
+        _ = try await cache.reconcile(
+            paused: [],
+            entries: [entry],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in Issue.record("Newer watched history must win"); return false },
+        )
+        #expect(cache.records(scope: "a").isEmpty)
+    }
+
     @Test func `shared recorder supplies checkpoints and preserves late partial playback until completion`() {
         let cache = CatalogProgressStore(defaults: TestDefaults.make())
         let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
@@ -124,6 +149,17 @@ struct SimklResumeTests {
         #expect(recorder.resumePosition == 950)
         recorder.finish()
         #expect(cache.records(scope: "a").first?.completed == true)
+        cache.acknowledge(
+            TrackerPlaybackReport(
+                event: .stop,
+                item: TrackerItem(kind: .movie, ids: title.matchingIDs),
+                progress: 100,
+                date: Date(),
+            ),
+            scope: "a",
+        )
+        recorder.stop(position: 1000)
+        #expect(cache.records(scope: "a").first?.pendingSync == false)
     }
 
     @Test func `existing player waits for actual duration before applying a remote percentage`() throws {

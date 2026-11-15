@@ -148,7 +148,6 @@ final class TrackerPlaybackSession {
     private var isResolved = false
     private var buffered: [(action: Action, date: Date)] = []
     private var phase = Phase.idle
-    private var hasStarted = false
     private var hasObservedPosition = false
 
     init(resumeOffset: TimeInterval?, minimumProgress: Int? = nil, now: @escaping () -> Date = Date.init) {
@@ -177,7 +176,7 @@ final class TrackerPlaybackSession {
     }
 
     func updateInitialResumeOffset(_ position: TimeInterval?) {
-        guard !hasStarted else { return }
+        guard !hasObservedPosition else { return }
         resumeOffset = position
     }
 
@@ -213,7 +212,6 @@ final class TrackerPlaybackSession {
             let effective = effectivePosition(position)
             guard let progress = Self.progress(effective, duration) else { return }
             phase = .playing
-            hasStarted = true
             send(.start, progress: progress, date: date)
         case let .paused(position, duration):
             guard phase == .playing else { return }
