@@ -17,6 +17,44 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     let seasons: [Season]?
     let external_ids: RemoteIDs?
     let runtime: Int?
+    var tagline: String? = nil
+    var episode_run_time: [Int]? = nil
+    var number_of_seasons: Int? = nil
+    var production_companies: [Company]? = nil
+    var networks: [Company]? = nil
+    var content_ratings: ContentRatings? = nil
+    var release_dates: ReleaseDates? = nil
+
+    struct Company: Codable, Hashable, Sendable { let id: Int; let name: String }
+    struct ContentRatings: Codable, Hashable, Sendable {
+        struct Rating: Codable, Hashable, Sendable { let iso_3166_1: String; let rating: String }
+        let results: [Rating]
+    }
+
+    struct ReleaseDates: Codable, Hashable, Sendable {
+        struct Region: Codable, Hashable, Sendable {
+            struct Release: Codable, Hashable, Sendable { let certification: String; let type: Int? }
+            let iso_3166_1: String
+            let release_dates: [Release]
+        }
+
+        let results: [Region]
+    }
+
+    func certification(in region: String) -> String? {
+        if kind ==
+            .tv
+        {
+            return content_ratings?.results.first { $0.iso_3166_1 == region && !$0.rating.isEmpty }?.rating
+        }
+        let releases = release_dates?.results.first { $0.iso_3166_1 == region }?.release_dates
+            .filter { !$0.certification.isEmpty } ?? []
+        return (releases.first { $0.type == 3 } ?? releases.first)?.certification
+    }
+
+    var runtimeMinutes: Int? {
+        runtime.flatMap { $0 > 0 ? $0 : nil } ?? episode_run_time?.first { $0 > 0 }
+    }
 
     struct Genre: Codable, Hashable, Sendable { let id: Int; let name: String }
     struct Season: Codable, Identifiable, Hashable, Sendable {
@@ -181,7 +219,10 @@ actor TMDBClient {
     func details(_ title: TMDBTitle) async throws -> TMDBTitle {
         var result: TMDBTitle = try await get(
             "\(title.kind.rawValue)/\(title.id)",
-            query: [URLQueryItem(name: "append_to_response", value: "external_ids")],
+            query: [URLQueryItem(
+                name: "append_to_response",
+                value: title.kind == .movie ? "external_ids,release_dates" : "external_ids,content_ratings",
+            )],
         )
         result.media_type = title.kind.rawValue
         return result

@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MediaCard: View {
+    @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @Environment(ServerRegistry.self) private var registry
     @Environment(MediaServices.self) private var scopedServices: MediaServices?
     #if os(tvOS)
@@ -48,7 +49,13 @@ struct MediaCard: View {
             .contentShape(Rectangle())
             .onHover { isFocused = $0 }
         #endif
-            .onTapGesture(perform: onTap)
+            .onTapGesture {
+                if let media = media.playableItem {
+                    catalogBackdrop?.select(media)
+                }
+                onTap()
+            }
+            .catalogBackdropCandidate(media.playableItem)
             .mediaCardContextMenu(media)
     }
 

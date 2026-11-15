@@ -389,6 +389,32 @@ final class DiscoveryStore {
         }
     }
 
+    func markWatched(_ title: TMDBTitle, episode: TMDBEpisode?) async throws {
+        guard let client = coordinator.simklLibraryClient,
+              let item = title.trackerItem(episode: episode) else { throw TrackerAPIError.unavailable }
+        let scope = scope
+        await syncTask?.value
+        guard self.scope == scope, coordinator.simklLibraryClient === client else { throw TrackerAPIError.unavailable }
+        let now = Date()
+        try await client.markCatalogWatched(title, episode: episode, at: now)
+        guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
+        let saved = progress.progress(title: title, episode: episode, scope: scope)
+        let duration = saved?.duration ?? (episode?.runtime ?? title.runtimeMinutes).map { Double($0) * 60 }
+        progress.save(
+            title: title,
+            episode: episode,
+            position: duration ?? saved?.position ?? 0,
+            duration: duration,
+            finished: true,
+            scope: scope,
+            event: "watched",
+            protectInitialZero: false,
+        )
+        progress.acknowledge(TrackerPlaybackReport(event: .stop, item: item, progress: 100, date: Date()), scope: scope)
+        lastSync = nil; retryAt = nil
+        await sync(force: true)
+    }
+
     func setPlanned(_ title: TMDBTitle, planned: Bool) async throws {
         guard let client = coordinator.simklLibraryClient else { throw TrackerAPIError.unavailable }
         let scope = scope

@@ -123,6 +123,7 @@ struct AllDebridLibraryView: View {
                     .refreshable { await refresh() }
                 }
             }
+            .catalogBackdropDisabled()
             .navigationTitle(navigationTitle)
             .toolbar {
                 if isConfigured {

@@ -116,6 +116,9 @@ private struct CatalogBrowseTab: View {
             .padding(.horizontal, LayoutMetrics.pageMargin)
             .padding(.vertical, 20)
         }
+        .catalogBackdrop(media: tab.feeds.compactMap { data.feeds[$0]?.first }.first.map {
+            CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil)
+        })
         .navigationTitle(tab.title)
         .tabRootChrome()
         .task {
@@ -180,6 +183,7 @@ private struct CatalogWatchlistTab: View {
             }
             .refreshable { await discovery.sync(force: true) }
         }
+        .catalogBackdrop(media: titles.first.map { CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil) })
         .navigationTitle("My List")
         .tabRootChrome()
         .navigationDestination(item: $selection) { TMDBDetailView(title: $0) }

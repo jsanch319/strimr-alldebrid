@@ -111,6 +111,7 @@ final class StreamingServicesData {
 }
 
 struct StreamingServicesSection: View {
+    @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @AppStorage("tmdb.watchRegion") private var region = Locale.current.region?.identifier ?? "US"
     @State private var data = StreamingServicesData()
     @State private var selection: StreamingService?
@@ -131,7 +132,16 @@ struct StreamingServicesSection: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 16) {
                     ForEach(StreamingService.all) { service in
-                        Button { selection = service } label: {
+                        Button {
+                            if let title = data.posters[service.id]?.first {
+                                catalogBackdrop?.select(CatalogMediaAdapter.make(
+                                    title: title,
+                                    episode: nil,
+                                    resume: nil,
+                                ))
+                            }
+                            selection = service
+                        } label: {
                             StreamingServiceCard(
                                 service: service,
                                 width: min(560, max(280, availableWidth * 0.94)),
@@ -140,6 +150,11 @@ struct StreamingServicesSection: View {
                                 posters: data.posters[service.id] ?? [],
                             )
                         }.buttonStyle(.plain)
+                            .catalogBackdropCandidate(data.posters[service.id]?.first.map { CatalogMediaAdapter.make(
+                                title: $0,
+                                episode: nil,
+                                resume: nil,
+                            ) })
                     }
                 }.scrollTargetLayout()
                     .padding(.vertical, 8)
@@ -311,6 +326,7 @@ private struct StreamingProviderView: View {
                 }
             }
         }
+        .catalogBackdrop(media: titles.first.map { CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil) })
         .navigationTitle(service.name)
         .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
         .navigationDestination(item: $selection) { TMDBDetailView(title: $0) }

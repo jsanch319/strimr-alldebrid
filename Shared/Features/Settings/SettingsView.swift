@@ -101,6 +101,7 @@ struct SettingsView: View {
         #if os(iOS)
         .listStyle(.insetGrouped)
         #endif
+        .catalogBackdropDisabled()
         .navigationTitle("settings.title")
         .sheet(isPresented: $showsAllDebrid) {
             AllDebridLibraryView(navigationTitle: "AllDebrid", onAuthenticated: { onCatalogChanged?() })

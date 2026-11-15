@@ -48,6 +48,49 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build 2>&1 | tee build-output.log
+      - name: Launch app on an available iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYSMOKE'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"]))["devices"]
+          available = [(runtime, device) for runtime, rows in devices.items() if ".iOS-" in runtime for device in rows if device["name"].startswith("iPhone") and device.get("deviceTypeIdentifier")]
+          if not available:
+              print("No installed iPhone simulator runtime: launch behavior remains unverified.")
+              raise SystemExit(0)
+          runtime, device = available[0]
+          identifier = subprocess.check_output(["xcrun", "simctl", "create", "Strimr launch smoke", device["deviceTypeIdentifier"], runtime], text=True).strip()
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write("STRIMR_SMOKE_ID=" + identifier + "\n")
+          subprocess.run(["xcrun", "simctl", "boot", identifier], check=True)
+          subprocess.run(["xcrun", "simctl", "bootstatus", identifier, "-b"], check=True)
+          app = "build/DerivedData/Build/Products/Debug-iphonesimulator/Strimr-iOS.app"
+          bundle = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print CFBundleIdentifier", app + "/Info.plist"], text=True).strip()
+          subprocess.run(["xcrun", "simctl", "install", identifier, app], check=True)
+          subprocess.run(["xcrun", "simctl", "launch", identifier, bundle], check=True)
+          import time
+          time.sleep(3)
+          processes = subprocess.check_output(["xcrun", "simctl", "spawn", identifier, "launchctl", "list"], text=True)
+          if bundle not in processes:
+              raise RuntimeError("The app exited immediately after simulator launch")
+          subprocess.run(["xcrun", "simctl", "io", identifier, "screenshot", "build/ios-launch-smoke.png"], check=True)
+          print("iOS app startup smoke passed. This fresh simulator has no user API credentials; authenticated catalog interactions are not covered.")
+          PYSMOKE
+      - name: Clean up launch simulator
+        if: always() && env.STRIMR_SMOKE_ID != ''
+        shell: bash
+        run: |
+          xcrun simctl shutdown "$STRIMR_SMOKE_ID" || true
+          xcrun simctl delete "$STRIMR_SMOKE_ID" || true
+      - name: Upload iOS launch screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-launch-smoke
+          path: build/ios-launch-smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload compiler output
         if: always()
         uses: actions/upload-artifact@v4

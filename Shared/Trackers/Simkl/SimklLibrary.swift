@@ -135,6 +135,16 @@ extension SimklClient {
         return try await libraryRead("sync/all-items/\(type)", query: query).decode(SimklLibraryResponse.self).entries
     }
 
+    func markCatalogWatched(_ title: TMDBTitle, episode: TMDBEpisode?, at date: Date) async throws {
+        guard let item = title.trackerItem(episode: episode),
+              let body = TrackerRequestBody.history(
+                  [TrackerHistoryEntry(item: item, watchedAt: date)],
+                  media: SimklAPI.media,
+              )
+        else { throw TrackerAPIError.unavailable }
+        try await libraryWrite("sync/history", body: body)
+    }
+
     func setPlanned(_ title: TMDBTitle, planned: Bool) async throws {
         var media: [String: Any] = ["ids": ["tmdb": String(title.id)], "title": title.displayTitle]
         if let year = Int(title.date.prefix(4)) {

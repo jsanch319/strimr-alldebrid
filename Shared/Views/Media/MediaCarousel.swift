@@ -3,6 +3,7 @@ import SwiftUI
 struct MediaCarousel: View {
     enum Layout { case portrait, landscape }
 
+    @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(\.railPageMargin) private var pageMargin
@@ -55,24 +56,29 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
+        .onScrollPhaseChange {
+            _, phase in if phase != .idle {
+                catalogBackdrop?.clearTapPriority()
+            }
+        }
         #if os(tvOS)
-            .scrollClipDisabled()
-            .focusSection()
-            .onChange(of: focusedItemID) { oldID, newID in
-                guard let newID else { return }
-                // `defaultFocus` is ignored when entering a focus section with the remote, so redirect by hand.
-                if oldID == nil, let target = entryItemID, target != newID {
-                    focusedItemID = target
-                    return
-                }
-                lastFocusedItemID = newID
+        .scrollClipDisabled()
+        .focusSection()
+        .onChange(of: focusedItemID) { oldID, newID in
+            guard let newID else { return }
+            // `defaultFocus` is ignored when entering a focus section with the remote, so redirect by hand.
+            if oldID == nil, let target = entryItemID, target != newID {
+                focusedItemID = target
+                return
             }
-            .onChange(of: isViewAllFocused) { _, isFocused in
-                // Moving back from "View all" lands on the last card, which must not be redirected.
-                if isFocused {
-                    lastFocusedItemID = items.last?.id
-                }
+            lastFocusedItemID = newID
+        }
+        .onChange(of: isViewAllFocused) { _, isFocused in
+            // Moving back from "View all" lands on the last card, which must not be redirected.
+            if isFocused {
+                lastFocusedItemID = items.last?.id
             }
+        }
         #endif
     }
 

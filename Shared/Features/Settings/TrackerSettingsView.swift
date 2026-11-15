@@ -29,6 +29,7 @@ struct TrackerSettingsView: View {
 
     var body: some View {
         content
+            .catalogBackdropDisabled()
             .onDisappear { connection.cancel() }
     }
 

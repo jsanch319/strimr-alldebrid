@@ -42,7 +42,7 @@
             }
             .scrollIndicators(.never)
             .scrollClipDisabled()
-            .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0 }
+            .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0; onVisibilityChange?($0) }
             .containerRelativeFrame(.vertical) { height, _ in
                 Self.height(for: height)
             }

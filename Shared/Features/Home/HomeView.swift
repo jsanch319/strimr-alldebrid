@@ -12,7 +12,8 @@ struct HomeView: View {
     @State private var hasAllDebridAccount = false
     @State private var scrollInteractionCount = 0
     @State private var featuredBackdropID: MediaIdentity?
-    @State private var selectedBackdropMedia: MediaItem?
+    @State private var backdropSelection = CatalogBackdropSelection()
+    @State private var heroBackdropVisible = true
     @State private var catalogSelection: CatalogHomeData.Selection?
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -54,8 +55,9 @@ struct HomeView: View {
                     onDetails: { select(.playable($0)) },
                     onFeaturedChange: { media in
                         featuredBackdropID = media?.identity
-                        selectedBackdropMedia = nil
+                        backdropSelection.clearTapPriority()
                     },
+                    onVisibilityChange: { heroBackdropVisible = $0 },
                 )
             }
 
@@ -106,13 +108,12 @@ struct HomeView: View {
             .padding(.horizontal, LayoutMetrics.pageMargin)
             .padding(.vertical, 20)
         }
-        .background {
-            #if os(iOS)
-                if viewModel.isServerFree {
-                    CatalogHomeBackdrop(media: backdropMedia)
-                }
-            #endif
-        }
+        .catalogBackdrop(
+            media: backdropMedia,
+            selection: backdropSelection,
+            preferDefault: heroBackdropVisible && !viewModel.heroSlides.isEmpty,
+            enabled: viewModel.isServerFree,
+        )
         .onScrollPhaseChange { _, phase in
             if phase != .idle {
                 scrollInteractionCount += 1
@@ -126,7 +127,11 @@ struct HomeView: View {
         .navigationTitle("tabs.home")
         .tabRootChrome()
         .navigationDestination(item: $catalogSelection) { selection in
-            TMDBDetailView(title: selection.title, initialSeason: selection.episode?.season_number)
+            TMDBDetailView(
+                title: selection.title,
+                initialSeason: selection.episode?.season_number,
+                initialEpisode: selection.episode,
+            )
         }
         .toolbar {
             if viewModel.isServerFree {
@@ -241,7 +246,7 @@ struct HomeView: View {
     }
 
     private var backdropMedia: MediaItem? {
-        selectedBackdropMedia ?? viewModel.heroSlides.first { $0.media.identity == featuredBackdropID }?.media
+        viewModel.heroSlides.first { $0.media.identity == featuredBackdropID }?.media
             ?? viewModel.heroSlides.first?.media
     }
 
@@ -256,7 +261,7 @@ struct HomeView: View {
 
     private func select(_ media: MediaDisplayItem) {
         guard let catalog = viewModel.catalog, let item = media.playableItem else { onSelectMedia(media); return }
-        selectedBackdropMedia = item
+        backdropSelection.select(item)
         if let selection = catalog.selection(for: item) {
             catalogSelection = selection
         } else if let selection = catalog.rawSelection(for: item) {
@@ -266,7 +271,7 @@ struct HomeView: View {
 
     private func play(_ media: MediaItem) {
         guard let catalog = viewModel.catalog else { mediaCardActions?.play(media, false); return }
-        selectedBackdropMedia = media
+        backdropSelection.select(media)
         if let selection = catalog.selection(for: media) {
             if selection.title.kind == .tv, selection.episode == nil {
                 catalogSelection = selection
@@ -296,9 +301,11 @@ private struct CatalogHubView: View {
     @Environment(\.dismiss) private var dismiss
     let hub: Hub
     var showsCloseButton = true
+    var usesBackdrop = true
     let onSelect: (MediaDisplayItem) -> Void
     var body: some View {
         HubDetailView(viewModel: HubDetailViewModel(hub: hub), onSelectMedia: onSelect)
+            .catalogBackdrop(media: hub.items.first?.playableItem, enabled: usesBackdrop)
             .toolbar {
                 if showsCloseButton {
                     ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } }
@@ -314,8 +321,13 @@ struct CatalogSearchView: View {
     @State private var query = ""
     var body: some View {
         VStack {
-            CatalogHubView(hub: data.searchRow.hub, showsCloseButton: showsCloseButton, onSelect: onSelect)
-                .id(data.searchRow.hub)
+            CatalogHubView(
+                hub: data.searchRow.hub,
+                showsCloseButton: showsCloseButton,
+                usesBackdrop: false,
+                onSelect: onSelect,
+            )
+            .id(data.searchRow.hub)
             if data.isSearching {
                 ProgressView()
             }
@@ -326,6 +338,11 @@ struct CatalogSearchView: View {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .catalogBackdrop(media: data.searchResults.first.map { CatalogMediaAdapter.make(
+            title: $0,
+            episode: nil,
+            resume: nil,
+        ) })
         .navigationTitle("tabs.search")
         .searchable(text: $query, prompt: "Search movies and TV shows")
         .task(id: query) { await data.search(query) }

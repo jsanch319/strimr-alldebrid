@@ -12,6 +12,11 @@ struct CatalogSourcesView: View {
     @State private var error: String?
     @State private var request: Request?
     @State private var resumes = true
+    init(title: TMDBTitle, episode: TMDBEpisode?, startsFromBeginning: Bool = false) {
+        self.title = title; self.episode = episode
+        _resumes = State(initialValue: !startsFromBeginning)
+    }
+
     private struct Request: Identifiable {
         let id = UUID()
         let url: URL
