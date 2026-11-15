@@ -15,7 +15,7 @@ nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
     let vote_average: Double?
     let genres: [Genre]?
     let seasons: [Season]?
-    let external_ids: ExternalIDs?
+    let external_ids: RemoteIDs?
 
     struct Genre: Decodable, Hashable, Sendable { let id: Int; let name: String }
     struct Season: Decodable, Identifiable, Hashable, Sendable {
@@ -25,7 +25,30 @@ nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
         let episode_count: Int
     }
 
-    struct ExternalIDs: Decodable, Hashable, Sendable { let imdb_id: String?; let tvdb_id: Int? }
+    struct RemoteIDs: Decodable, Hashable, Sendable { let imdb_id: String?; let tvdb_id: Int? }
+    /// Reuses the app's identity format for Simkl and file/source matching.
+    var matchingIDs: ExternalIDs {
+        ExternalIDs(imdb: external_ids?.imdb_id, tmdb: String(id), tvdb: external_ids?.tvdb_id.map(String.init))
+    }
+
+    func trackerItem(episode: TMDBEpisode? = nil) -> TrackerItem? {
+        switch (kind, episode) {
+        case (.movie, nil):
+            TrackerItem(kind: .movie, ids: matchingIDs, title: displayTitle, year: Int(date.prefix(4)))
+        case let (.tv, episode?):
+            TrackerItem(
+                kind: .episode,
+                ids: matchingIDs,
+                title: displayTitle,
+                year: Int(date.prefix(4)),
+                season: episode.season_number,
+                episode: episode.episode_number,
+            )
+        default:
+            nil
+        }
+    }
+
     var kind: Kind {
         media_type == "tv" ? .tv : .movie
     }

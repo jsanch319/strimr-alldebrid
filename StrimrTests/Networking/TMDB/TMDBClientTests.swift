@@ -69,8 +69,15 @@ struct TMDBClientTests {
         #expect(detail.catalogID == "tv:12")
         #expect(detail.seasons?.map(\.season_number) == [0, 1])
         #expect(detail.external_ids?.imdb_id == "tt123")
+        #expect(detail.matchingIDs.tmdb == "12")
+        #expect(detail.trackerItem() == nil)
         let episodes = try await client.episodes(tvID: detail.id, season: 0)
-        #expect(episodes.first?.name == "Special")
+        let episode = try #require(episodes.first)
+        #expect(episode.name == "Special")
+        let tracked = try #require(detail.trackerItem(episode: episode))
+        #expect(tracked.ids.tmdb == "12")
+        #expect(tracked.season == 0)
+        #expect(tracked.episode == 1)
         #expect(stub.requests.last?.url?.path == "/3/tv/12/season/0")
     }
 }

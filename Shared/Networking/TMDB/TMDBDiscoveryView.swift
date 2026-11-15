@@ -19,7 +19,8 @@ struct TMDBDiscoveryView: View {
                 Button("TMDb Settings") { configuring = true }
             }
             TextField("Search movies and TV shows", text: $query)
-                .textFieldStyle(.roundedBorder)
+                .padding(12)
+                .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             if loading {
                 ProgressView("Loading TMDb…")
             }
@@ -199,7 +200,18 @@ private struct TMDBDetailView: View {
                     ForEach(episodes) { episode in
                         VStack(alignment: .leading, spacing: 6) {
                             Text("\(episode.episode_number). \(episode.name)").font(.headline)
+                            if let path = episode.still_path {
+                                TMDBArtwork(path: path, backdrop: true).frame(height: 160).clipped()
+                            }
                             Text(episode.air_date ?? "Air date unknown").font(.caption)
+                            if let runtime = episode.runtime {
+                                Text("Runtime: \(runtime) min").font(.caption)
+                            }
+                            if let rating = episode
+                                .vote_average
+                            {
+                                Text("TMDb Rating: \(rating, specifier: "%.1f") / 10").font(.caption)
+                            }
                             Text(episode.overview ?? "").font(.subheadline).foregroundStyle(.secondary)
                         }
                     }

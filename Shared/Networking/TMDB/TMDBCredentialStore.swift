@@ -33,14 +33,18 @@ nonisolated struct TMDBCredentialStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        let deleteStatus = SecItemDelete(query as CFDictionary)
-        guard deleteStatus == errSecSuccess || deleteStatus == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(deleteStatus)
-        }
-        let attributes = query.merging([
+        let values: [String: Any] = [
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(apiKey.utf8),
-        ]) { $1 }
+        ]
+        let updateStatus = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        if updateStatus == errSecSuccess {
+            return
+        }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(updateStatus)
+        }
+        let attributes = query.merging(values) { $1 }
         let status = SecItemAdd(attributes as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw KeychainError.unexpectedStatus(status)
