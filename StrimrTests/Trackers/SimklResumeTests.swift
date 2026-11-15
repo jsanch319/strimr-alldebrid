@@ -395,6 +395,18 @@ struct SimklResumeTests {
         #expect(cache.progress(title: .reference(id: 99, kind: .movie), episode: nil, scope: "a")?.resumeOffset == 55.5)
     }
 
+    @Test func `a real pause before one second is retained without accepting startup zero`() {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let title = TMDBTitle.reference(id: 12, kind: .movie)
+        let recorder = cache.makeRecorder(title: title, episode: nil, scope: "a")
+        recorder.record(position: 0, duration: 1000, isPaused: false)
+        #expect(cache.records(scope: "a").isEmpty)
+        recorder.record(position: 0.625, duration: 1000, isPaused: true)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 0.625)
+        recorder.stop(position: 0.75)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 0.75)
+    }
+
     @Test func `unfinished checkpoints are not evicted by a library size cap`() throws {
         let defaults = TestDefaults.make()
         let cache = CatalogProgressStore(defaults: defaults)

@@ -867,6 +867,7 @@ final class PlayerViewModel {
         if isCatalogPlayback, isPaused, isBuffering {
             // A pause can arrive while the timeline still reports buffering.
             saveProgress()
+            trackerSession?.paused(position: position, duration: duration ?? media?.duration)
         }
 
         if previousState != playbackState {

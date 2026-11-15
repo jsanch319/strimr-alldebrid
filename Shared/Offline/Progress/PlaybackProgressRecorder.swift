@@ -136,7 +136,7 @@ final class PlaybackProgressRecorder {
             return nil
         }
         // The player reports position 0 before seeking to the resume point; do not let it erase local progress.
-        guard hasStarted || position >= 1 else { return nil }
+        guard hasStarted || position >= 1 || (destination != nil && position > 0) else { return nil }
         let event: ProgressJournalEvent
         let reportState: ItemPlaybackReportState
         if !hasStarted {
