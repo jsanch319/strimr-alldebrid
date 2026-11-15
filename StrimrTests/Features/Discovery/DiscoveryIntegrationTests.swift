@@ -96,7 +96,7 @@ struct DiscoveryIntegrationTests {
         await #expect(throws: TrackerAPIError.notFound) { try await client.setPlanned(title, planned: true) }
     }
 
-    @Test func `sync gates pulls on activities preserves cache on failure and isolates profiles`() async {
+    @Test func `sync gates pulls on activities preserves cache on failure and isolates profiles`() async throws {
         let defaults = TestDefaults.make()
         let accounts = TrackerAccountStore(userDefaults: defaults, secureStore: InMemorySecureStore())
         let stub = HTTPStub { request in
