@@ -83,8 +83,8 @@ enum DiscordWatchTogetherConfiguration {
             guard let discordURL = URL(string: "discord://"),
                   UIApplication.shared.canOpenURL(discordURL)
             else {
-                 completion(.discordNotInstalled)
-                 return
+                completion(.discordNotInstalled)
+                return
             }
             UIApplication.shared.open(url) { opened in
                 completion(opened ? .opened : .activityUnavailable)
