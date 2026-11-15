@@ -864,6 +864,10 @@ final class PlayerViewModel {
         let previousState = playbackState
         self.isPaused = isPaused
         self.isBuffering = isBuffering
+        if isCatalogPlayback, isPaused, isBuffering {
+            // A pause can arrive while the timeline still reports buffering.
+            saveProgress()
+        }
 
         if previousState != playbackState {
             reportTimeline(state: playbackState, force: true)

@@ -561,6 +561,12 @@ extension CatalogProgressStore {
             }
         }
         guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
+        // Another episode may have started while a network replay was suspended.
+        for current in records(scope: scope) where current.exactCheckpoint != nil {
+            if current.updatedAt > (resolved[current.id]?.updatedAt ?? .distantPast) {
+                resolved[current.id] = current
+            }
+        }
         replace(Array(resolved.values), scope: scope)
         return (replayed, unmapped)
     }

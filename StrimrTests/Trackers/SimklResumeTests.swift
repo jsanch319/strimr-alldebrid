@@ -273,8 +273,11 @@ struct SimklResumeTests {
         model.handlePlaybackState(isPaused: false, isBuffering: true)
         model.saveProgress()
         #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 610.375)
+        model.handlePlaybackPosition(611.125, isScrubbing: false)
+        model.handlePlaybackState(isPaused: true, isBuffering: true)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 611.125)
         model.handleStop()
-        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 610.375)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 611.125)
     }
 
     @Test func `completion clear and restart fence off stale pauses without sharing episode positions`() async throws {
@@ -332,11 +335,20 @@ struct SimklResumeTests {
             tmdb: metadata(),
             replay: { _, _, _ in
                 cache.save(title: title, episode: nil, position: 200.125, duration: 1000, finished: false, scope: "a")
+                cache.save(
+                    title: .reference(id: 99, kind: .movie),
+                    episode: nil,
+                    position: 55.5,
+                    duration: 1000,
+                    finished: false,
+                    scope: "a",
+                )
                 return true
             },
         )
         #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 200.125)
         #expect(cache.progress(title: title, episode: nil, scope: "a")?.pendingSync == true)
+        #expect(cache.progress(title: .reference(id: 99, kind: .movie), episode: nil, scope: "a")?.resumeOffset == 55.5)
     }
 
     @Test func `unfinished checkpoints are not evicted by a library size cap`() throws {
