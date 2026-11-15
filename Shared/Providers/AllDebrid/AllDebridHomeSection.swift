@@ -153,12 +153,18 @@ struct AllDebridOnlyHomeView: View {
             .navigationTitle("tabs.home")
             .sheet(item: $selectedItem) { item in
                 let initialFile: AllDebridMagnetFile? = {
-                    if case let .magnetFile(file) = item { return file }
-                    return nil
+                    if case let .magnetFile(file) = item {
+                        return file
+                    } else {
+                        return nil
+                    }
                 }()
                 let initialLink: AllDebridSavedLink? = {
-                    if case let .savedLink(link) = item { return link }
-                    return nil
+                    if case let .savedLink(link) = item {
+                        return link
+                    } else {
+                        return nil
+                    }
                 }()
 
                 AllDebridLibraryView(
