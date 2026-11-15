@@ -39,27 +39,24 @@ final class CatalogHomeData {
 
     var rows: [HomeRow] {
         var rows: [HomeRow] = []
-        for kind in [TMDBTitle.Kind.movie, .tv] {
-            let items = progressRecords.filter { $0.title.kind == kind }.map { record in
-                let duration = record.duration ?? (record.episode?.runtime ?? record.title.runtime)
-                    .map { Double($0) * 60 }
-                let offset = record.pendingSync == false && record
-                    .remotePercentage != nil ? (duration.map { $0 * record.fraction }) : record.position
-                return CatalogMediaAdapter.make(
-                    title: record.title,
-                    episode: record.episode,
-                    resume: offset,
-                    duration: duration,
-                )
-            }
-            rows.append(Self.row(
-                id: "catalog:continue:\(kind.rawValue)",
-                title: kind == .movie ? "Continue Watching Movies" : "Continue Watching TV Shows",
-                kind: .continueWatching,
-                style: .landscape,
-                items: items,
-            ))
+        let items = progressRecords.sorted { $0.updatedAt > $1.updatedAt }.map { record in
+            let duration = record.duration ?? (record.episode?.runtime ?? record.title.runtime).map { Double($0) * 60 }
+            let offset = record.pendingSync == false && record.remotePercentage != nil
+                ? duration.map { $0 * record.fraction } : record.position
+            return CatalogMediaAdapter.make(
+                title: record.title,
+                episode: record.episode,
+                resume: offset,
+                duration: duration,
+            )
         }
+        rows.append(Self.row(
+            id: "catalog:continue",
+            title: "Continue Watching",
+            kind: .continueWatching,
+            style: .landscape,
+            items: items,
+        ))
         let next = discovery.nextUp.compactMap { entry -> MediaItem? in
             guard let title = discovery.title(for: entry), let next = entry.nextEpisode else { return nil }
             let episode = TMDBEpisode(
@@ -92,12 +89,6 @@ final class CatalogHomeData {
                 items: (feeds[feed] ?? []).map { CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil) },
             ))
         }
-        let recent = Array(files.filter(\.isVideo).prefix(20)).map { rawMedia(
-            id: "magnet:\($0.id)",
-            filename: $0.filename,
-        ) }
-            + Array(links.filter(\.isVideo).prefix(10)).map { rawMedia(id: "saved:\($0.id)", filename: $0.filename) }
-        rows.append(Self.row(id: "catalog:recent", title: "Recently Added to AllDebrid", items: recent))
         return rows.filter(\.hub.hasItems)
     }
 
@@ -236,9 +227,5 @@ final class CatalogHomeData {
                 items: items.map(MediaDisplayItem.playable),
             ),
         )
-    }
-
-    private func rawMedia(id: String, filename: String) -> MediaItem {
-        CatalogMediaAdapter.raw(id: id, filename: filename)
     }
 }

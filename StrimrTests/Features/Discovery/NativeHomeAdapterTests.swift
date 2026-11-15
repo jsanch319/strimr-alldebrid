@@ -27,7 +27,7 @@ struct NativeHomeAdapterTests {
             finished: false,
             scope: discovery.scope,
         )
-        let row = try #require(home.rows.first { $0.id == "catalog:continue:movie" })
+        let row = try #require(home.rows.first { $0.id == "catalog:continue" })
         #expect(row.kind == .continueWatching)
         #expect(row.style == .landscape)
         let media = try #require(row.items.first?.playableItem)
@@ -38,7 +38,7 @@ struct NativeHomeAdapterTests {
         #expect(media.remainingTimeText?.contains("%") == false)
     }
 
-    @Test func `TV progress stays in its own native row with episode metadata`() throws {
+    @Test func `TV progress uses the combined native row with episode metadata`() throws {
         let (home, progress, discovery) = stores()
         let title = TMDBTitle.reference(id: 12, kind: .tv, title: "Show")
         let episode = try JSONDecoder().decode(
@@ -53,14 +53,47 @@ struct NativeHomeAdapterTests {
             finished: false,
             scope: discovery.scope,
         )
-        let row = try #require(home.rows.first { $0.id == "catalog:continue:tv" })
+        let row = try #require(home.rows.first { $0.id == "catalog:continue" })
         let media = try #require(row.items.first?.playableItem)
         #expect(media.type == .episode)
         #expect(media.grandparentTitle == "Show")
         #expect(media.parentIndex == 2)
         #expect(media.index == 3)
         #expect(media.remainingTimeText == RemainingTimeFormatter.text(duration: 1800, viewOffset: 600))
-        #expect(home.rows.contains { $0.id == "catalog:continue:movie" } == false)
+        #expect(home.rows.filter { $0.kind == .continueWatching }.count == 1)
+    }
+
+    @Test func `mixed progress appears once above discovery without raw file rows`() throws {
+        let (home, progress, discovery) = stores()
+        let movie = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        let show = TMDBTitle.reference(id: 12, kind: .tv, title: "Show")
+        let episode = try JSONDecoder().decode(
+            TMDBEpisode.self,
+            from: Data(#"{"id":1,"season_number":1,"episode_number":2,"name":"Episode"}"#.utf8),
+        )
+        progress.save(
+            title: movie,
+            episode: nil,
+            position: 600,
+            duration: 3600,
+            finished: false,
+            scope: discovery.scope,
+        )
+        progress.save(
+            title: show,
+            episode: episode,
+            position: 300,
+            duration: 1800,
+            finished: false,
+            scope: discovery.scope,
+        )
+        let rows = home.rows.filter { $0.kind == .continueWatching }
+        #expect(rows.count == 1)
+        #expect(rows.first?.hub.title == "Continue Watching")
+        #expect(rows.first?.items.count == 2)
+        #expect(rows.first?.items.first?.playableItem?.type == .episode)
+        #expect(home.rows.first?.id == "catalog:continue")
+        #expect(!home.rows.contains { $0.id == "catalog:recent" })
     }
 
     @Test func `native hero supports movie and TV identities and respects the off setting`() {

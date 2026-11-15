@@ -4,6 +4,25 @@ import Testing
 
 @MainActor
 struct TMDBClientTests {
+    @Test func `provider discovery scopes subscriptions to region and preserves TV identity`() async throws {
+        let stub = HTTPStub { _ in
+            .json(#"{"results":[{"id":12,"name":"Series"}],"total_results":1,"total_pages":1}"#)
+        }
+        let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })
+        let result = try await client.providerTitles(ids: [9, 8], kind: .tv, region: "GB", page: 2)
+        #expect(result.results.first?.catalogID == "tv:12")
+        let url = try #require(stub.requests.first?.url)
+        #expect(url.path == "/3/discover/tv")
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(query.first { $0.name == "with_watch_providers" }?.value == "8|9")
+        #expect(query.first { $0.name == "watch_region" }?.value == "GB")
+        #expect(query.first { $0.name == "with_watch_monetization_types" }?.value == "flatrate")
+        #expect(query.first { $0.name == "page" }?.value == "2")
+        let empty = try await client.providerTitles(ids: [], kind: .movie, region: "GB")
+        #expect(empty.results.isEmpty)
+        #expect(stub.requests.count == 1)
+    }
+
     @Test func `direct catalog requests use bearer authentication and cache results`() async throws {
         let stub = HTTPStub { _ in .json(#"{"results":[{"id":12,"name":"Example TV"}]}"#) }
         let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })

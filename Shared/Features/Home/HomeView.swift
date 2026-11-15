@@ -78,6 +78,10 @@ struct HomeView: View {
                     )
                 }
 
+                if viewModel.isServerFree {
+                    StreamingServicesSection()
+                }
+
                 if viewModel.isLoading, !viewModel.hasContent {
                     RailsSkeleton(showsLabels: settingsManager.interface.showsCardLabels)
                 }

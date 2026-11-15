@@ -208,6 +208,51 @@ actor TMDBClient {
         return result.episodes
     }
 
+    nonisolated struct WatchProvider: Decodable, Sendable {
+        let provider_id: Int
+        let provider_name: String
+        let logo_path: String?
+    }
+
+    nonisolated struct WatchRegion: Decodable, Identifiable, Sendable {
+        let iso_3166_1: String
+        let english_name: String
+        var id: String {
+            iso_3166_1
+        }
+    }
+
+    nonisolated struct ProviderPage: Decodable, Sendable {
+        var results: [TMDBTitle]
+        let total_results: Int
+        let total_pages: Int
+    }
+
+    func watchProviders(kind: TMDBTitle.Kind) async throws -> [WatchProvider] {
+        struct Response: Decodable { let results: [WatchProvider] }
+        let response: Response = try await get("watch/providers/\(kind.rawValue)")
+        return response.results
+    }
+
+    func watchRegions() async throws -> [WatchRegion] {
+        struct Response: Decodable { let results: [WatchRegion] }
+        let response: Response = try await get("watch/providers/regions")
+        return response.results.sorted { $0.english_name < $1.english_name }
+    }
+
+    func providerTitles(ids: [Int], kind: TMDBTitle.Kind, region: String, page: Int = 1) async throws -> ProviderPage {
+        guard !ids.isEmpty else { return ProviderPage(results: [], total_results: 0, total_pages: 0) }
+        var response: ProviderPage = try await get("discover/\(kind.rawValue)", query: [
+            URLQueryItem(name: "with_watch_providers", value: ids.sorted().map(String.init).joined(separator: "|")),
+            URLQueryItem(name: "watch_region", value: region),
+            URLQueryItem(name: "with_watch_monetization_types", value: "flatrate"),
+            URLQueryItem(name: "sort_by", value: "popularity.desc"),
+            URLQueryItem(name: "page", value: String(page)),
+        ])
+        response.results = response.results.map { var title = $0; title.media_type = kind.rawValue; return title }
+        return response
+    }
+
     private func titles(path: String, kind: TMDBTitle.Kind, page: Int) async throws -> [TMDBTitle] {
         let result: Page = try await get(path, query: [URLQueryItem(name: "page", value: String(page))])
         return result.results.map { var title = $0; title.media_type = kind.rawValue; return title }
