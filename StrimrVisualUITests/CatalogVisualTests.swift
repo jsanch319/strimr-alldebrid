@@ -75,6 +75,22 @@ final class CatalogVisualTests: XCTestCase {
         let services = app.staticTexts["Streaming Services"].firstMatch
         scrollTo(services)
         capture("03-Streaming-Services")
+        let netflix = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@",
+            "Netflix, streaming movies and series",
+        )).firstMatch
+        scrollTo(netflix)
+        netflix.tap()
+        XCTAssertTrue(app.navigationBars["Netflix"].waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertTrue(card("movie:693134").waitForExistence(timeout: 20))
+        app.segmentedControls.buttons["TV Shows"].tap()
+        XCTAssertTrue(card("tv:95396").waitForExistence(timeout: 20))
+        XCTAssertFalse(card("movie:693134").exists)
+        card("tv:95396").tap()
+        XCTAssertTrue(app.staticTexts["catalog.detail.title"].waitForExistence(timeout: 15))
+        XCTAssertEqual(app.staticTexts["catalog.detail.title"].label, "Severance")
+        app.navigationBars.buttons.firstMatch.tap()
+        app.buttons["Close"].tap()
         app.swipeUp()
         capture("04-Home-Scrolled")
     }

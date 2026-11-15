@@ -411,33 +411,6 @@
     },
     {
       "status": "plantowatch",
-      "movie": {
-        "title": "Inception",
-        "ids": {
-          "tmdb": "27205"
-        }
-      }
-    },
-    {
-      "status": "plantowatch",
-      "show": {
-        "title": "The Last of Us",
-        "ids": {
-          "tmdb": "100088"
-        }
-      }
-    },
-    {
-      "status": "plantowatch",
-      "movie": {
-        "title": "Interstellar",
-        "ids": {
-          "tmdb": "157336"
-        }
-      }
-    },
-    {
-      "status": "plantowatch",
       "show": {
         "title": "Silo",
         "ids": {
@@ -453,6 +426,16 @@
         "title": "Severance",
         "ids": {
           "tmdb": "95396"
+        }
+      }
+    },
+    {
+      "status": "watching",
+      "last_watched_at": "2026-11-01T11:00:00Z",
+      "movie": {
+        "title": "Dune: Part Two",
+        "ids": {
+          "tmdb": "693134"
         }
       }
     }

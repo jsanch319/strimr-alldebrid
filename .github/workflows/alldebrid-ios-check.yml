@@ -61,6 +61,8 @@ jobs:
               print("No installed iPhone simulator runtime: launch behavior remains unverified.")
               raise SystemExit(0)
           runtime, device = available[0]
+          with open("build/simulator.json", "w") as output:
+              json.dump({"runtime": runtime, "model": device["name"], "deviceType": device["deviceTypeIdentifier"]}, output, indent=2)
           identifier = subprocess.check_output(["xcrun", "simctl", "create", "Strimr launch smoke", device["deviceTypeIdentifier"], runtime], text=True).strip()
           with open(os.environ["GITHUB_ENV"], "a") as output:
               output.write("STRIMR_SMOKE_ID=" + identifier + "\n")
@@ -106,6 +108,7 @@ jobs:
           name: ios-catalog-visual-tests
           path: |
             build/screenshots
+            build/simulator.json
             build/visual-tests.log
             build/CatalogVisualTests.xcresult
           if-no-files-found: ignore

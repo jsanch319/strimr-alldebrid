@@ -394,7 +394,6 @@
 			);
 			fileSystemSynchronizedGroups = (
 				E9A7E5700000000000000002 /* StrimrTests */,
-				E9A8F1000000000000000002 /* StrimrVisualUITests */,
 			);
 			name = StrimrTests;
 			productName = StrimrTests;
