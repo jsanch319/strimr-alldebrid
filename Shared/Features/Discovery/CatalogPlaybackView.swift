@@ -94,6 +94,7 @@ struct CatalogSourcesView: View {
     private func play(_ source: AllDebridTitleMatcher.Source) async {
         loading = true; error = nil
         defer { loading = false }
+        let scope = DiscoveryStore.shared.scope
         do {
             guard let key = try AllDebridCredentialStore().load()
             else { throw AllDebridAPIClient.APIError.invalidAPIKey }
@@ -109,7 +110,8 @@ struct CatalogSourcesView: View {
             } else {
                 []
             }
-            request = Request(url: resolved.url, subtitles: subtitles, scope: DiscoveryStore.shared.scope)
+            guard DiscoveryStore.shared.scope == scope else { throw TrackerAPIError.unavailable }
+            request = Request(url: resolved.url, subtitles: subtitles, scope: scope)
         } catch { self.error = error.localizedDescription }
     }
 }

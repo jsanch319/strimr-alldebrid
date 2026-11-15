@@ -172,7 +172,8 @@ final class DiscoveryStore {
                 for type in ["movies", "shows"] {
                     let delta = try await client.library(type: type, since: since)
                     let changed = Set(delta.map(\.id))
-                    merged.removeAll { changed.contains($0.id) }
+                    let catalogIDs = Set(delta.compactMap(\.catalogID))
+                    merged.removeAll { changed.contains($0.id) || $0.catalogID.map { catalogIDs.contains($0) } == true }
                     merged += delta
                 }
                 if let old = snapshot?.activities, old.removals != activities.removals {
@@ -219,8 +220,17 @@ final class DiscoveryStore {
         guard self.scope == scope, coordinator.simklLibraryClient === client else { throw TrackerAPIError.unavailable }
         try await client.setPlanned(title, planned: planned)
         guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
-        // Full refresh is explicit after a user mutation. Never advance an incremental checkpoint over this write.
-        snapshot = nil
+        // Apply a confirmed write locally, retaining the pre-write checkpoint for the next delta.
+        var changed = entry(for: title) ?? SimklListEntry.planned(title)
+        changed.status = "plantowatch"
+        entries.removeAll { $0.catalogID == title.catalogID }
+        if planned {
+            entries.append(changed)
+        }
+        if snapshot != nil {
+            snapshot?.entries = entries
+            try defaults.set(JSONEncoder().encode(snapshot), forKey: "strimr.simkl.library.\(scope)")
+        }
         lastSync = nil
         retryAt = nil
         await sync(force: true)

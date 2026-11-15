@@ -7,6 +7,10 @@ nonisolated struct SimklCatalogIDs: Codable, Hashable, Sendable {
     let imdb: String?
     let tvdb: String?
     enum CodingKeys: String, CodingKey { case simkl, tmdb, imdb, tvdb }
+    init(tmdb: String, imdb: String? = nil, tvdb: String? = nil) {
+        simkl = nil; self.tmdb = tmdb; self.imdb = imdb; self.tvdb = tvdb
+    }
+
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         func text(_ key: CodingKeys) -> String? {
@@ -30,7 +34,7 @@ nonisolated struct SimklListEntry: Codable, Hashable, Identifiable, Sendable {
         let episodes: [Episode]?
     }
 
-    let status: String?
+    var status: String?
     let movie: Media?
     let show: Media?
     let last_watched_at: String?
@@ -38,6 +42,24 @@ nonisolated struct SimklListEntry: Codable, Hashable, Identifiable, Sendable {
     let seasons: [Season]?
     let watched_episodes_count: Int?
     let total_episodes_count: Int?
+    static func planned(_ title: TMDBTitle) -> SimklListEntry {
+        let media = Media(
+            title: title.displayTitle,
+            year: Int(title.date.prefix(4)),
+            ids: SimklCatalogIDs(tmdb: String(title.id), imdb: title.matchingIDs.imdb, tvdb: title.matchingIDs.tvdb),
+        )
+        return SimklListEntry(
+            status: "plantowatch",
+            movie: title.kind == .movie ? media : nil,
+            show: title.kind == .tv ? media : nil,
+            last_watched_at: nil,
+            next_to_watch: nil,
+            seasons: nil,
+            watched_episodes_count: nil,
+            total_episodes_count: nil,
+        )
+    }
+
     /// Only entries with a TMDb ID enter TMDb discovery. Never guess an anime mapping.
     var media: Media? {
         movie ?? show
