@@ -309,7 +309,7 @@ struct TMDBDetailView: View {
             }
             Text(item.overview ?? "No synopsis available.").foregroundStyle(.secondary)
                 .lineLimit(expandedSynopsis ? nil : 4)
-            if let overview = item.overview, overview.count > 180 {
+            if let overview = item.overview, !overview.isEmpty {
                 Button(expandedSynopsis ? "Read less" : "Read more") {
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { expandedSynopsis.toggle() }
                 }.buttonStyle(.plain).fontWeight(.semibold)

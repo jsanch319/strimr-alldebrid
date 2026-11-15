@@ -72,7 +72,8 @@ jobs:
           import time
           time.sleep(3)
           processes = subprocess.check_output(["xcrun", "simctl", "spawn", identifier, "launchctl", "list"], text=True)
-          if bundle not in processes:
+          running = [line.split() for line in processes.splitlines() if bundle in line]
+          if not any(row and row[0].isdigit() and int(row[0]) > 0 for row in running):
               raise RuntimeError("The app exited immediately after simulator launch")
           subprocess.run(["xcrun", "simctl", "io", identifier, "screenshot", "build/ios-launch-smoke.png"], check=True)
           print("iOS app startup smoke passed. This fresh simulator has no user API credentials; authenticated catalog interactions are not covered.")
