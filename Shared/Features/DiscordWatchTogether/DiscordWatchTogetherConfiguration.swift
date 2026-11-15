@@ -77,7 +77,6 @@ enum DiscordWatchTogetherConfiguration {
             case activityUnavailable
         }
 
-        
         @MainActor
         static func openActivityURL(_ url: URL, completion: @escaping (LaunchResult) -> Void) {
             guard let discordURL = URL(string: "discord://"),
