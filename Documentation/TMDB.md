@@ -5,7 +5,7 @@ Home now reads the TMDb catalog directly. No Plex, Jellyfin, Emby, or Seerr acco
 1. Create an account at https://www.themoviedb.org.
 2. Visit https://www.themoviedb.org/settings/api and request API access under TMDb's terms.
 3. Copy the **API Read Access Token** (v4 bearer token, not the v3 API key).
-4. On Home, open **TMDb Settings**, paste the token, and select **Save Token**.
+4. On Home, open the accounts menu → **TMDb Settings**, paste the token, and select **Save Token**.
 
 No build setting or GitHub Actions secret is needed. Each device stores its own token in Keychain using `AfterFirstUnlockThisDeviceOnly`. Do not commit or log tokens. Remove or replace the token through TMDb Settings; revoke it through TMDb if compromised. Shipping a private service credential inside an IPA would not keep it secret; use your own authenticated backend if deploying centrally managed credentials.
 
@@ -17,7 +17,7 @@ TMDb identities include both media type and numeric ID, since movie and TV IDs c
 
 ## Current boundaries
 
-The detail view now offers Simkl My List actions and matches movies/episodes to available AllDebrid files with explicit source selection and Simkl-backed resume positions with offline checkpoints. See [the integration guide](DISCOVERY_INTEGRATION.md) for setup, sync behavior, matching rules, and validation boundaries. Recommendations are related-title recommendations, not a personalized Simkl recommendation feed. Server-based Seerr hero behavior is preserved; the new direct TMDb discovery block also appears on server-backed Home. The featured discovery card shows one trending movie. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
+The detail view now offers Simkl My List actions and matches movies/episodes to available AllDebrid files with explicit source selection and Simkl-backed resume positions with offline checkpoints. See [the integration guide](DISCOVERY_INTEGRATION.md) for setup, sync behavior, matching rules, and validation boundaries. Recommendations are related-title recommendations, not a personalized Simkl recommendation feed. Server-based Seerr hero behavior is preserved; the new direct TMDb discovery block also appears on server-backed Home. Discovery uses the original Strimr hero carousel with movie/TV slides and the original card rows. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
 
 ## Validation
 

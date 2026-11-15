@@ -1,126 +1,5 @@
 import SwiftUI
 
-@MainActor
-struct TMDBDiscoveryView: View {
-    @State private var rows: [TMDBClient.Feed: [TMDBTitle]] = [:]
-    @State private var results: [TMDBTitle] = []
-    @State private var query = ""
-    @State private var error: String?
-    @State private var loading = false
-    @State private var configuring = false
-    @State private var token = ""
-    @State private var revision = 0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            HStack {
-                Text("Discover").font(.largeTitle.bold())
-                Spacer()
-                Button("TMDb Settings") { configuring = true }
-            }
-            DiscoveryPersonalRows()
-            TextField("Search movies and TV shows", text: $query)
-                .padding(12)
-                .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
-            if loading {
-                ProgressView("Loading TMDb…")
-            }
-            if let error {
-                Text(error).foregroundStyle(.secondary)
-                Button("Retry") { revision += 1 }
-            }
-            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                if let hero = rows[.trendingMovies]?.first {
-                    NavigationLink { TMDBDetailView(title: hero) } label: {
-                        ZStack(alignment: .bottomLeading) {
-                            TMDBArtwork(path: hero.backdrop_path, backdrop: true)
-                                .frame(height: 230).clipped()
-                            LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom)
-                            Text(hero.displayTitle).font(.title.bold()).foregroundStyle(.white).padding()
-                        }.clipShape(RoundedRectangle(cornerRadius: 16))
-                    }.buttonStyle(.plain)
-                }
-                ForEach(TMDBClient.Feed.allCases) { feed in
-                    if let titles = rows[feed], !titles.isEmpty {
-                        TMDBPosterRow(heading: feed.title, titles: titles)
-                    }
-                }
-            } else {
-                TMDBPosterRow(heading: "Search Results", titles: results)
-                if !loading, results.isEmpty, error == nil {
-                    Text("No movies or TV shows found.")
-                }
-            }
-            Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
-                .font(.caption).foregroundStyle(.secondary)
-            Link("The Movie Database", destination: URL(string: "https://www.themoviedb.org")!)
-        }
-        .task(id: "\(revision):\(query)") { await load() }
-        .sheet(isPresented: $configuring) {
-            NavigationStack {
-                Form {
-                    Section("TMDb API Read Access Token") {
-                        SecureField("Paste your read access token", text: $token)
-                        Text(
-                            "Create a TMDb account and request API access in Settings → API. The token is stored only in this device’s Keychain.",
-                        )
-                        Link("TMDb API Settings", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
-                        Button("Save Token") {
-                            do {
-                                let value = token.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !value.isEmpty else { throw TMDBError.missingToken }
-                                try TMDBCredentialStore().save(value)
-                                token = ""
-                                Task { await TMDBClient.shared.reset(); revision += 1 }
-                                configuring = false
-                            } catch { self.error = error.localizedDescription }
-                        }
-                        Button("Remove Token", role: .destructive) {
-                            do {
-                                try TMDBCredentialStore().delete()
-                                rows = [:]; results = []; token = ""
-                                Task { await TMDBClient.shared.reset(); revision += 1 }
-                                configuring = false
-                            } catch { self.error = error.localizedDescription }
-                        }
-                        if let error {
-                            Text(error).foregroundStyle(.red)
-                        }
-                    }
-                }
-                .navigationTitle("TMDb Setup")
-                .toolbar { Button("Done") { token = ""; configuring = false } }
-            }
-        }
-    }
-
-    private func load() async {
-        loading = true
-        error = nil
-        defer { loading = false }
-        do {
-            let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !search.isEmpty {
-                results = []
-                try await Task.sleep(for: .milliseconds(350))
-                let found = try await TMDBClient.shared.search(search)
-                try Task.checkCancellation()
-                results = found
-            } else {
-                for feed in TMDBClient.Feed.allCases {
-                    let titles = try await TMDBClient.shared.feed(feed)
-                    try Task.checkCancellation()
-                    rows[feed] = titles
-                }
-            }
-        } catch is CancellationError {
-        } catch {
-            guard !Task.isCancelled else { return }
-            self.error = error.localizedDescription
-        }
-    }
-}
-
 struct TMDBArtwork: View {
     let path: String?
     var backdrop = false
@@ -134,27 +13,22 @@ struct TMDBArtwork: View {
 }
 
 struct TMDBPosterRow: View {
+    @Environment(SettingsManager.self) private var settingsManager
     let heading: String
     let titles: [TMDBTitle]
+    @State private var selection: TMDBTitle?
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(heading).font(.title2.bold())
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(titles, id: \.catalogID) { title in
-                        NavigationLink { TMDBDetailView(title: title) } label: {
-                            VStack(alignment: .leading) {
-                                TMDBArtwork(path: title.poster_path)
-                                    .frame(width: 140, height: 210).clipped()
-                                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                                Text(title.displayTitle).font(.subheadline).lineLimit(2)
-                                Text(String(title.date.prefix(4))).font(.caption).foregroundStyle(.secondary)
-                            }.frame(width: 140, alignment: .leading)
-                        }.buttonStyle(.plain)
-                    }
-                }
-            }
+        MediaHubSection(title: heading) {
+            MediaCarousel(
+                layout: .portrait,
+                items: titles.map { .playable(CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil)) },
+                showsLabels: settingsManager.interface.showsCardLabels,
+                onSelectMedia: { media in
+                    selection = titles.first { $0.catalogID == media.id }
+                },
+            )
         }
+        .navigationDestination(item: $selection) { TMDBDetailView(title: $0) }
     }
 }
 
@@ -299,5 +173,50 @@ struct TMDBDetailView: View {
                 }
             }
         }
+    }
+}
+
+@MainActor
+struct TMDBSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var token = ""
+    @State private var error: String?
+    let onChanged: () -> Void
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("TMDb API Read Access Token") {
+                    SecureField("Paste your read access token", text: $token)
+                    Text(
+                        "Create a TMDb account and request API access in Settings → API. The token is stored in this device’s Keychain.",
+                    )
+                    Link("TMDb API Settings", destination: URL(string: "https://www.themoviedb.org/settings/api")!)
+                    Button("Save Token") { update(remove: false) }
+                        .disabled(token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Button("Remove Token", role: .destructive) { update(remove: true) }
+                    if let error {
+                        Text(error).foregroundStyle(.red)
+                    }
+                }
+                Section {
+                    Text("This product uses the TMDB API but is not endorsed or certified by TMDB.")
+                    Link("The Movie Database", destination: URL(string: "https://www.themoviedb.org")!)
+                }
+            }
+            .navigationTitle("TMDb Setup")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+        }
+    }
+
+    private func update(remove: Bool) {
+        do {
+            if remove {
+                try TMDBCredentialStore().delete()
+            } else {
+                try TMDBCredentialStore().save(token.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            token = ""
+            Task { await TMDBClient.shared.reset(); onChanged(); dismiss() }
+        } catch { self.error = error.localizedDescription }
     }
 }

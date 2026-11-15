@@ -189,6 +189,9 @@ struct PlayerView: View {
                 }
                 .onChange(of: playerController.duration) { _, newValue in
                     viewModel.handlePlaybackDuration(newValue)
+                    if viewModel.resumesFromRemotePercentage, !awaitingMediaLoad {
+                        applyResumeOffsetIfNeeded()
+                    }
                 }
                 .onChange(of: playerController.bufferedAhead) { _, newValue in
                     viewModel.handleBufferedAhead(newValue)
@@ -1266,6 +1269,9 @@ struct PlayerView: View {
         automaticSubtitleSearchKey = viewModel.currentRatingKey
         if sharePlayCoordinator.isInSession {
             sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
+        }
+        if viewModel.resumesFromRemotePercentage {
+            viewModel.handlePlaybackDuration(playerController.duration)
         }
         applyResumeOffsetIfNeeded()
         if shouldPauseAfterMediaLoad {

@@ -109,38 +109,36 @@ final class CatalogProgressStore {
         replace(records, scope: scope)
     }
 
-    #if !os(tvOS)
-        func makeRecorder(title: TMDBTitle, episode: TMDBEpisode?, scope: String) -> PlaybackProgressRecorder {
-            let key = CatalogProgress.key(title: title, episode: episode)
-            activeKeys.insert(scope + "|" + key)
-            let destination = PlaybackProgressRecorder.Destination(
-                resumePosition: { [weak self] in
-                    guard let record = self?.progress(title: title, episode: episode, scope: scope),
-                          !record.completed else { return nil }
-                    return record.position > 0 ? record.position : nil
-                },
-                checkpoint: { [weak self] position, duration, event in
-                    self?.save(
-                        title: title,
-                        episode: episode,
-                        position: position,
-                        duration: duration,
-                        finished: event == .watched,
-                        scope: scope,
-                        event: event.rawValue,
-                        protectInitialZero: false,
-                    )
-                    if event == .stop || event == .watched {
-                        self?.activeKeys.remove(scope + "|" + key)
-                    }
-                },
-            )
-            return PlaybackProgressRecorder(
-                destination: destination,
-                duration: progress(title: title, episode: episode, scope: scope)?.duration,
-            )
-        }
-    #endif
+    func makeRecorder(title: TMDBTitle, episode: TMDBEpisode?, scope: String) -> PlaybackProgressRecorder {
+        let key = CatalogProgress.key(title: title, episode: episode)
+        activeKeys.insert(scope + "|" + key)
+        let destination = PlaybackProgressRecorder.Destination(
+            resumePosition: { [weak self] in
+                guard let record = self?.progress(title: title, episode: episode, scope: scope),
+                      !record.completed else { return nil }
+                return record.position > 0 ? record.position : nil
+            },
+            checkpoint: { [weak self] position, duration, event in
+                self?.save(
+                    title: title,
+                    episode: episode,
+                    position: position,
+                    duration: duration,
+                    finished: event == .watched,
+                    scope: scope,
+                    event: event.rawValue,
+                    protectInitialZero: false,
+                )
+                if event == .stop || event == .watched {
+                    self?.activeKeys.remove(scope + "|" + key)
+                }
+            },
+        )
+        return PlaybackProgressRecorder(
+            destination: destination,
+            duration: progress(title: title, episode: episode, scope: scope)?.duration,
+        )
+    }
 }
 
 /// Persisted per profile and Simkl account. Incremental pulls are always gated by activities.

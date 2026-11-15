@@ -7,15 +7,18 @@ import Foundation
 final class PlaybackProgressRecorder {
     static let watchedThreshold = 0.9
 
-    private let owner: MediaOwner?
+    #if !os(tvOS)
+        private let owner: MediaOwner?
+        private let store: OfflineStore?
+        private let coordinator: OfflineCoordinator?
+    #endif
     private let itemID: String
     private let media: MediaItem?
-    private let store: OfflineStore?
-    private let coordinator: OfflineCoordinator?
     private let pushesImmediately: Bool
     private var duration: TimeInterval?
     private let completionThreshold: Double
     private var hasStarted = false
+    private var hasStopped = false
     private var hasReportedWatched = false
     private var pushTask: Task<Void, Never>?
 
@@ -30,84 +33,94 @@ final class PlaybackProgressRecorder {
 
     init(destination: Destination, duration: TimeInterval?, watchedThreshold: Double = 1) {
         completionThreshold = watchedThreshold
-        owner = nil; itemID = ""; media = nil; store = nil; coordinator = nil
+        #if !os(tvOS)
+            owner = nil; store = nil; coordinator = nil
+        #endif
+        itemID = ""; media = nil
         pushesImmediately = false
         self.destination = destination
         self.duration = duration
     }
 
-    init(
-        owner: MediaOwner,
-        itemID: String,
-        duration: TimeInterval?,
-        media: MediaItem? = nil,
-        pushesImmediately: Bool = true,
-        store: OfflineStore,
-        coordinator: OfflineCoordinator,
-    ) {
-        completionThreshold = Self.watchedThreshold
-        self.owner = owner
-        self.itemID = itemID
-        self.media = media
-        self.duration = duration
-        self.pushesImmediately = pushesImmediately
-        self.store = store
-        self.coordinator = coordinator
-    }
+    #if !os(tvOS)
+        init(
+            owner: MediaOwner,
+            itemID: String,
+            duration: TimeInterval?,
+            media: MediaItem? = nil,
+            pushesImmediately: Bool = true,
+            store: OfflineStore,
+            coordinator: OfflineCoordinator,
+        ) {
+            completionThreshold = Self.watchedThreshold
+            self.owner = owner
+            self.itemID = itemID
+            self.media = media
+            self.duration = duration
+            self.pushesImmediately = pushesImmediately
+            self.store = store
+            self.coordinator = coordinator
+        }
 
-    /// Keeps the position of a stream interrupted by a lost server, so the download resumes there and the server is
-    /// caught up by the synchronization.
-    static func recordInterruptedStream(
-        owner: MediaOwner,
-        itemID: String,
-        position: TimeInterval,
-        duration: TimeInterval?,
-        media: MediaItem? = nil,
-        store: OfflineStore,
-    ) {
-        guard position.isFinite, position > 0 else { return }
-        let now = Date()
-        let previous = store.watchState(itemID: itemID, owner: owner)
-        if let media {
-            store.savePlaybackProgress(
-                media: media,
+        /// Keeps the position of a stream interrupted by a lost server, so the download resumes there and the server is
+        /// caught up by the synchronization.
+        static func recordInterruptedStream(
+            owner: MediaOwner,
+            itemID: String,
+            position: TimeInterval,
+            duration: TimeInterval?,
+            media: MediaItem? = nil,
+            store: OfflineStore,
+        ) {
+            guard position.isFinite, position > 0 else { return }
+            let now = Date()
+            let previous = store.watchState(itemID: itemID, owner: owner)
+            if let media {
+                store.savePlaybackProgress(
+                    media: media,
+                    owner: owner,
+                    position: position,
+                    duration: duration,
+                    lastWatchedAt: now,
+                    isCompleted: false,
+                )
+            } else {
+                store.setWatchState(
+                    OfflineWatchState(
+                        viewOffset: position,
+                        viewCount: previous?.viewCount ?? 0,
+                        played: previous?.played ?? false,
+                        lastViewedAt: now,
+                        source: .local,
+                    ),
+                    itemID: itemID,
+                    owner: owner,
+                )
+            }
+            _ = store.appendJournal(
+                itemID: itemID,
                 owner: owner,
                 position: position,
                 duration: duration,
-                lastWatchedAt: now,
-                isCompleted: false,
-            )
-        } else {
-            store.setWatchState(
-                OfflineWatchState(
-                    viewOffset: position,
-                    viewCount: previous?.viewCount ?? 0,
-                    played: previous?.played ?? false,
-                    lastViewedAt: now,
-                    source: .local,
-                ),
-                itemID: itemID,
-                owner: owner,
+                event: .stop,
+                occurredAt: now,
+                syncedAt: nil,
             )
         }
-        _ = store.appendJournal(
-            itemID: itemID,
-            owner: owner,
-            position: position,
-            duration: duration,
-            event: .stop,
-            occurredAt: now,
-            syncedAt: nil,
-        )
-    }
+
+    #endif
 
     /// Resume position using the same rules as streaming: finished items restart from the beginning.
     var resumePosition: TimeInterval? {
         if let destination {
             return destination.resumePosition()
         }
-        guard let store, let owner else { return nil }
-        return store.resumePosition(owner: owner, itemID: itemID, fallbackDuration: duration)
+        #if !os(tvOS)
+            guard let store, let owner else { return nil }
+            return store.resumePosition(owner: owner, itemID: itemID, fallbackDuration: duration)
+        #else
+            return nil
+        #endif
     }
 
     @discardableResult
@@ -119,7 +132,7 @@ final class PlaybackProgressRecorder {
         if let duration, duration.isFinite, duration > 0 {
             self.duration = duration
         }
-        if destination != nil, hasReportedWatched {
+        if destination != nil, hasReportedWatched || hasStopped {
             return nil
         }
         // The player reports position 0 before seeking to the resume point; do not let it erase local progress.
@@ -152,8 +165,11 @@ final class PlaybackProgressRecorder {
             return nil
         }
         guard hasStarted else { return nil }
-        if destination != nil, hasReportedWatched {
+        if destination != nil, hasReportedWatched || hasStopped {
             return nil
+        }
+        if destination != nil {
+            hasStopped = true
         }
         let journalID = write(
             event: .stop,
@@ -185,7 +201,9 @@ final class PlaybackProgressRecorder {
 
     func markSynced(_ journalID: Int64?) {
         guard let journalID else { return }
-        store?.markJournalSynced(ids: [journalID])
+        #if !os(tvOS)
+            store?.markJournalSynced(ids: [journalID])
+        #endif
     }
 
     private func checkWatchedThreshold(position: TimeInterval) {
@@ -200,43 +218,45 @@ final class PlaybackProgressRecorder {
             destination.checkpoint(duration ?? 0, duration, .watched)
             return
         }
-        guard let store, let owner else { return }
-        let now = Date()
-        let previous = store.watchState(itemID: itemID, owner: owner)
-        store.setWatchState(
-            OfflineWatchState(
-                viewOffset: nil,
-                viewCount: (previous?.viewCount ?? 0) + 1,
-                played: true,
-                lastViewedAt: now,
-                source: .local,
-            ),
-            itemID: itemID,
-            owner: owner,
-        )
-        if let media {
-            store.savePlaybackProgress(
-                media: media,
+        #if !os(tvOS)
+            guard let store, let owner else { return }
+            let now = Date()
+            let previous = store.watchState(itemID: itemID, owner: owner)
+            store.setWatchState(
+                OfflineWatchState(
+                    viewOffset: nil,
+                    viewCount: (previous?.viewCount ?? 0) + 1,
+                    played: true,
+                    lastViewedAt: now,
+                    source: .local,
+                ),
+                itemID: itemID,
+                owner: owner,
+            )
+            if let media {
+                store.savePlaybackProgress(
+                    media: media,
+                    owner: owner,
+                    position: duration ?? 0,
+                    duration: duration,
+                    lastWatchedAt: now,
+                    isCompleted: true,
+                )
+            }
+            let journalID = store.appendJournal(
+                itemID: itemID,
                 owner: owner,
                 position: duration ?? 0,
                 duration: duration,
-                lastWatchedAt: now,
-                isCompleted: true,
+                event: .watched,
+                occurredAt: now,
+                syncedAt: nil,
             )
-        }
-        let journalID = store.appendJournal(
-            itemID: itemID,
-            owner: owner,
-            position: duration ?? 0,
-            duration: duration,
-            event: .watched,
-            occurredAt: now,
-            syncedAt: nil,
-        )
-        push(journalID: journalID) { services, itemID in
-            try await services.playback.markItemWatched(itemID: itemID, at: now)
-            TrackerCoordinator.shared.noteWatched(itemID: itemID, at: now, detail: services.detail)
-        }
+            push(journalID: journalID) { services, itemID in
+                try await services.playback.markItemWatched(itemID: itemID, at: now)
+                TrackerCoordinator.shared.noteWatched(itemID: itemID, at: now, detail: services.detail)
+            }
+        #endif
     }
 
     private func write(
@@ -250,82 +270,87 @@ final class PlaybackProgressRecorder {
             destination.checkpoint(position, duration, event)
             return nil
         }
-        guard let store, let owner else { return nil }
-        let now = Date()
-        let previous = store.watchState(itemID: itemID, owner: owner)
-        if let media {
-            store.savePlaybackProgress(
-                media: media,
+        #if !os(tvOS)
+            guard let store, let owner else { return nil }
+            let now = Date()
+            let previous = store.watchState(itemID: itemID, owner: owner)
+            if let media {
+                store.savePlaybackProgress(
+                    media: media,
+                    owner: owner,
+                    position: position,
+                    duration: duration,
+                    lastWatchedAt: now,
+                    isCompleted: false,
+                )
+            } else {
+                store.setWatchState(
+                    OfflineWatchState(
+                        viewOffset: position,
+                        viewCount: previous?.viewCount ?? 0,
+                        played: previous?.played ?? false,
+                        lastViewedAt: now,
+                        source: .local,
+                    ),
+                    itemID: itemID,
+                    owner: owner,
+                )
+            }
+            let journalID = store.appendJournal(
+                itemID: itemID,
                 owner: owner,
                 position: position,
                 duration: duration,
-                lastWatchedAt: now,
-                isCompleted: false,
+                event: event,
+                occurredAt: now,
+                syncedAt: nil,
             )
-        } else {
-            store.setWatchState(
-                OfflineWatchState(
-                    viewOffset: position,
-                    viewCount: previous?.viewCount ?? 0,
-                    played: previous?.played ?? false,
-                    lastViewedAt: now,
-                    source: .local,
-                ),
-                itemID: itemID,
-                owner: owner,
-            )
-        }
-        let journalID = store.appendJournal(
-            itemID: itemID,
-            owner: owner,
-            position: position,
-            duration: duration,
-            event: event,
-            occurredAt: now,
-            syncedAt: nil,
-        )
-        guard pushesImmediately else { return journalID }
-        let duration = duration
-        push(journalID: journalID) { services, itemID in
-            try await services.playback.reportItemPlayback(
-                itemID: itemID,
-                state: reportState,
-                position: position,
-                duration: duration,
-                isPaused: isPaused,
-            )
-        }
-        return journalID
+            guard pushesImmediately else { return journalID }
+            let duration = duration
+            push(journalID: journalID) { services, itemID in
+                try await services.playback.reportItemPlayback(
+                    itemID: itemID,
+                    state: reportState,
+                    position: position,
+                    duration: duration,
+                    isPaused: isPaused,
+                )
+            }
+            return journalID
+        #else
+            return nil
+        #endif
     }
 
-    private func push(
-        journalID: Int64?,
-        _ operation: @escaping @MainActor (MediaServices, String) async throws -> Void,
-    ) {
-        guard let journalID, let store, let owner, let coordinator,
-              let services = coordinator.reachableServices(for: owner) else { return }
-        let previousTask = pushTask
-        let itemID = itemID
-        pushTask = Task { @MainActor in
-            await previousTask?.value
-            do {
-                try await operation(services, itemID)
-                store.markJournalSynced(ids: [journalID])
-                if store.pendingJournal(owner: owner).allSatisfy({ $0.itemID != itemID }),
-                   var state = store.watchState(itemID: itemID, owner: owner)
-                {
-                    state.source = .server
-                    store.setWatchState(state, itemID: itemID, owner: owner)
-                }
-            } catch {
-                guard !Task.isCancelled, !error.isCancellation else { return }
-                if error.isTransportFailure {
-                    coordinator.reportTransportFailure(on: owner.server)
-                } else {
-                    store.markJournalFailed(ids: [journalID], error: String(describing: type(of: error)))
-                    ErrorReporter.capture(error)
+    #if !os(tvOS)
+        private func push(
+            journalID: Int64?,
+            _ operation: @escaping @MainActor (MediaServices, String) async throws -> Void,
+        ) {
+            guard let journalID, let store, let owner, let coordinator,
+                  let services = coordinator.reachableServices(for: owner) else { return }
+            let previousTask = pushTask
+            let itemID = itemID
+            pushTask = Task { @MainActor in
+                await previousTask?.value
+                do {
+                    try await operation(services, itemID)
+                    store.markJournalSynced(ids: [journalID])
+                    if store.pendingJournal(owner: owner).allSatisfy({ $0.itemID != itemID }),
+                       var state = store.watchState(itemID: itemID, owner: owner)
+                    {
+                        state.source = .server
+                        store.setWatchState(state, itemID: itemID, owner: owner)
+                    }
+                } catch {
+                    guard !Task.isCancelled, !error.isCancellation else { return }
+                    if error.isTransportFailure {
+                        coordinator.reportTransportFailure(on: owner.server)
+                    } else {
+                        store.markJournalFailed(ids: [journalID], error: String(describing: type(of: error)))
+                        ErrorReporter.capture(error)
+                    }
                 }
             }
-        }
-    }
+        } #endif
 }

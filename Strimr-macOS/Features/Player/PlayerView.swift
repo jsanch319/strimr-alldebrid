@@ -111,10 +111,13 @@ struct PlayerView: View {
     @State private var showsPlaybackStatistics = false
 
     private let presentationID: UUID
+    private let onClose: (() -> Void)?
+    @State private var appliedCatalogResume = false
     private let controlsHideDelay: TimeInterval = 3
     private let seekFeedbackDelay: TimeInterval = 1.2
 
-    init(viewModel: PlayerViewModel, presentationID: UUID) {
+    init(viewModel: PlayerViewModel, presentationID: UUID, onClose: (() -> Void)? = nil) {
+        self.onClose = onClose
         _viewModel = State(initialValue: viewModel)
         self.presentationID = presentationID
     }
@@ -360,6 +363,7 @@ struct PlayerView: View {
                 }
                 .onChange(of: playerController.duration) { _, duration in
                     viewModel.handlePlaybackDuration(duration)
+                    applyCatalogResumeIfReady()
                 }
                 .onChange(of: playerController.bufferedAhead) { _, bufferedAhead in
                     viewModel.handleBufferedAhead(bufferedAhead)
@@ -1509,6 +1513,10 @@ struct PlayerView: View {
             fallBackToServerTranscode(after: error)
         }
         playerController.onMediaLoaded = {
+            if viewModel.resumesFromRemotePercentage {
+                viewModel.handlePlaybackDuration(playerController.duration)
+                applyCatalogResumeIfReady()
+            }
             viewModel.confirmLiveChannelSwitch()
             automaticSubtitleSearchKey = viewModel.currentRatingKey
             let tracks = playerController.trackList()
@@ -1572,9 +1580,17 @@ struct PlayerView: View {
         }
     }
 
+    private func applyCatalogResumeIfReady() {
+        guard viewModel.resumesFromRemotePercentage, !appliedCatalogResume,
+              let position = viewModel.resumePosition, position > 0, loadedURL != nil else { return }
+        appliedCatalogResume = true
+        Task { await playerController.seekAfterReady(to: position) }
+    }
+
     private func startPlaybackIfNeeded(_ url: URL?) {
         guard let url, loadedURL != url else { return }
         loadedURL = url
+        appliedCatalogResume = false
         let isSharePlayPlayback = participatesInSharePlay && sharePlayCoordinator.isInSession
         let startPosition = isSharePlayPlayback
             ? sharePlayCoordinator.activity?.initialPosition
@@ -1943,6 +1959,9 @@ struct PlayerView: View {
         }
         restoreCursor()
         stopPlayback()
+        if let onClose {
+            onClose(); return
+        }
         appModel.resetPlayer()
         dismissWindow(id: AppModel.playerWindowID)
     }

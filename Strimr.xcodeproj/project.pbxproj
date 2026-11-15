@@ -127,7 +127,6 @@
 				Offline/Artwork/CachedArtworkService.swift,
 				Offline/OfflineCoordinator.swift,
 				Offline/Pinning/OfflineEnrichmentService.swift,
-				Offline/Progress/PlaybackProgressRecorder.swift,
 				Offline/Progress/ProgressSynchronizer.swift,
 				Offline/Services/CachedDetailService.swift,
 				Offline/Services/CachedHomeService.swift,

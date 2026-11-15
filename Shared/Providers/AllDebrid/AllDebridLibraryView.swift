@@ -1,5 +1,4 @@
 import AetherEngine
-import AVKit
 import OSLog
 import SwiftUI
 
@@ -38,13 +37,13 @@ struct AllDebridLibraryView: View {
     }
 
     private enum ActiveSheet: Identifiable {
-        case player(URL)
+        case savedPlayer(link: AllDebridSavedLink, url: URL)
         case magnetPlayer(file: AllDebridMagnetFile, url: URL)
         case sources(AllDebridMagnetFile)
 
         var id: String {
             switch self {
-            case let .player(url): "player:\(url.absoluteString)"
+            case let .savedPlayer(link, _): "saved-player:\(link.id)"
             case let .magnetPlayer(file, _): "magnet-player:\(file.id)"
             case let .sources(file): "sources:\(file.id)"
             }
@@ -168,18 +167,18 @@ struct AllDebridLibraryView: View {
             .sheet(item: $activeSheet) { sheet in
                 Group {
                     switch sheet {
-                    case let .player(playerURL):
-                        AllDebridVideoPlayer(url: playerURL)
+                    case let .savedPlayer(link, url):
+                        AllDebridFilePlayer(
+                            media: CatalogMediaAdapter.raw(id: "saved:\(link.id)", filename: link.filename),
+                            url: url,
+                            externalSubtitles: [],
+                        )
                     case let .magnetPlayer(file, url):
-                        #if os(iOS)
-                            AllDebridMagnetPlayer(
-                                file: file,
-                                url: url,
-                                externalSubtitles: AllDebridSubtitleMatcher.externalTracks(for: file, in: magnetFiles),
-                            )
-                        #else
-                            AllDebridVideoPlayer(url: url)
-                        #endif
+                        AllDebridFilePlayer(
+                            media: CatalogMediaAdapter.raw(id: "magnet:\(file.id)", filename: file.filename),
+                            url: url,
+                            externalSubtitles: AllDebridSubtitleMatcher.externalTracks(for: file, in: magnetFiles),
+                        )
                     case let .sources(file):
                         AllDebridSourcePicker(
                             magnetTitle: Self.cleanTitle(file.filename),
@@ -259,7 +258,7 @@ struct AllDebridLibraryView: View {
         do {
             let client = try AllDebridAPIClient(apiKey: apiKey)
             let resolution = try await client.resolvePlaybackURL(link.link, filename: link.filename)
-            activeSheet = .player(resolution.url)
+            activeSheet = .savedPlayer(link: link, url: resolution.url)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -442,114 +441,21 @@ struct AllDebridLibraryView: View {
     }
 }
 
-private struct AllDebridVideoPlayer: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let url: URL
-    @State private var player: AVPlayer?
+@MainActor
+private struct AllDebridFilePlayer: View {
+    @State private var viewModel: PlayerViewModel
+    init(media: MediaItem, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
+        _viewModel = State(initialValue: PlayerViewModel(
+            localMedia: media,
+            localPlaybackURL: url,
+            localExternalSubtitles: externalSubtitles,
+        ))
+    }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let player {
-                    VideoPlayer(player: player).ignoresSafeArea()
-                } else {
-                    ProgressView()
-                }
-            }
-            closeButton
-        }
-        .onAppear {
-            let player = AVPlayer(url: url)
-            self.player = player
-            player.play()
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
-        }
-    }
-
-    private var closeButton: some View {
-        Button("Done", systemImage: "xmark") {
-            dismiss()
-        }
-        .labelStyle(.iconOnly)
-        .font(.headline)
-        .padding(12)
-        .background(.regularMaterial, in: Circle())
-        .padding()
-        .accessibilityLabel("Close player")
+        NativePlaybackView(viewModel: viewModel)
     }
 }
-
-#if os(iOS)
-    private struct AllDebridMagnetPlayer: View {
-        @Environment(\.dismiss) private var dismiss
-        @State private var viewModel: PlayerViewModel
-
-        init(file: AllDebridMagnetFile, url: URL, externalSubtitles: [ExternalSubtitleTrack]) {
-            _viewModel = State(initialValue: PlayerViewModel(
-                localMedia: Self.media(for: file),
-                localPlaybackURL: url,
-                localExternalSubtitles: externalSubtitles,
-            ))
-        }
-
-        var body: some View {
-            PlayerWrapper(viewModel: viewModel)
-                .overlay(alignment: .topTrailing) {
-                    Button("Done", systemImage: "xmark") {
-                        dismiss()
-                    }
-                    .labelStyle(.iconOnly)
-                    .font(.headline)
-                    .padding(12)
-                    .background(.regularMaterial, in: Circle())
-                    .padding()
-                    .safeAreaPadding(.top)
-                    .zIndex(1)
-                    .accessibilityLabel("Close player")
-                }
-        }
-
-        private static func media(for file: AllDebridMagnetFile) -> MediaItem {
-            MediaItem(
-                id: file.id,
-                guid: "alldebrid://\(file.id)",
-                summary: nil,
-                title: AllDebridLibraryView.cleanTitle(file.filename),
-                type: .movie,
-                parentRatingKey: nil,
-                grandparentRatingKey: nil,
-                genres: [],
-                year: nil,
-                duration: nil,
-                videoResolution: nil,
-                rating: nil,
-                ratings: [],
-                contentRating: nil,
-                studio: nil,
-                tagline: nil,
-                thumbPath: nil,
-                artPath: nil,
-                artworkCornerColors: nil,
-                viewOffset: nil,
-                viewCount: nil,
-                childCount: nil,
-                leafCount: nil,
-                viewedLeafCount: nil,
-                grandparentTitle: nil,
-                parentTitle: nil,
-                parentIndex: nil,
-                index: nil,
-                grandparentThumbPath: nil,
-                grandparentArtPath: nil,
-                parentThumbPath: nil,
-            )
-        }
-    }
-#endif
 
 private struct AllDebridSourcePicker: View {
     @Environment(\.dismiss) private var dismiss

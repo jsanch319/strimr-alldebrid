@@ -166,6 +166,8 @@ struct ItemArtworkView: View {
     var body: some View {
         if let services {
             MediaImageView(viewModel: MediaImageViewModel(services: services, artworkKind: kind, media: media))
+        } else if let item = media.playableItem, CatalogMediaAdapter.selectionID(item) != nil {
+            MediaImageView(viewModel: MediaImageViewModel(artworkKind: kind, media: media))
         } else {
             Rectangle()
                 .fill(.gray.opacity(0.15))

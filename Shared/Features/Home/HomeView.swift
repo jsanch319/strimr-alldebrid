@@ -10,16 +10,25 @@ struct HomeView: View {
     @State private var selectedSheet: HomeSheet?
     @State private var hasAllDebridAccount = false
     @State private var scrollInteractionCount = 0
+    @State private var catalogSelection: CatalogHomeData.Selection?
     let onSelectMedia: (MediaDisplayItem) -> Void
 
     private enum HomeSheet: Identifiable {
         case hub(Hub)
         case allDebrid(AllDebridHomeItem)
+        case catalogSources(CatalogHomeData.Selection)
+        case catalogHub(Hub)
+        case tmdbSettings
+        case catalogSearch
 
         var id: String {
             switch self {
             case let .hub(hub): "hub:\(hub.id)"
             case let .allDebrid(item): "alldebrid:\(item.id)"
+            case let .catalogSources(item): "sources:\(item.id)"
+            case let .catalogHub(hub): "catalog-hub:\(hub.id)"
+            case .tmdbSettings: "tmdb-settings"
+            case .catalogSearch: "catalog-search"
             }
         }
     }
@@ -38,25 +47,34 @@ struct HomeView: View {
                 HomeHeroCarousel(
                     slides: viewModel.heroSlides,
                     interactionCount: scrollInteractionCount,
-                    onPlay: { mediaCardActions?.play($0, false) },
-                    onDetails: { onSelectMedia(.playable($0)) },
+                    onPlay: { play($0) },
+                    onDetails: { select(.playable($0)) },
                 )
             }
 
             VStack(alignment: .leading, spacing: 24) {
-                TMDBDiscoveryView()
-
-                AllDebridHomeSection(
-                    onSelect: { selectedSheet = .allDebrid($0) },
-                    onAccountAvailabilityChange: { hasAllDebridAccount = $0 },
-                )
+                if !viewModel.isServerFree {
+                    AllDebridHomeSection(
+                        onSelect: { selectedSheet = .allDebrid($0) },
+                        onAccountAvailabilityChange: { hasAllDebridAccount = $0 },
+                    )
+                }
 
                 ForEach(viewModel.rows) { row in
                     HomeRowSectionView(
                         row: row,
                         showsLabels: settingsManager.interface.showsCardLabels,
-                        onViewAll: { selectedSheet = .hub($0) },
-                        onSelectMedia: onSelectMedia,
+                        canOpenWithoutServer: viewModel.isServerFree,
+                        onViewAll: { hub in
+                            if viewModel
+                                .isServerFree
+                            {
+                                selectedSheet = hub.id == "catalog:recent" ? .allDebrid(.library) : .catalogHub(hub)
+                            } else {
+                                selectedSheet = .hub(hub)
+                            }
+                        },
+                        onSelectMedia: select,
                     )
                 }
 
@@ -64,9 +82,11 @@ struct HomeView: View {
                     RailsSkeleton(showsLabels: settingsManager.interface.showsCardLabels)
                 }
 
-                if let errorMessage = viewModel.errorMessage {
+                if let errorMessage = viewModel.catalog?.errorMessage ?? viewModel.errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
+                } else if let syncError = viewModel.isServerFree ? DiscoveryStore.shared.errorMessage : nil {
+                    Text(syncError).font(.footnote).foregroundStyle(.textSecondary)
                 } else if !viewModel.hasContent, !hasAllDebridAccount, !viewModel.isLoading {
                     Text("common.empty.nothingToShow")
                         .foregroundStyle(.secondary)
@@ -87,11 +107,33 @@ struct HomeView: View {
         #endif
         .navigationTitle("tabs.home")
         .tabRootChrome()
+        .navigationDestination(item: $catalogSelection) { selection in
+            TMDBDetailView(title: selection.title, initialSeason: selection.episode?.season_number)
+        }
+        .toolbar {
+            if viewModel.isServerFree {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("tabs.search", systemImage: "magnifyingglass") { selectedSheet = .catalogSearch }
+                    Menu {
+                        NavigationLink("Simkl Account") { TrackerSettingsView(service: .simkl) }
+                        Button("Sync Simkl") { Task { await DiscoveryStore.shared.sync(force: true) } }
+                        Button("TMDb Settings") { selectedSheet = .tmdbSettings }
+                        Button("AllDebrid Library") { selectedSheet = .allDebrid(.library) }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                        .accessibilityLabel("Home accounts")
+                }
+            }
+        }
+        .environment(\.mediaCardActions, effectiveActions)
         .environment(\.reloadAfterPlaylistChange) { server in
             Task { await viewModel.refresh(server: server) }
         }
         .task {
             await viewModel.load()
+        }
+        .task(id: viewModel.isServerFree ? DiscoveryStore.shared.accountKey : "server") {
+            guard viewModel.isServerFree else { return }
+            await DiscoveryStore.shared.sync()
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { return }
@@ -114,6 +156,19 @@ struct HomeView: View {
         }
         .sheet(item: $selectedSheet) { sheet in
             switch sheet {
+            case let .catalogSources(selection):
+                CatalogSourcesView(title: selection.title, episode: selection.episode)
+            case .catalogSearch:
+                if let catalog = viewModel.catalog {
+                    NavigationStack { CatalogSearchView(
+                        data: catalog,
+                        onSelect: { media in selectedSheet = nil; select(media) },
+                    ) }
+                }
+            case .tmdbSettings:
+                TMDBSettingsView { Task { await viewModel.reload() } }
+            case let .catalogHub(hub):
+                NavigationStack { CatalogHubView(hub: hub, onSelect: { media in selectedSheet = nil; select(media) }) }
             case let .hub(hub):
                 NavigationStack {
                     ServerScopedView(server: hub.server) { services in
@@ -164,6 +219,37 @@ struct HomeView: View {
             Task { await viewModel.refreshIfNeeded() }
         }
     }
+
+    private var effectiveActions: MediaCardActions? {
+        guard viewModel.isServerFree else { return mediaCardActions }
+        return MediaCardActions(
+            play: { media, _ in play(media) },
+            resume: { play($0) },
+            showMedia: { select(.playable($0)) },
+        )
+    }
+
+    private func select(_ media: MediaDisplayItem) {
+        guard let catalog = viewModel.catalog, let item = media.playableItem else { onSelectMedia(media); return }
+        if let selection = catalog.selection(for: item) {
+            catalogSelection = selection
+        } else if let selection = catalog.rawSelection(for: item) {
+            selectedSheet = .allDebrid(selection)
+        }
+    }
+
+    private func play(_ media: MediaItem) {
+        guard let catalog = viewModel.catalog else { mediaCardActions?.play(media, false); return }
+        if let selection = catalog.selection(for: media) {
+            if selection.title.kind == .tv, selection.episode == nil {
+                catalogSelection = selection
+            } else {
+                selectedSheet = .catalogSources(selection)
+            }
+        } else if let selection = catalog.rawSelection(for: media) {
+            selectedSheet = .allDebrid(selection)
+        }
+    }
 }
 
 #if os(iOS)
@@ -178,3 +264,26 @@ struct HomeView: View {
         }
     }
 #endif
+
+private struct CatalogHubView: View {
+    @Environment(\.dismiss) private var dismiss
+    let hub: Hub
+    let onSelect: (MediaDisplayItem) -> Void
+    var body: some View {
+        HubDetailView(viewModel: HubDetailViewModel(hub: hub), onSelectMedia: onSelect)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } } }
+    }
+}
+
+private struct CatalogSearchView: View {
+    let data: CatalogHomeData
+    let onSelect: (MediaDisplayItem) -> Void
+    @State private var query = ""
+    var body: some View {
+        CatalogHubView(hub: data.searchRow.hub, onSelect: onSelect)
+            .id(data.searchRow.hub)
+            .navigationTitle("tabs.search")
+            .searchable(text: $query, prompt: "Search movies and TV shows")
+            .task(id: query) { await data.search(query) }
+    }
+}

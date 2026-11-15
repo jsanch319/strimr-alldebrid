@@ -147,6 +147,17 @@ struct SimklResumeTests {
         #expect(cache.records(scope: "a").first?.completed == false)
         #expect(cache.records(scope: "a").first?.pendingSync == true)
         #expect(recorder.resumePosition == 950)
+        cache.acknowledge(
+            TrackerPlaybackReport(
+                event: .stop,
+                item: TrackerItem(kind: .movie, ids: title.matchingIDs),
+                progress: 95,
+                date: Date(),
+            ),
+            scope: "a",
+        )
+        recorder.stop(position: 950)
+        #expect(cache.records(scope: "a").first?.pendingSync == false)
         recorder.finish()
         #expect(cache.records(scope: "a").first?.completed == true)
         cache.acknowledge(

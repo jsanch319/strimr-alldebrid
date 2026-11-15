@@ -12,7 +12,7 @@ final class MediaImageViewModel {
         case cardArt
     }
 
-    @ObservationIgnored private let service: any MediaArtworkService
+    @ObservationIgnored private let service: (any MediaArtworkService)?
     var artworkKind: ArtworkKind
     var media: MediaDisplayItem
     var spoilerProtection = SpoilerProtectionLevel.off
@@ -22,6 +22,12 @@ final class MediaImageViewModel {
 
     init(services: MediaServices, artworkKind: ArtworkKind, media: MediaDisplayItem) {
         service = services.artwork
+        self.artworkKind = artworkKind
+        self.media = media
+    }
+
+    init(artworkKind: ArtworkKind, media: MediaDisplayItem) {
+        service = nil
         self.artworkKind = artworkKind
         self.media = media
     }
@@ -93,6 +99,11 @@ final class MediaImageViewModel {
             return
         }
 
+        if service == nil, let url = CatalogMediaAdapter.artworkURL(path) {
+            resource = .url(url)
+            return
+        }
+        guard let service else { resource = nil; return }
         do {
             resource = try await service.artwork(path: path, width: nil, height: nil)
         } catch {

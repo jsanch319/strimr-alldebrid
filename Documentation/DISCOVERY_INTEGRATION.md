@@ -3,8 +3,8 @@
 ## Configuration and use
 
 1. Connect AllDebrid using its existing login. Home works without a Plex, Jellyfin, Emby, or Seerr account.
-2. Home → TMDb Settings: save your TMDb API Read Access Token in device Keychain (see TMDB.md).
-3. Home → Simkl Account: use the existing device authorization flow. Server-free accounts use a separate stable profile scope; server-backed profiles retain their existing tracker accounts.
+2. Home → accounts menu → TMDb Settings: save your TMDb API Read Access Token in device Keychain (see TMDB.md).
+3. Home → accounts menu → Simkl Account: use the existing device authorization flow. Server-free accounts use a separate stable profile scope; server-backed profiles retain their existing tracker accounts.
 4. Open a movie or TV episode → Find Available Sources. The app reads existing saved video links and ready magnet files, shows every matching variant, and unlocks the selected file only when you choose it. No content is acquired or downloaded.
 5. Resume is enabled by default when that title/episode has a saved unfinished position. Turn off the Resume toggle to start over. Each playback resolves a fresh URL, so expiring AllDebrid URLs never become progress identities.
 
@@ -46,10 +46,30 @@ For catalog playback only, scrobbles send the documented `min_progress=100` URL 
 - The documented retention windows are Free 7 days, PRO 30 days, VIP 90 days; saved records may also be replaced or removed. The app consumes the API's returned snapshot instead of inventing progress for missing sessions. The server's documented expiry/retention behavior is not a durability guarantee.
 - Paused sessions may lack TMDb IDs. The app uses known library/cache IDs or TMDb's external-ID lookup; unsupported/unmapped titles are reported rather than guessed. Anime season numbering remains limited to verified mappings. Unknown/non-finite file duration prevents percentage-to-seconds conversion until the engine has a usable duration.
 - Conflict resolution has no per-device transaction/version API: newer unsent checkpoints can be replayed using timestamps, while acknowledged cache always yields to Simkl. Concurrent playback and inaccurate device clocks cannot be resolved perfectly. Rate limits or API outages retain an explicitly cached/pending resume point until synchronization succeeds.
-- iOS/iPadOS use Strimr's existing player; the existing macOS/tvOS catalog AVPlayer fallback is limited to containers/codecs supported by AVPlayer. Live account authorization and switching actual devices require manual verification.
+- iOS/iPadOS, macOS and tvOS now use their original Strimr PlayerView and controls through a presentation adapter; the separate catalog AVPlayer UI has been removed. Live account authorization and switching actual devices require manual verification.
 
 API references: https://api.simkl.org/api-reference/simkl/get-playback-sessions and https://api.simkl.org/guides/scrobble (including `min_progress`).
 
 ### Supplied original commit
 
 The user subsequently supplied SHA `b2ca1ad239c962ce48c3cc886459d5d0791515d2`. It is absent from the attached checkout and its reflogs/unreachable objects. `git fetch origin <SHA>` returns `not our ref`; GitHub's commit API returns HTTP 422, "No commit found for SHA". No other usable original checkout is attached. Its file-level changes therefore still cannot be compared or recovered here. This update is an implementation on PR #2, not recovery of that commit.
+
+## Original Strimr UI comparison
+
+AllDebrid-only mode now instantiates the same `HomeView` as the original app, with a server-free `HomeViewModel` data source. The previous custom Discover heading, fixed-size poster rails, orange progress bars, single custom hero and percentage captions have been removed from Home.
+
+| Element | Original component reused |
+| --- | --- |
+| Home layout, scrolling, page margins and vertical row spacing | `HomeView` |
+| Hero height, masks, animation, auto-advance, page indicators and action buttons | `HomeHeroCarousel` / `HomeHeroSlide` |
+| Row headings and horizontal scroll spacing | `HomeRowSectionView`, `MediaHubSection`, `MediaCarousel` |
+| Posters, landscape Continue Watching cards, fonts and corner shapes | `PortraitMediaCard`, `LandscapeMediaCard`, `MediaCard` |
+| Time left and progress fill/track colors | `RemainingTimeFormatter`, unchanged `CardProgressBar` |
+| See All grid and navigation | `HubDetailView` with a preloaded catalog model |
+| Playback controls, seek bar, colors and settings | Original platform `PlayerWrapper` / `PlayerView` |
+
+The only new Home controls are native search and account actions needed to configure/query the server-free data sources. Search is on its own native hub page so it does not change Home's hero/row layout. Artwork uses the existing image renderer/cache and spoiler preferences, with allowlisted TMDb URLs when no server artwork service exists. Hero off/Continue Watching/Discover, poster-size and card-label preferences remain active. Unknown runtimes do not produce invented remaining-time labels.
+
+AllDebrid saved links and magnet files also use the original native player; the catalog-specific AVPlayer screen and additional close-button overlay are removed. tvOS shares the existing recorder destination for local catalog streams without adding offline-server storage to tvOS. macOS receives a close-presentation callback so closing an AllDebrid sheet does not reset an unrelated player window. No playback settings, theme assets, control styling or layout metrics are changed.
+
+Validation compares the component tree and source against main: `CardProgressBar` is byte-for-byte unchanged, and player control, timeline styling, theme and layout-metric files are unchanged. Adapter tests verify separate native movie/TV rows, remaining-time fields, hero identities/preferences and direct artwork without a media server. Simulator screenshots and real-device visual/playback comparisons have not been performed in this Linux workspace; compilation/tests do not establish pixel-level or real-account behavior.

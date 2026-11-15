@@ -138,49 +138,20 @@ struct AllDebridHomeSection: View {
 
 @MainActor
 struct AllDebridOnlyHomeView: View {
-    @State private var selectedItem: AllDebridHomeItem?
+    @Environment(SessionManager.self) private var sessionManager
+    @Environment(SettingsManager.self) private var settingsManager
     let onSignedOut: () -> Void
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    TMDBDiscoveryView()
-                    AllDebridHomeSection { item in
-                        selectedItem = item
-                    }
-                }
-                .padding(.horizontal, LayoutMetrics.pageMargin)
-                .padding(.vertical, 20)
-            }
-            .navigationTitle("tabs.home")
-            .task {
-                TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID)
-            }
-            .sheet(item: $selectedItem) { item in
-                let initialFile: AllDebridMagnetFile? = {
-                    if case let .magnetFile(file) = item {
-                        return file
-                    }
-                    return nil
-                }()
-                let initialLink: AllDebridSavedLink? = {
-                    if case let .savedLink(link) = item {
-                        return link
-                    }
-                    return nil
-                }()
-
-                AllDebridLibraryView(
-                    navigationTitle: "AllDebrid",
-                    initialFile: initialFile,
-                    initialLink: initialLink,
-                    onAuthenticated: { selectedItem = nil },
-                    onSignedOut: {
-                        selectedItem = nil
-                        onSignedOut()
-                    },
-                )
+            HomeView(viewModel: HomeViewModel(
+                sessionManager: sessionManager,
+                settingsManager: settingsManager,
+                serverFree: true,
+            ))
+            .task { TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID) }
+            .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
+                onSignedOut()
             }
         }
     }

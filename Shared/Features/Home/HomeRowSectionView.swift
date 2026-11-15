@@ -5,6 +5,7 @@ struct HomeRowSectionView: View {
     @Environment(\.mediaCardActions) private var mediaCardActions
     let row: HomeRow
     let showsLabels: Bool
+    var canOpenWithoutServer = false
     let onViewAll: (Hub) -> Void
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -47,10 +48,13 @@ struct HomeRowSectionView: View {
     }
 
     private var canOpenViewAll: Bool {
+        if canOpenWithoutServer {
+            return row.hub.hasItems
+        }
         #if os(tvOS)
-            row.hub.canShowViewAll
+            return row.hub.canShowViewAll
         #else
-            row.hub.canOpenDetail
+            return row.hub.canOpenDetail
         #endif
     }
 

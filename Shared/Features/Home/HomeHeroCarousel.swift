@@ -300,11 +300,17 @@
                 .clipped()
                 .task(id: "\(media.id)-\(spoilerProtection.rawValue)") {
                     resource = nil
-                    guard let path = artworkPath,
-                          let services = registry.services(for: media.identity.server),
-                          let loaded = try? await services.artwork.artwork(path: path, width: 1920, height: 1080),
-                          !Task.isCancelled
-                    else { return }
+                    guard let path = artworkPath else { return }
+                    let loaded: ArtworkResource? = if let services = registry.services(for: media.identity.server) {
+                        try? await services.artwork.artwork(path: path, width: 1920, height: 1080)
+                    } else if CatalogMediaAdapter.selectionID(media) != nil,
+                              let url = CatalogMediaAdapter.artworkURL(path)
+                    {
+                        .url(url)
+                    } else {
+                        nil
+                    }
+                    guard let loaded, !Task.isCancelled else { return }
                     withAnimation(Motion.crossfade) {
                         resource = loaded
                     }

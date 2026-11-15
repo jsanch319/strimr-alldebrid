@@ -261,9 +261,7 @@ final class PlayerViewModel {
     @ObservationIgnored private var liveTimelineTask: Task<Void, Never>?
     @ObservationIgnored private var liveWatchTask: Task<Void, Never>?
     @ObservationIgnored private var pendingLiveTimelineState: TimelineState?
-    #if !os(tvOS)
-        @ObservationIgnored private var progressRecorder: PlaybackProgressRecorder?
-    #endif
+    @ObservationIgnored private var progressRecorder: PlaybackProgressRecorder?
 
     init(
         queue: PlaybackQueue,
@@ -309,19 +307,19 @@ final class PlayerViewModel {
         #endif
     }
 
-    #if !os(tvOS)
-        /// Plays a downloaded file. With an owner, progress is journaled locally, pushed live when the owner's
-        /// server is reachable, and playback resumes from the latest local position.
-        init(
-            localMedia: MediaItem,
-            localPlaybackURL: URL,
-            localExternalSubtitles: [ExternalSubtitleTrack] = [],
-            owner: MediaOwner? = nil,
-            resumes: Bool = true,
-            catalogTrackerItem: TrackerItem? = nil,
-            catalogRecorder: PlaybackProgressRecorder? = nil,
-            catalogResumePercentage: Double? = nil,
-        ) {
+    /// Plays a downloaded file. With an owner, progress is journaled locally, pushed live when the owner's
+    /// server is reachable, and playback resumes from the latest local position.
+    init(
+        localMedia: MediaItem,
+        localPlaybackURL: URL,
+        localExternalSubtitles: [ExternalSubtitleTrack] = [],
+        owner: MediaOwner? = nil,
+        resumes: Bool = true,
+        catalogTrackerItem: TrackerItem? = nil,
+        catalogRecorder: PlaybackProgressRecorder? = nil,
+        catalogResumePercentage: Double? = nil,
+    ) {
+        #if !os(tvOS)
             let recorder = catalogRecorder ?? owner.flatMap {
                 OfflineCoordinator.shared.makeRecorder(
                     owner: $0,
@@ -330,7 +328,11 @@ final class PlayerViewModel {
                     media: localMedia,
                 )
             }
-            let resumePosition = resumes ? (recorder?.resumePosition ?? localMedia.viewOffset) : nil
+        #else
+            let recorder = catalogRecorder
+        #endif
+        let resumePosition = resumes ? (recorder?.resumePosition ?? localMedia.viewOffset) : nil
+        #if !os(tvOS)
             let media = resumePosition.map { position in
                 localMedia.applying(OfflineWatchState(
                     viewOffset: position,
@@ -340,27 +342,31 @@ final class PlayerViewModel {
                     source: .local,
                 ))
             } ?? localMedia
-            ratingKey = localMedia.id
-            mediaServices = nil
-            mediaQueue = nil
-            shouldResumeFromOffsetFlag = resumes && (resumePosition != nil || catalogResumePercentage != nil)
-            self.localMedia = media
-            self.localPlaybackURL = localPlaybackURL
-            self.localExternalSubtitles = localExternalSubtitles
-            self.media = media
-            playbackURL = localPlaybackURL
-            selectedQuality = .original
-            progressRecorder = recorder
-            self.catalogResumePercentage = resumes ? catalogResumePercentage : nil
-            isCatalogPlayback = catalogRecorder != nil
-            if let catalogTrackerItem {
-                trackerSession = TrackerCoordinator.shared.beginCatalogPlayback(
-                    item: catalogTrackerItem,
-                    resumeOffset: resumePosition,
-                )
-            }
+        #else
+            let media = localMedia
+        #endif
+        ratingKey = localMedia.id
+        mediaServices = nil
+        mediaQueue = nil
+        shouldResumeFromOffsetFlag = resumes && (resumePosition != nil || catalogResumePercentage != nil)
+        self.localMedia = media
+        self.localPlaybackURL = localPlaybackURL
+        self.localExternalSubtitles = localExternalSubtitles
+        self.media = media
+        playbackURL = localPlaybackURL
+        selectedQuality = .original
+        progressRecorder = recorder
+        self.catalogResumePercentage = resumes ? catalogResumePercentage : nil
+        isCatalogPlayback = catalogRecorder != nil
+        if let catalogTrackerItem {
+            trackerSession = TrackerCoordinator.shared.beginCatalogPlayback(
+                item: catalogTrackerItem,
+                resumeOffset: resumePosition,
+            )
         }
+    }
 
+    #if !os(tvOS)
         convenience init(request: LocalPlaybackRequest) {
             self.init(
                 localMedia: request.media,
@@ -899,39 +905,35 @@ final class PlayerViewModel {
     }
 
     func handleStop() {
-        #if !os(tvOS)
-            if isCatalogPlayback {
-                progressRecorder?.stop(position: position, pushesImmediately: false)
-                trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
-                return
-            }
-        #endif
+        if isCatalogPlayback {
+            progressRecorder?.stop(position: position, pushesImmediately: false)
+            trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
+            return
+        }
         trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
-        #if !os(tvOS)
-            if let progressRecorder {
-                let journalID = progressRecorder.stop(
-                    position: position,
-                    pushesImmediately: isLocalPlayback,
-                )
-                guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
-                Task {
-                    do {
-                        try await mediaServices.playback.reportStopped(
-                            plan: playbackPlan,
-                            position: position,
-                            currentSelection: currentPlaybackStreamSelection,
-                        )
-                        progressRecorder.markSynced(journalID)
-                    } catch {
-                        if !Task.isCancelled, !error.isCancellation {
-                            ErrorReporter.capture(error)
-                        }
+        if let progressRecorder {
+            let journalID = progressRecorder.stop(
+                position: position,
+                pushesImmediately: isLocalPlayback,
+            )
+            guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
+            Task {
+                do {
+                    try await mediaServices.playback.reportStopped(
+                        plan: playbackPlan,
+                        position: position,
+                        currentSelection: currentPlaybackStreamSelection,
+                    )
+                    progressRecorder.markSynced(journalID)
+                } catch {
+                    if !Task.isCancelled, !error.isCancellation {
+                        ErrorReporter.capture(error)
                     }
-                    await mediaServices.playback.release(plan: playbackPlan)
                 }
-                return
+                await mediaServices.playback.release(plan: playbackPlan)
             }
-        #endif
+            return
+        }
         if let liveSession {
             self.liveSession = nil
             invalidateLiveReporting()
@@ -988,34 +990,30 @@ final class PlayerViewModel {
     }
 
     func markPlaybackFinished() async {
-        #if !os(tvOS)
-            if isCatalogPlayback {
-                progressRecorder?.finish(pushesImmediately: false)
-                trackerSession?.finished()
-                return
-            }
-        #endif
+        if isCatalogPlayback {
+            progressRecorder?.finish(pushesImmediately: false)
+            trackerSession?.finished()
+            return
+        }
         trackerSession?.finished()
-        #if !os(tvOS)
-            if let progressRecorder {
-                let journalID = progressRecorder.finish(pushesImmediately: isLocalPlayback)
-                guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
-                do {
-                    try await mediaServices.playback.reportStopped(
-                        plan: playbackPlan,
-                        position: media?.duration ?? duration ?? position,
-                        currentSelection: currentPlaybackStreamSelection,
-                    )
-                    progressRecorder.markSynced(journalID)
-                } catch {
-                    if !Task.isCancelled, !error.isCancellation {
-                        LiveTVErrorReporting.capture(error)
-                    }
+        if let progressRecorder {
+            let journalID = progressRecorder.finish(pushesImmediately: isLocalPlayback)
+            guard !isLocalPlayback, let mediaServices, let playbackPlan else { return }
+            do {
+                try await mediaServices.playback.reportStopped(
+                    plan: playbackPlan,
+                    position: media?.duration ?? duration ?? position,
+                    currentSelection: currentPlaybackStreamSelection,
+                )
+                progressRecorder.markSynced(journalID)
+            } catch {
+                if !Task.isCancelled, !error.isCancellation {
+                    LiveTVErrorReporting.capture(error)
                 }
-                await mediaServices.playback.release(plan: playbackPlan)
-                return
             }
-        #endif
+            await mediaServices.playback.release(plan: playbackPlan)
+            return
+        }
         if let liveSession {
             self.liveSession = nil
             invalidateLiveReporting()
@@ -1304,23 +1302,21 @@ final class PlayerViewModel {
         lastTimelineSentAt = now
         lastTimelineState = state
 
-        #if !os(tvOS)
-            if let progressRecorder {
-                guard state != .buffering else { return }
-                let journalID = progressRecorder.record(
-                    position: position,
-                    duration: duration ?? media?.duration,
-                    isPaused: state == .paused,
-                )
-                guard !isLocalPlayback else { return }
-                Task {
-                    if await sendTimeline(state: state) {
-                        progressRecorder.markSynced(journalID)
-                    }
+        if let progressRecorder {
+            guard state != .buffering else { return }
+            let journalID = progressRecorder.record(
+                position: position,
+                duration: duration ?? media?.duration,
+                isPaused: state == .paused,
+            )
+            guard !isLocalPlayback else { return }
+            Task {
+                if await sendTimeline(state: state) {
+                    progressRecorder.markSynced(journalID)
                 }
-                return
             }
-        #endif
+            return
+        }
 
         if let liveSession {
             guard !isLiveReportingSuspended else { return }
@@ -1352,11 +1348,7 @@ final class PlayerViewModel {
     }
 
     private var hasProgressRecorder: Bool {
-        #if os(tvOS)
-            false
-        #else
-            progressRecorder != nil
-        #endif
+        progressRecorder != nil
     }
 
     private func startLiveTimelineReport(

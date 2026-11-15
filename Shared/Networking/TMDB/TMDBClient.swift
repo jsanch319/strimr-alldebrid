@@ -86,7 +86,7 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
-nonisolated struct TMDBEpisode: Codable, Identifiable, Sendable {
+nonisolated struct TMDBEpisode: Codable, Identifiable, Hashable, Sendable {
     let id: Int
     let episode_number: Int
     let season_number: Int

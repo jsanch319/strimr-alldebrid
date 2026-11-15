@@ -10,7 +10,7 @@ final class HubDetailViewModel {
     var isLoadingMore = false
     var errorMessage: String?
 
-    @ObservationIgnored private let service: any MediaHomeService
+    @ObservationIgnored private let service: (any MediaHomeService)?
     @ObservationIgnored private var hasLoaded = false
     @ObservationIgnored private var reachedEnd = false
     @ObservationIgnored private var totalItemCount: Int?
@@ -21,6 +21,15 @@ final class HubDetailViewModel {
         service = services.home
     }
 
+    /// Already loaded catalog rows use the same hub UI without impersonating a media server.
+    init(hub: Hub) {
+        self.hub = hub
+        service = nil
+        items = hub.items
+        hasLoaded = true
+        reachedEnd = true
+    }
+
     func load() async {
         guard !hasLoaded else { return }
         hasLoaded = true
@@ -28,6 +37,7 @@ final class HubDetailViewModel {
     }
 
     func reload() async {
+        guard service != nil else { items = hub.items; reachedEnd = true; return }
         items = []
         reachedEnd = false
         totalItemCount = nil
@@ -45,7 +55,7 @@ final class HubDetailViewModel {
     }
 
     private func loadPage(start: Int, isInitialLoad: Bool) async {
-        guard !reachedEnd, !isLoading, !isLoadingMore else { return }
+        guard !reachedEnd, !isLoading, !isLoadingMore, let service else { return }
 
         if isInitialLoad {
             isLoading = true
