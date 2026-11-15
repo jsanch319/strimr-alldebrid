@@ -266,6 +266,18 @@ struct TrackerPlaybackTests {
         #expect(client.reports.isEmpty)
     }
 
+    @Test func `a late duration sends one start with the original resume point`() async {
+        let client = FakeTrackerClient(resendThrottle: 0)
+        let (session, binding) = session(client: client, resumeOffset: 300)
+        session.resolve(item: item, bindings: [binding])
+        session.playing(position: 0, duration: nil)
+        session.playing(position: 0, duration: 1000)
+        session.playing(position: 5, duration: 1000)
+        await binding.channel.flush()
+        #expect(client.reports.count == 1)
+        #expect(client.reports.first?.progress == 30)
+    }
+
     @Test func `the first start uses the resume point, as the player reports 0 before seeking`() async {
         let client = FakeTrackerClient()
         let (session, binding) = session(client: client, resumeOffset: 300)

@@ -878,6 +878,10 @@ final class PlayerViewModel {
         #else
             self.duration = duration
         #endif
+        // Catalog movies learn their duration from the engine, after the first playback state can arrive.
+        if catalogProgress != nil {
+            reportTrackerState()
+        }
     }
 
     func handleBufferedAhead(_ bufferedAhead: Double) {

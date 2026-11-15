@@ -173,11 +173,12 @@ final class TrackerPlaybackSession {
         switch action {
         case let .playing(position, duration):
             guard phase != .playing else { return }
-            phase = .playing
             // The player reports position 0 before it seeks to the resume point.
             let effective = !hasStarted && position < 1 ? resumeOffset ?? position : position
+            guard let progress = Self.progress(effective, duration) else { return }
+            phase = .playing
             hasStarted = true
-            send(.start, progress: Self.progress(effective, duration), date: date)
+            send(.start, progress: progress, date: date)
         case let .paused(position, duration):
             guard phase == .playing else { return }
             phase = .paused
