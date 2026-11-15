@@ -309,11 +309,12 @@ private struct CatalogHubView: View {
 
 struct CatalogSearchView: View {
     let data: CatalogHomeData
+    var showsCloseButton = true
     let onSelect: (MediaDisplayItem) -> Void
     @State private var query = ""
     var body: some View {
         VStack {
-            CatalogHubView(hub: data.searchRow.hub, showsCloseButton: false, onSelect: onSelect)
+            CatalogHubView(hub: data.searchRow.hub, showsCloseButton: showsCloseButton, onSelect: onSelect)
                 .id(data.searchRow.hub)
             if data.isSearching {
                 ProgressView()

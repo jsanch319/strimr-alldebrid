@@ -78,7 +78,7 @@ private struct CatalogSearchTab: View {
     let data: CatalogHomeData
     @State private var selection: TMDBTitle?
     var body: some View {
-        CatalogSearchView(data: data, onSelect: { media in
+        CatalogSearchView(data: data, showsCloseButton: false, onSelect: { media in
             guard let item = media.playableItem else { return }
             selection = data.selection(for: item)?.title
         })
