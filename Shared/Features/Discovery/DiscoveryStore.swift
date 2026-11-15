@@ -20,6 +20,7 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
 
     var localCheckpoint: ExactCheckpoint?
     var locallyCleared: Bool?
+    var acknowledgedAt: Date?
 
     var exactCheckpoint: ExactCheckpoint? {
         if let localCheckpoint {
@@ -167,6 +168,7 @@ final class CatalogProgressStore {
         }), records[index].updatedAt <= report.date else { return }
         records[index].pendingSync = false
         records[index].remotePercentage = report.progress
+        records[index].acknowledgedAt = Date()
         replace(records, scope: scope)
     }
 
@@ -484,7 +486,7 @@ extension CatalogProgressStore {
                     duration: duration,
                 ) ?? 0,
                 duration: duration,
-                completed: false,
+                completed: pause.progress >= 100,
                 remotePercentage: pause.progress,
                 pendingSync: false,
                 checkpointEvent: nil,
@@ -526,7 +528,16 @@ extension CatalogProgressStore {
                 resolved[record.id] = completed
                 continue
             }
-            if let remoteDate, remoteDate > record.updatedAt {
+            let echoesAcknowledgement: Bool = if let remote = resolved[record.id],
+                                                 let acknowledgedAt = record.acknowledgedAt,
+                                                 let percentage = record.remotePercentage
+            {
+                record.usesExactPosition && record.pendingSync == false && remote.updatedAt <= acknowledgedAt
+                    && abs((remote.remotePercentage ?? -1) - percentage.trackerProgress) < 0.011
+            } else {
+                false
+            }
+            if let remoteDate, remoteDate > record.updatedAt, !echoesAcknowledgement {
                 // Keep the precise checkpoint as provenance, but select this newer cross-device session.
                 continue
             }
@@ -549,7 +560,8 @@ extension CatalogProgressStore {
             let delivered = await replay(item, percent, record.updatedAt)
             var updated = record
             if delivered {
-                updated.pendingSync = false; updated.remotePercentage = percent; replayed = true
+                updated.pendingSync = false; updated.remotePercentage = percent.trackerProgress
+                updated.acknowledgedAt = Date(); replayed = true
             }
             // Recording can continue while the shared network channel is awaited.
             if let current = progress(title: record.title, episode: record.episode, scope: scope),

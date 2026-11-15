@@ -225,6 +225,50 @@ struct SimklResumeTests {
         #expect(relaunched.records(scope: "other-account").isEmpty)
     }
 
+    @Test func `server echo of our rounded pause cannot replace its precise seconds`() async throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        cache.save(title: title, episode: nil, position: 126.125, duration: 1000.5, finished: false, scope: "a")
+        var record = try #require(cache.records(scope: "a").first)
+        record.updatedAt = Date(timeIntervalSince1970: 0)
+        record.localCheckpoint = .init(
+            position: record.position,
+            duration: record.duration,
+            updatedAt: record.updatedAt,
+        )
+        cache.replace([record], scope: "a")
+        cache.acknowledge(
+            TrackerPlaybackReport(
+                event: .pause,
+                item: TrackerItem(kind: .movie, ids: title.matchingIDs),
+                progress: 12.61,
+                date: Date(),
+            ),
+            scope: "a",
+        )
+        _ = try await cache.reconcile(
+            paused: [pause(percent: 12.61)],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in Issue.record("Our acknowledged echo must not be replayed"); return false },
+        )
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.resumeOffset == 126.125)
+        _ = try await cache.reconcile(
+            paused: [pause(percent: 30, date: "2099-01-01T00:00:00Z")],
+            entries: [],
+            scope: "a",
+            activities: activities,
+            tmdb: metadata(),
+            replay: { _, _, _ in false },
+        )
+        let newer = try #require(cache.progress(title: title, episode: nil, scope: "a"))
+        #expect(newer.resumeOffset == nil)
+        #expect(newer.resumePercentage == 30)
+        #expect(newer.localCheckpoint?.position == 126.125)
+    }
+
     @Test func `Simkl is a duration-based fallback until this device actually plays`() async throws {
         let cache = CatalogProgressStore(defaults: TestDefaults.make())
         _ = try await cache.reconcile(
