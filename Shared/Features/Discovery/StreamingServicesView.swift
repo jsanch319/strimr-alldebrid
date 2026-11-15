@@ -280,6 +280,7 @@ private struct StreamingProviderView: View {
     }
 
     private func load(reset: Bool) async {
+        guard reset || !loading else { return }
         if reset {
             titles = []; page = 0; totalPages = 0
         }

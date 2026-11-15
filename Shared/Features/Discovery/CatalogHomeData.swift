@@ -92,8 +92,11 @@ final class CatalogHomeData {
         }))
         for kind in [TMDBTitle.Kind.movie, .tv] {
             let unwatched = discovery.entries.filter { entry in
-                entry.kind == kind && entry.status != "completed" && entry.status != "dropped"
-                    && (kind == .movie || (entry.watched_episodes_count ?? 0) == 0)
+                entry.kind == kind && ["plantowatch", "watching", "hold"].contains(entry.status ?? "")
+                    && (kind == .movie || (entry.last_watched_at == nil
+                            &&
+                            (entry.watched_episodes_count ?? entry.seasons?
+                                .reduce(0) { $0 + ($1.episodes?.count ?? 0) } ?? 0) == 0))
             }.compactMap { discovery.title(for: $0) }
             rows.append(Self.row(
                 id: "catalog:unwatched:\(kind.rawValue)",
@@ -218,6 +221,7 @@ final class CatalogHomeData {
     }
 
     func search(_ query: String) async {
+        errorMessage = nil
         searchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         searchResults = []; searchPage = 0; hasMoreSearchResults = false
         guard !searchQuery.isEmpty else { isSearching = false; return }
@@ -235,6 +239,7 @@ final class CatalogHomeData {
     }
 
     func searchMore(query: String? = nil) async {
+        guard query != nil || !isSearching else { return }
         let requested = query ?? searchQuery
         guard !requested.isEmpty, requested == searchQuery else { return }
         isSearching = true

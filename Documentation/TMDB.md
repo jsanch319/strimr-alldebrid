@@ -17,7 +17,7 @@ TMDb identities include both media type and numeric ID, since movie and TV IDs c
 
 ## Current boundaries
 
-The detail view now offers Simkl My List actions and matches movies/episodes to available AllDebrid files with explicit source selection and Simkl-backed resume positions with offline checkpoints. See [the integration guide](DISCOVERY_INTEGRATION.md) for setup, sync behavior, matching rules, and validation boundaries. Recommendations are related-title recommendations, not a personalized Simkl recommendation feed. Server-based Seerr hero behavior is preserved; the new direct TMDb discovery block also appears on server-backed Home. Discovery uses the original Strimr hero carousel with movie/TV slides and the original card rows. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
+The detail view now offers Simkl My List actions and matches movies/episodes to available AllDebrid files with explicit source selection and Simkl-backed resume positions with offline checkpoints. See [the integration guide](DISCOVERY_INTEGRATION.md) for setup, sync behavior, matching rules, and validation boundaries. Details show related titles. Home also combines TMDb recommendations from up to two actual Simkl watch-history seeds, excluding titles already in the Simkl library. Server-based Seerr hero behavior is preserved; direct TMDb discovery powers the server-free Home. Discovery uses the original Strimr hero carousel with movie/TV slides and the original card rows. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
 
 ## Validation
 
