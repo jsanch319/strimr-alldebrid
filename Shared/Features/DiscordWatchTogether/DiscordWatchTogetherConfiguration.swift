@@ -86,7 +86,7 @@ enum DiscordWatchTogetherConfiguration {
                  return
             }
         }
-    endif
+    #endif
 
     private static func safeIdentifier(_ value: String) -> String? {
         let identifier = value.trimmingCharacters(in: .whitespacesAndNewlines)
