@@ -43,7 +43,7 @@ enum DiscordWatchTogetherConfiguration {
               var components = URLComponents(string: "https://discord.com/activities/\(applicationID)")
         else {
             return nil
-          }
+        }
 
         let mediaType: String? = switch media.kind {
         case .movie: "movie"
