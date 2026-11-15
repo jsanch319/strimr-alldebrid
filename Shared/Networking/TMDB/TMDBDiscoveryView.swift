@@ -18,6 +18,7 @@ struct TMDBDiscoveryView: View {
                 Spacer()
                 Button("TMDb Settings") { configuring = true }
             }
+            DiscoveryPersonalRows()
             TextField("Search movies and TV shows", text: $query)
                 .padding(12)
                 .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
@@ -120,7 +121,7 @@ struct TMDBDiscoveryView: View {
     }
 }
 
-private struct TMDBArtwork: View {
+struct TMDBArtwork: View {
     let path: String?
     var backdrop = false
     var body: some View {
@@ -132,7 +133,7 @@ private struct TMDBArtwork: View {
     }
 }
 
-private struct TMDBPosterRow: View {
+struct TMDBPosterRow: View {
     let heading: String
     let titles: [TMDBTitle]
     var body: some View {
@@ -158,8 +159,18 @@ private struct TMDBPosterRow: View {
 }
 
 @MainActor
-private struct TMDBDetailView: View {
+struct TMDBDetailView: View {
     let title: TMDBTitle
+    var initialSeason: Int?
+    @State private var selectedPlayback: PlaybackSelection?
+    @State private var changingList = false
+    @State private var confirmRemoval = false
+    private let discovery = DiscoveryStore.shared
+    private struct PlaybackSelection: Identifiable {
+        let id = UUID()
+        let episode: TMDBEpisode?
+    }
+
     @State private var detail: TMDBTitle?
     @State private var recommendations: [TMDBTitle] = []
     @State private var episodes: [TMDBEpisode] = []
@@ -168,6 +179,13 @@ private struct TMDBDetailView: View {
     @State private var loadingEpisodes = false
     private var item: TMDBTitle {
         detail ?? title
+    }
+
+    private func changeList(planned: Bool) async {
+        changingList = true
+        defer { changingList = false }
+        do { try await discovery.setPlanned(item, planned: planned) }
+        catch { self.error = "Simkl could not update My List. \(error.localizedDescription)" }
     }
 
     var body: some View {
@@ -182,10 +200,25 @@ private struct TMDBDetailView: View {
                 Text((item.genres ?? []).map(\.name).joined(separator: " • "))
                 Text(item.overview ?? "No description available.")
                 Text("TMDb \(item.kind.rawValue) ID: \(item.id)").font(.caption)
-                Text(
-                    "Catalog metadata does not confirm playback availability. Browse your AllDebrid library for available files.",
-                )
-                .font(.footnote).foregroundStyle(.secondary)
+                if item.kind == .movie {
+                    Button("Find Available Sources") { selectedPlayback = PlaybackSelection(episode: nil) }
+                        .buttonStyle(.borderedProminent)
+                }
+                if TrackerCoordinator.shared.simklLibraryClient != nil {
+                    let planned = discovery.entry(for: item)?.isPlanned == true
+                    Button(planned ? "Remove from My List" : "Add to My List") {
+                        if planned {
+                            confirmRemoval = true
+                        } else {
+                            Task { await changeList(planned: true) }
+                        }
+                    }.disabled(changingList)
+                    if discovery.entry(for: item)?.status == "completed" {
+                        Label("Watched · Simkl", systemImage: "checkmark.circle.fill")
+                    }
+                } else {
+                    NavigationLink("Connect Simkl for My List and tracking") { TrackerSettingsView(service: .simkl) }
+                }
                 if let seasons = item.seasons, !seasons.isEmpty {
                     Picker("Season", selection: $season) {
                         Text("Select a season").tag(Int?.none)
@@ -213,6 +246,14 @@ private struct TMDBDetailView: View {
                                 Text("TMDb Rating: \(rating, specifier: "%.1f") / 10").font(.caption)
                             }
                             Text(episode.overview ?? "").font(.subheadline).foregroundStyle(.secondary)
+                            if discovery.entry(for: item)?.watched(
+                                season: episode.season_number,
+                                episode: episode.episode_number,
+                            ) == true {
+                                Label("Watched · Simkl", systemImage: "checkmark.circle.fill")
+                            }
+                            Button("Find Available Sources") { selectedPlayback = PlaybackSelection(episode: episode) }
+                                .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -225,7 +266,19 @@ private struct TMDBDetailView: View {
             }.padding()
         }
         .navigationTitle(item.displayTitle)
+        .sheet(item: $selectedPlayback, onDismiss: { Task { await discovery.sync(force: true) } }) { selection in
+            CatalogSourcesView(title: item, episode: selection.episode)
+        }
+        .confirmationDialog(
+            "Remove this title from Simkl? This also clears its Simkl watch history and rating.",
+            isPresented: $confirmRemoval,
+            titleVisibility: .visible,
+        ) {
+            Button("Remove from Simkl", role: .destructive) { Task { await changeList(planned: false) } }
+        }
         .task {
+            season = initialSeason
+            await discovery.sync()
             do {
                 detail = try await TMDBClient.shared.details(title)
                 recommendations = try await TMDBClient.shared.recommendations(title)

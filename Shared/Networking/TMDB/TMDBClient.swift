@@ -1,7 +1,7 @@
 import Foundation
 
 /// A catalog identity is always the media type plus TMDb ID (movie and TV IDs can overlap).
-nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
+nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     enum Kind: String, Codable, Sendable { case movie, tv }
     let id: Int
     var media_type: String?
@@ -17,15 +17,15 @@ nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
     let seasons: [Season]?
     let external_ids: RemoteIDs?
 
-    struct Genre: Decodable, Hashable, Sendable { let id: Int; let name: String }
-    struct Season: Decodable, Identifiable, Hashable, Sendable {
+    struct Genre: Codable, Hashable, Sendable { let id: Int; let name: String }
+    struct Season: Codable, Identifiable, Hashable, Sendable {
         let id: Int
         let season_number: Int
         let name: String
         let episode_count: Int
     }
 
-    struct RemoteIDs: Decodable, Hashable, Sendable { let imdb_id: String?; let tvdb_id: Int? }
+    struct RemoteIDs: Codable, Hashable, Sendable { let imdb_id: String?; let tvdb_id: Int? }
     /// Reuses the app's identity format for Simkl and file/source matching.
     var matchingIDs: ExternalIDs {
         ExternalIDs(imdb: external_ids?.imdb_id, tmdb: String(id), tvdb: external_ids?.tvdb_id.map(String.init))
@@ -49,6 +49,24 @@ nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
         }
     }
 
+    static func reference(id: Int, kind: Kind, title: String = "", year: Int? = nil) -> TMDBTitle {
+        TMDBTitle(
+            id: id,
+            media_type: kind.rawValue,
+            title: kind == .movie ? title : nil,
+            name: kind == .tv ? title : nil,
+            overview: nil,
+            poster_path: nil,
+            backdrop_path: nil,
+            release_date: kind == .movie ? year.map(String.init) : nil,
+            first_air_date: kind == .tv ? year.map(String.init) : nil,
+            vote_average: nil,
+            genres: nil,
+            seasons: nil,
+            external_ids: nil,
+        )
+    }
+
     var kind: Kind {
         media_type == "tv" ? .tv : .movie
     }
@@ -66,7 +84,7 @@ nonisolated struct TMDBTitle: Decodable, Identifiable, Hashable, Sendable {
     }
 }
 
-nonisolated struct TMDBEpisode: Decodable, Identifiable, Sendable {
+nonisolated struct TMDBEpisode: Codable, Identifiable, Sendable {
     let id: Int
     let episode_number: Int
     let season_number: Int

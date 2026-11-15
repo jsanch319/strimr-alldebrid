@@ -233,6 +233,22 @@ final class TrackerCoordinator {
         }
     }
 
+    /// Server-free accounts use a stable, separate scope; server profiles keep their existing accounts.
+    static let allDebridProfileID = "strimr.server-free.alldebrid"
+
+    var simklLibraryClient: SimklClient? {
+        enabledBindings.first { $0.service == .simkl }?.client as? SimklClient
+    }
+
+    /// Catalog playback already knows the IDs, so it never invokes a server resolver or a second scrobbler.
+    func beginCatalogPlayback(item: TrackerItem, resumeOffset: TimeInterval?) -> TrackerPlaybackSession? {
+        let targets = enabledBindings.filter { $0.service == .simkl }
+        guard !targets.isEmpty else { return nil }
+        let session = TrackerPlaybackSession(resumeOffset: resumeOffset, now: now)
+        session.resolve(item: item, bindings: targets)
+        return session
+    }
+
     // MARK: - Playback
 
     /// Nil when nothing would be reported: Live TV and clips never call this, and other kinds are not tracked.

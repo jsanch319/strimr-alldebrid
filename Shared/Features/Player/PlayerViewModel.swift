@@ -226,6 +226,8 @@ final class PlayerViewModel {
 
     @ObservationIgnored private let timelineInterval: TimeInterval = 10
     @ObservationIgnored private var trackerSession: TrackerPlaybackSession?
+    @ObservationIgnored private var catalogProgress: ((Double, Double?, Bool) -> Void)?
+    @ObservationIgnored private var lastCatalogSave: Date?
     @ObservationIgnored private var lastTimelineSentAt: Date?
     @ObservationIgnored private var lastTimelineState: TimelineState?
     @ObservationIgnored private let ratingKey: String
@@ -306,6 +308,8 @@ final class PlayerViewModel {
             localExternalSubtitles: [ExternalSubtitleTrack] = [],
             owner: MediaOwner? = nil,
             resumes: Bool = true,
+            catalogTrackerItem: TrackerItem? = nil,
+            catalogProgress: ((Double, Double?, Bool) -> Void)? = nil,
         ) {
             let recorder = owner.flatMap {
                 OfflineCoordinator.shared.makeRecorder(
@@ -315,7 +319,7 @@ final class PlayerViewModel {
                     media: localMedia,
                 )
             }
-            let resumePosition = resumes ? recorder?.resumePosition : nil
+            let resumePosition = resumes ? (recorder?.resumePosition ?? localMedia.viewOffset) : nil
             let media = resumePosition.map { position in
                 localMedia.applying(OfflineWatchState(
                     viewOffset: position,
@@ -336,6 +340,13 @@ final class PlayerViewModel {
             playbackURL = localPlaybackURL
             selectedQuality = .original
             progressRecorder = recorder
+            self.catalogProgress = catalogProgress
+            if let catalogTrackerItem {
+                trackerSession = TrackerCoordinator.shared.beginCatalogPlayback(
+                    item: catalogTrackerItem,
+                    resumeOffset: resumePosition,
+                )
+            }
         }
 
         convenience init(request: LocalPlaybackRequest) {
@@ -851,6 +862,10 @@ final class PlayerViewModel {
             self.position = position
         #endif
         reportTimeline(state: playbackState)
+        if lastCatalogSave.map({ Date().timeIntervalSince($0) >= 10 }) ?? true {
+            catalogProgress?(self.position, duration ?? media?.duration, false)
+            lastCatalogSave = Date()
+        }
     }
 
     func handlePlaybackDuration(_ duration: Double?) {
@@ -870,6 +885,7 @@ final class PlayerViewModel {
     }
 
     func handleStop() {
+        catalogProgress?(position, duration ?? media?.duration, false)
         trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
         #if !os(tvOS)
             if let progressRecorder {
@@ -952,6 +968,7 @@ final class PlayerViewModel {
     }
 
     func markPlaybackFinished() async {
+        catalogProgress?(position, duration ?? media?.duration, true)
         trackerSession?.finished()
         #if !os(tvOS)
             if let progressRecorder {

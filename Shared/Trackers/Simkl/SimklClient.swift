@@ -237,6 +237,38 @@ final class SimklClient: TrackerClient {
         ))
     }
 
+    /// Uses the same token provider and write gate as scrobbling, avoiding competing refreshes.
+    func libraryRead(_ path: String, query: [URLQueryItem] = []) async throws -> TrackerHTTPResponse {
+        try await transport.read { token in
+            .trackerJSON(
+                url: SimklAPI.url(path: path).appending(queryItems: query),
+                method: "GET",
+                headers: SimklAPI.headers(token: token),
+                body: nil,
+            )
+        }
+    }
+
+    func libraryWrite(_ path: String, body: [String: Any]) async throws {
+        let data = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+        let response = try await transport.write { token in
+            var request = URLRequest.trackerJSON(
+                url: SimklAPI.url(path: path),
+                headers: SimklAPI.headers(token: token),
+                body: nil,
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = data
+            return request
+        }
+        let result = try JSONSerialization.jsonObject(with: response.data) as? [String: Any]
+        if let notFound = result?["not_found"] as? [String: Any],
+           notFound.values.contains(where: { ($0 as? [Any])?.isEmpty == false })
+        {
+            throw TrackerAPIError.notFound
+        }
+    }
+
     private func post(path: String, body: [String: Any]) async throws {
         let payload = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
         try await transport.write { token in

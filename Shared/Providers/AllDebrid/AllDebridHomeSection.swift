@@ -154,6 +154,9 @@ struct AllDebridOnlyHomeView: View {
                 .padding(.vertical, 20)
             }
             .navigationTitle("tabs.home")
+            .task {
+                TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID)
+            }
             .sheet(item: $selectedItem) { item in
                 let initialFile: AllDebridMagnetFile? = {
                     if case let .magnetFile(file) = item {

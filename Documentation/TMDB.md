@@ -13,11 +13,11 @@ Discovery includes weekly trending movies/TV, popular movies/TV, upcoming movies
 
 Successful responses are cached in memory for five minutes, bounded to 150 entries. HTTP 429 establishes a client-wide cooldown using Retry-After seconds or HTTP dates (60-second fallback). Requests are not automatically retried; the UI shows when to retry. HTTP authentication and server errors display actionable messages. Network calls use a 30-second timeout. Saving/removing credentials clears the cache and cooldown.
 
-TMDb identities include both media type and numeric ID, since movie and TV IDs can overlap. Details also retrieve IMDb and TVDB external IDs for future matching. Preserve the numeric TMDb ID as Simkl `ids.tmdb` with the corresponding media type. Existing Simkl authentication/scrobbling and AllDebrid authentication/playback are unchanged. TMDb is metadata only: it does not establish file availability or acquire files.
+TMDb identities include both media type and numeric ID, since movie and TV IDs can overlap. Details also retrieve IMDb and TVDB external IDs for future matching. Preserve the numeric TMDb ID as Simkl `ids.tmdb` with the corresponding media type. Existing Simkl authentication/scrobbling and AllDebrid authentication/playback are reused; catalog playback supplies known TMDb identities to the existing tracking channel. TMDb is metadata only: it does not establish file availability or acquire files.
 
 ## Current boundaries
 
-The detail view does not yet match catalog titles to AllDebrid files or expose Simkl watchlist actions. Use the existing AllDebrid library for playback. Recommendations are related-title recommendations, not a personalized Simkl recommendation feed. Server-based Seerr hero behavior is preserved; the new direct TMDb discovery block also appears on server-backed Home. The featured discovery card shows one trending movie. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
+The detail view now offers Simkl My List actions and matches movies/episodes to available AllDebrid files with explicit source selection and saved resume positions. See [the integration guide](DISCOVERY_INTEGRATION.md) for setup, sync behavior, matching rules, and validation boundaries. Recommendations are related-title recommendations, not a personalized Simkl recommendation feed. Server-based Seerr hero behavior is preserved; the new direct TMDb discovery block also appears on server-backed Home. The featured discovery card shows one trending movie. Attribution text and a TMDb link are included; review TMDb's current branding requirements and add its approved logo before distribution.
 
 ## Validation
 
