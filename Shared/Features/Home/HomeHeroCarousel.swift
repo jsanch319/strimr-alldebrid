@@ -13,6 +13,7 @@
         let onPlay: (MediaItem) -> Void
         let onDetails: (MediaItem) -> Void
         var onFeaturedChange: ((MediaItem?) -> Void)?
+        var onVisibilityChange: ((Bool) -> Void)?
 
         @State private var selection: MediaIdentity?
         @State private var restart = 0
