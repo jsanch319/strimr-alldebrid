@@ -48,7 +48,11 @@ final class ProgressSynchronizer {
             let server = try await services.playback.serverWatchState(itemID: itemID)
             let serverDate = server.lastViewedAt
 
-            if let serverDate, latest.occurredAt <= serverDate {
+            if let serverDate, !PlaybackProgressConflict.prefersLocal(
+                localDate: latest.occurredAt,
+                isPending: true,
+                remoteDate: serverDate,
+            ) {
                 // The server saw more recent activity: it wins, unless a local "watched" is newer than it.
                 if let lastWatched, lastWatched.occurredAt > serverDate, !server.isPlayed {
                     try await services.playback.markItemWatched(itemID: itemID, at: lastWatched.occurredAt)

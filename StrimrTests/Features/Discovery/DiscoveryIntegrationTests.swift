@@ -67,6 +67,8 @@ struct DiscoveryIntegrationTests {
         #expect(second.progress(title: title, episode: nil, scope: "alice")?.position == 400)
         #expect(second.records(scope: "bob").isEmpty)
         second.save(title: title, episode: nil, position: 970, duration: 1000, finished: false, scope: "alice")
+        #expect(second.progress(title: title, episode: nil, scope: "alice")?.completed == false)
+        second.save(title: title, episode: nil, position: 1000, duration: 1000, finished: true, scope: "alice")
         #expect(second.progress(title: title, episode: nil, scope: "alice")?.completed == true)
         second.save(title: title, episode: nil, position: .nan, duration: nil, finished: false, scope: "alice")
         #expect(second.records(scope: "alice").count == 1)
@@ -102,6 +104,7 @@ struct DiscoveryIntegrationTests {
         let stub = HTTPStub { request in
             switch request.url?.path {
             case "/users/settings": .json(#"{"user":{"name":"alice"}}"#)
+            case "/sync/playback": .json("[]")
             case "/sync/activities": .json(#"{"all":"2026-11-15T00:00:00Z","movies":{"all":"2026-11-15T00:00:00Z"}}"#)
             case "/sync/all-items/movies": .json(
                     #"{"movies":[{"status":"plantowatch","movie":{"title":"Movie","year":2020,"ids":{"simkl":10,"tmdb":"12"}}}]}"#,
@@ -124,13 +127,21 @@ struct DiscoveryIntegrationTests {
         coordinator.activate(profileID: "alice")
         await coordinator.connect(.simkl, session: TrackerFixtures.session)
         let tmdb = TMDBClient(session: stub.session, tokenProvider: { nil })
-        let store = DiscoveryStore(defaults: defaults, coordinator: coordinator, tmdb: tmdb)
+        let store = DiscoveryStore(
+            defaults: defaults,
+            coordinator: coordinator,
+            tmdb: tmdb,
+            progress: CatalogProgressStore(defaults: defaults),
+        )
         await store.sync(force: true)
         #expect(store.planned.count == 1)
         let pulls = stub.requests.filter { $0.url?.path.contains("all-items") == true }.count
         await store.sync(force: true)
         #expect(stub.requests.filter { $0.url?.path.contains("all-items") == true }.count == pulls)
         stub.respond { request in
+            if request.url?.path == "/sync/playback" {
+                return .json("[]")
+            }
             if request.url?
                 .path == "/sync/add-to-list"
             {
@@ -148,7 +159,12 @@ struct DiscoveryIntegrationTests {
         coordinator.setEnabled(false, for: .simkl)
         await store.sync()
         #expect(store.entries.isEmpty)
-        stub.respond { _ in .json(#"{"all":"2026-11-15T00:00:00Z","movies":{"all":"2026-11-15T00:00:00Z"}}"#) }
+        stub.respond { request in
+            if request.url?.path == "/sync/playback" {
+                return .json("[]")
+            }
+            return .json(#"{"all":"2026-11-15T00:00:00Z","movies":{"all":"2026-11-15T00:00:00Z"}}"#)
+        }
         coordinator.setEnabled(true, for: .simkl)
         await store.sync()
         #expect(store.planned.count == 2)

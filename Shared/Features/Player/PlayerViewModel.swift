@@ -109,7 +109,17 @@ final class PlayerViewModel {
     }
 
     var resumePosition: Double? {
-        media?.viewOffset
+        if let catalogResumePercentage {
+            return PlaybackProgressConflict.position(
+                percentage: catalogResumePercentage,
+                duration: duration,
+            )
+        }
+        return media?.viewOffset
+    }
+
+    var resumesFromRemotePercentage: Bool {
+        catalogResumePercentage != nil
     }
 
     var markers: [SkipSegment] = []
@@ -226,8 +236,8 @@ final class PlayerViewModel {
 
     @ObservationIgnored private let timelineInterval: TimeInterval = 10
     @ObservationIgnored private var trackerSession: TrackerPlaybackSession?
-    @ObservationIgnored private var catalogProgress: ((Double, Double?, Bool) -> Void)?
-    @ObservationIgnored private var lastCatalogSave: Date?
+    @ObservationIgnored private var catalogResumePercentage: Double?
+    @ObservationIgnored private var isCatalogPlayback = false
     @ObservationIgnored private var lastTimelineSentAt: Date?
     @ObservationIgnored private var lastTimelineState: TimelineState?
     @ObservationIgnored private let ratingKey: String
@@ -309,9 +319,10 @@ final class PlayerViewModel {
             owner: MediaOwner? = nil,
             resumes: Bool = true,
             catalogTrackerItem: TrackerItem? = nil,
-            catalogProgress: ((Double, Double?, Bool) -> Void)? = nil,
+            catalogRecorder: PlaybackProgressRecorder? = nil,
+            catalogResumePercentage: Double? = nil,
         ) {
-            let recorder = owner.flatMap {
+            let recorder = catalogRecorder ?? owner.flatMap {
                 OfflineCoordinator.shared.makeRecorder(
                     owner: $0,
                     itemID: localMedia.id,
@@ -332,7 +343,7 @@ final class PlayerViewModel {
             ratingKey = localMedia.id
             mediaServices = nil
             mediaQueue = nil
-            shouldResumeFromOffsetFlag = resumePosition != nil
+            shouldResumeFromOffsetFlag = resumes && (resumePosition != nil || catalogResumePercentage != nil)
             self.localMedia = media
             self.localPlaybackURL = localPlaybackURL
             self.localExternalSubtitles = localExternalSubtitles
@@ -340,7 +351,8 @@ final class PlayerViewModel {
             playbackURL = localPlaybackURL
             selectedQuality = .original
             progressRecorder = recorder
-            self.catalogProgress = catalogProgress
+            self.catalogResumePercentage = resumes ? catalogResumePercentage : nil
+            isCatalogPlayback = catalogRecorder != nil
             if let catalogTrackerItem {
                 trackerSession = TrackerCoordinator.shared.beginCatalogPlayback(
                     item: catalogTrackerItem,
@@ -862,10 +874,6 @@ final class PlayerViewModel {
             self.position = position
         #endif
         reportTimeline(state: playbackState)
-        if lastCatalogSave.map({ Date().timeIntervalSince($0) >= 10 }) ?? true {
-            catalogProgress?(self.position, duration ?? media?.duration, false)
-            lastCatalogSave = Date()
-        }
     }
 
     func handlePlaybackDuration(_ duration: Double?) {
@@ -879,7 +887,8 @@ final class PlayerViewModel {
             self.duration = duration
         #endif
         // Catalog movies learn their duration from the engine, after the first playback state can arrive.
-        if catalogProgress != nil {
+        if isCatalogPlayback {
+            trackerSession?.updateInitialResumeOffset(resumePosition)
             reportTrackerState()
         }
     }
@@ -889,7 +898,13 @@ final class PlayerViewModel {
     }
 
     func handleStop() {
-        catalogProgress?(position, duration ?? media?.duration, false)
+        #if !os(tvOS)
+            if isCatalogPlayback {
+                progressRecorder?.stop(position: position, pushesImmediately: false)
+                trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
+                return
+            }
+        #endif
         trackerSession?.stopped(position: position, duration: duration ?? media?.duration)
         #if !os(tvOS)
             if let progressRecorder {
@@ -972,7 +987,13 @@ final class PlayerViewModel {
     }
 
     func markPlaybackFinished() async {
-        catalogProgress?(position, duration ?? media?.duration, true)
+        #if !os(tvOS)
+            if isCatalogPlayback {
+                progressRecorder?.finish(pushesImmediately: false)
+                trackerSession?.finished()
+                return
+            }
+        #endif
         trackerSession?.finished()
         #if !os(tvOS)
             if let progressRecorder {

@@ -225,6 +225,9 @@ struct PlayerView: View {
                 }
                 .onChange(of: playerController.duration) { _, newValue in
                     viewModel.handlePlaybackDuration(newValue)
+                    if viewModel.resumesFromRemotePercentage, !awaitingMediaLoad, !appliedResumeOffset {
+                        applyRemoteResumeWhenReady()
+                    }
                 }
                 .onChange(of: playerController.bufferedAhead) { _, newValue in
                     viewModel.handleBufferedAhead(newValue)
@@ -1655,6 +1658,18 @@ struct PlayerView: View {
         #endif
     }
 
+    private func applyRemoteResumeWhenReady() {
+        guard !sharePlayCoordinator.isInSession, viewModel.shouldResumeFromOffset,
+              let resume = viewModel.resumePosition, resume > 0 else { return }
+        appliedResumeOffset = true
+        let loadedURL = activePlaybackURL
+        Task {
+            await playerController.seekAfterReady(to: resume)
+            guard activePlaybackURL == loadedURL else { return }
+            finishMediaLoad()
+        }
+    }
+
     private func handleMediaLoaded() {
         guard awaitingMediaLoad else { return }
         awaitingMediaLoad = false
@@ -1663,6 +1678,9 @@ struct PlayerView: View {
         automaticSubtitleSearchKey = viewModel.currentRatingKey
         if sharePlayCoordinator.isInSession {
             sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
+        }
+        if viewModel.resumesFromRemotePercentage {
+            viewModel.handlePlaybackDuration(playerController.duration)
         }
         let resumePosition = pendingStartPosition
             ?? (!sharePlayCoordinator.isInSession && viewModel.shouldResumeFromOffset && !appliedResumeOffset

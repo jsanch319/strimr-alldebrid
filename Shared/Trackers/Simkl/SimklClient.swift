@@ -212,10 +212,20 @@ final class SimklClient: TrackerClient {
     }
 
     func report(_ event: TrackerPlaybackEvent, item: TrackerItem, progress: Double) async throws {
-        guard let body = TrackerRequestBody.scrobble(item: item, progress: progress, media: SimklAPI.media) else {
-            return
-        }
-        try await post(path: "scrobble/\(event.rawValue)", body: body)
+        try await report(event, item: item, progress: progress, minimumProgress: nil)
+    }
+
+    func report(
+        _ event: TrackerPlaybackEvent,
+        item: TrackerItem,
+        progress: Double,
+        minimumProgress: Int?,
+    ) async throws {
+        guard let body = TrackerRequestBody.scrobble(item: item, progress: progress, media: SimklAPI.media)
+        else { return }
+        let query = minimumProgress
+            .map { [URLQueryItem(name: "min_progress", value: String(min(100, max(50, $0))))] } ?? []
+        try await post(path: "scrobble/\(event.rawValue)", body: body, query: query)
     }
 
     func addToHistory(_ entries: [TrackerHistoryEntry]) async throws {
@@ -269,11 +279,11 @@ final class SimklClient: TrackerClient {
         }
     }
 
-    private func post(path: String, body: [String: Any]) async throws {
+    private func post(path: String, body: [String: Any], query: [URLQueryItem] = []) async throws {
         let payload = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
         try await transport.write { token in
             var request = URLRequest.trackerJSON(
-                url: SimklAPI.url(path: path),
+                url: SimklAPI.url(path: path).appending(queryItems: query),
                 headers: SimklAPI.headers(token: token),
                 body: nil,
             )

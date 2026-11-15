@@ -7,16 +7,34 @@ import Foundation
 final class PlaybackProgressRecorder {
     static let watchedThreshold = 0.9
 
-    private let owner: MediaOwner
+    private let owner: MediaOwner?
     private let itemID: String
     private let media: MediaItem?
-    private let store: OfflineStore
-    private let coordinator: OfflineCoordinator
+    private let store: OfflineStore?
+    private let coordinator: OfflineCoordinator?
     private let pushesImmediately: Bool
     private var duration: TimeInterval?
+    private let completionThreshold: Double
     private var hasStarted = false
     private var hasReportedWatched = false
     private var pushTask: Task<Void, Never>?
+
+    /// Alternative destination for server-free media. The recorder's validation, event ordering and
+    /// completion rules are shared; Simkl's existing channel remains the only network writer.
+    struct Destination {
+        let resumePosition: () -> TimeInterval?
+        let checkpoint: (TimeInterval, TimeInterval?, ProgressJournalEvent) -> Void
+    }
+
+    private var destination: Destination?
+
+    init(destination: Destination, duration: TimeInterval?, watchedThreshold: Double = 1) {
+        completionThreshold = watchedThreshold
+        owner = nil; itemID = ""; media = nil; store = nil; coordinator = nil
+        pushesImmediately = false
+        self.destination = destination
+        self.duration = duration
+    }
 
     init(
         owner: MediaOwner,
@@ -27,6 +45,7 @@ final class PlaybackProgressRecorder {
         store: OfflineStore,
         coordinator: OfflineCoordinator,
     ) {
+        completionThreshold = Self.watchedThreshold
         self.owner = owner
         self.itemID = itemID
         self.media = media
@@ -84,7 +103,11 @@ final class PlaybackProgressRecorder {
 
     /// Resume position using the same rules as streaming: finished items restart from the beginning.
     var resumePosition: TimeInterval? {
-        store.resumePosition(owner: owner, itemID: itemID, fallbackDuration: duration)
+        if let destination {
+            return destination.resumePosition()
+        }
+        guard let store, let owner else { return nil }
+        return store.resumePosition(owner: owner, itemID: itemID, fallbackDuration: duration)
     }
 
     @discardableResult
@@ -95,6 +118,9 @@ final class PlaybackProgressRecorder {
         }
         if let duration, duration.isFinite, duration > 0 {
             self.duration = duration
+        }
+        if destination != nil, hasReportedWatched {
+            return nil
         }
         // The player reports position 0 before seeking to the resume point; do not let it erase local progress.
         guard hasStarted || position >= 1 else { return nil }
@@ -156,17 +182,22 @@ final class PlaybackProgressRecorder {
 
     func markSynced(_ journalID: Int64?) {
         guard let journalID else { return }
-        store.markJournalSynced(ids: [journalID])
+        store?.markJournalSynced(ids: [journalID])
     }
 
     private func checkWatchedThreshold(position: TimeInterval) {
-        guard let duration, duration > 0, position / duration >= Self.watchedThreshold else { return }
+        guard let duration, duration > 0, position / duration >= completionThreshold else { return }
         markWatched()
     }
 
     private func markWatched() {
         guard !hasReportedWatched else { return }
         hasReportedWatched = true
+        if let destination {
+            destination.checkpoint(duration ?? 0, duration, .watched)
+            return
+        }
+        guard let store, let owner else { return }
         let now = Date()
         let previous = store.watchState(itemID: itemID, owner: owner)
         store.setWatchState(
@@ -212,6 +243,11 @@ final class PlaybackProgressRecorder {
         isPaused: Bool,
         pushesImmediately: Bool,
     ) -> Int64? {
+        if let destination {
+            destination.checkpoint(position, duration, event)
+            return nil
+        }
+        guard let store, let owner else { return nil }
         let now = Date()
         let previous = store.watchState(itemID: itemID, owner: owner)
         if let media {
@@ -263,7 +299,8 @@ final class PlaybackProgressRecorder {
         journalID: Int64?,
         _ operation: @escaping @MainActor (MediaServices, String) async throws -> Void,
     ) {
-        guard let journalID, let services = coordinator.reachableServices(for: owner) else { return }
+        guard let journalID, let store, let owner, let coordinator,
+              let services = coordinator.reachableServices(for: owner) else { return }
         let previousTask = pushTask
         let itemID = itemID
         let store = store

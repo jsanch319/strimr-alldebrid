@@ -105,7 +105,8 @@ nonisolated struct SimklLibraryResponse: Codable, Sendable {
 }
 
 nonisolated struct SimklActivities: Codable, Equatable, Sendable {
-    struct Domain: Codable, Equatable, Sendable { let all: String?; let removed_from_list: String? }
+    struct Domain: Codable, Equatable,
+        Sendable { let all: String?; let removed_from_list: String?; let playback: String? }
     let all: String?
     let movies: Domain?
     let tv_shows: Domain?

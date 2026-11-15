@@ -7,7 +7,7 @@ struct DiscoveryPersonalRows: View {
     private let progress = CatalogProgressStore.shared
     private var records: [CatalogProgress] {
         _ = progress.revision
-        return progress.records(scope: discovery.scope).filter { !$0.completed && $0.position > 0 }
+        return progress.records(scope: discovery.scope).filter { !$0.completed && ($0.fraction > 0 || $0.position > 0) }
     }
 
     var body: some View {
@@ -89,7 +89,9 @@ struct DiscoveryPersonalRows: View {
                                     {
                                         Text("S\(episode.season_number) E\(episode.episode_number)").font(.caption)
                                     }
-                                    Text("Resume at \(Int(record.position / 60)) min").font(.caption)
+                                    Text(record.pendingSync == false && record
+                                        .remotePercentage != nil ? "Resume at \(Int(record.fraction * 100))% · Simkl" :
+                                        "Resume at \(Int(record.position / 60)) min · pending sync").font(.caption)
                                         .foregroundStyle(.secondary)
                                 }.frame(width: 140, alignment: .leading)
                             }.buttonStyle(.plain)

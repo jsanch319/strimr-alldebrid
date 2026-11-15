@@ -16,6 +16,7 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     let genres: [Genre]?
     let seasons: [Season]?
     let external_ids: RemoteIDs?
+    let runtime: Int?
 
     struct Genre: Codable, Hashable, Sendable { let id: Int; let name: String }
     struct Season: Codable, Identifiable, Hashable, Sendable {
@@ -64,6 +65,7 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
             genres: nil,
             seasons: nil,
             external_ids: nil,
+            runtime: nil,
         )
     }
 
@@ -183,6 +185,18 @@ actor TMDBClient {
         )
         result.media_type = title.kind.rawValue
         return result
+    }
+
+    func find(imdb: String?, tvdb: String?, kind: TMDBTitle.Kind) async throws -> TMDBTitle? {
+        struct Matches: Decodable { let movie_results: [TMDBTitle]; let tv_results: [TMDBTitle] }
+        guard let identifier = imdb ?? tvdb else { return nil }
+        let result: Matches = try await get(
+            "find/\(identifier)",
+            query: [URLQueryItem(name: "external_source", value: imdb == nil ? "tvdb_id" : "imdb_id")],
+        )
+        guard var title = (kind == .movie ? result.movie_results : result.tv_results).first else { return nil }
+        title.media_type = kind.rawValue
+        return title
     }
 
     func recommendations(_ title: TMDBTitle, page: Int = 1) async throws -> [TMDBTitle] {

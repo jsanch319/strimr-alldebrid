@@ -27,8 +27,8 @@ struct CatalogSourcesView: View {
     var body: some View {
         NavigationStack {
             List {
-                if let progress, !progress.completed, progress.position > 0 {
-                    Toggle("Resume at \(Int(progress.position / 60)) min", isOn: $resumes)
+                if let progress, !progress.completed, progress.fraction > 0 || progress.position > 0 {
+                    Toggle("Resume at \(Int(progress.fraction * 100))%", isOn: $resumes)
                 }
                 ForEach(sources) { source in
                     Button {
@@ -45,6 +45,11 @@ struct CatalogSourcesView: View {
                 }
                 if let error {
                     Text(error).foregroundStyle(.red)
+                }
+                if let warning = DiscoveryStore.shared
+                    .errorMessage
+                {
+                    Text(warning).font(.footnote).foregroundStyle(.secondary)
                 }
                 Button("Refresh Available Files") { Task { await load() } }.disabled(loading)
             }
@@ -74,6 +79,7 @@ struct CatalogSourcesView: View {
         do {
             guard let key = try AllDebridCredentialStore().load()
             else { throw AllDebridAPIClient.APIError.invalidAPIKey }
+            await DiscoveryStore.shared.sync(force: true)
             let snapshot = try await AllDebridAPIClient(apiKey: key).librarySnapshot()
             try Task.checkCancellation()
             files = snapshot.magnetFiles
@@ -96,6 +102,7 @@ struct CatalogSourcesView: View {
         defer { loading = false }
         let scope = DiscoveryStore.shared.scope
         do {
+            await DiscoveryStore.shared.sync(force: true)
             guard let key = try AllDebridCredentialStore().load()
             else { throw AllDebridAPIClient.APIError.invalidAPIKey }
             let resolved = try await AllDebridAPIClient(apiKey: key).resolvePlaybackURL(
@@ -124,13 +131,20 @@ private struct CatalogPlayerView: View {
     #else
         @State private var player: AVPlayer?
         @State private var observer: Any?
+        @State private var statusObservation: NSKeyValueObservation?
+        @State private var durationObservation: NSKeyValueObservation?
+        private let remotePercentage: Double?
+        #if !os(tvOS)
+            private let recorder: PlaybackProgressRecorder
+        #endif
         private let url: URL
         private let resume: Double
-        private let title: TMDBTitle
-        private let episode: TMDBEpisode?
-        private let scope: String
         @State private var tracker: TrackerPlaybackSession?
     #endif
+
+    private let title: TMDBTitle
+    private let episode: TMDBEpisode?
+    private let scope: String
 
     init(
         title: TMDBTitle,
@@ -140,26 +154,26 @@ private struct CatalogPlayerView: View {
         scope: String,
         resumes: Bool,
     ) {
+        self.title = title; self.episode = episode; self.scope = scope
         let saved = CatalogProgressStore.shared.progress(title: title, episode: episode, scope: scope)
         let offset = resumes && saved?.completed != true ? saved?.position ?? 0 : 0
+        let remotePercentage = resumes && saved?.completed != true && saved?.pendingSync == false ? saved?
+            .remotePercentage : nil
         #if os(iOS)
             _viewModel = State(initialValue: PlayerViewModel(
                 localMedia: CatalogMediaFactory.make(title: title, episode: episode, resume: offset > 0 ? offset : nil),
                 localPlaybackURL: url, localExternalSubtitles: subtitles,
+                resumes: resumes,
                 catalogTrackerItem: title.trackerItem(episode: episode),
-                catalogProgress: { position, duration, finished in
-                    CatalogProgressStore.shared.save(
-                        title: title,
-                        episode: episode,
-                        position: position,
-                        duration: duration,
-                        finished: finished,
-                        scope: scope,
-                    )
-                },
+                catalogRecorder: CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope),
+                catalogResumePercentage: remotePercentage,
             ))
         #else
-            self.title = title; self.episode = episode; self.url = url; self.scope = scope; resume = offset
+            self.url = url; resume = offset
+            self.remotePercentage = remotePercentage
+            #if !os(tvOS)
+                recorder = CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope)
+            #endif
         #endif
     }
 
@@ -179,62 +193,121 @@ private struct CatalogPlayerView: View {
             Button("Done", systemImage: "xmark") { dismiss() }
                 .padding().background(.regularMaterial, in: Circle()).padding()
         }
+        .onDisappear { CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope) }
         #if !os(iOS)
-        .task {
-            let player = AVPlayer(url: url)
-            self.player = player
-            if let item = title
-                .trackerItem(episode: episode)
-            {
-                tracker = TrackerCoordinator.shared.beginCatalogPlayback(
-                    item: item,
-                    resumeOffset: resume,
-                )
+            .task {
+                let player = AVPlayer(url: url)
+                self.player = player
+                if let item = title
+                    .trackerItem(episode: episode)
+                {
+                    tracker = TrackerCoordinator.shared.beginCatalogPlayback(
+                        item: item,
+                        resumeOffset: resume,
+                    )
+                }
+                durationObservation = player.currentItem?.observe(\.status, options: [.initial, .new]) { item, _ in
+                    Task { @MainActor in
+                        guard item.status == .readyToPlay else { return }
+                        let target = remotePercentage.flatMap { PlaybackProgressConflict.position(
+                            percentage: $0,
+                            duration: item.duration.seconds,
+                        ) } ?? resume
+                        tracker?.updateInitialResumeOffset(target)
+                        if target > 0 {
+                            await player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
+                        }
+                        player.play()
+                    }
+                }
+                statusObservation = player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+                    Task { @MainActor in
+                        let position = player.currentTime().seconds
+                        let duration = player.currentItem?.duration.seconds
+                        switch player.timeControlStatus {
+                        case .playing: tracker?.playing(position: position, duration: duration)
+                        case .paused:
+                            #if !os(tvOS)
+                                recorder.record(position: position, duration: duration, isPaused: true)
+                            #else
+                                CatalogProgressStore.shared.save(
+                                    title: title,
+                                    episode: episode,
+                                    position: position,
+                                    duration: duration,
+                                    finished: false,
+                                    scope: scope,
+                                    event: "pause",
+                                )
+                            #endif
+                            tracker?.paused(position: position, duration: duration)
+                        default: break
+                        }
+                    }
+                }
+                observer = player.addPeriodicTimeObserver(
+                    forInterval: CMTime(seconds: 10, preferredTimescale: 600),
+                    queue: .main,
+                ) { time in
+                    Task { @MainActor in
+                        let duration = player.currentItem?.duration.seconds
+                        #if !os(tvOS)
+                            recorder.record(position: time.seconds, duration: duration, isPaused: player.rate == 0)
+                        #else
+                            CatalogProgressStore.shared.save(
+                                title: title,
+                                episode: episode,
+                                position: time.seconds,
+                                duration: duration,
+                                finished: false,
+                                scope: scope,
+                                event: "progress",
+                            )
+                        #endif
+                    }
+                }
             }
-            if resume > 0 {
-                await player.seek(to: CMTime(seconds: resume, preferredTimescale: 600))
-            }
-            observer = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 10, preferredTimescale: 600),
-                queue: .main,
-            ) { time in
-                Task { @MainActor in
-                    let duration = player.currentItem?.duration.seconds
+            .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { notification in
+                guard let item = notification.object as? AVPlayerItem, item === player?.currentItem else { return }
+                #if !os(tvOS)
+                    recorder.finish(pushesImmediately: false)
+                #else
                     CatalogProgressStore.shared.save(
                         title: title,
                         episode: episode,
-                        position: time.seconds,
+                        position: item.duration.seconds,
+                        duration: item.duration.seconds,
+                        finished: true,
+                        scope: scope,
+                        event: "watched",
+                    )
+                #endif
+                tracker?.finished()
+            }
+            .onDisappear {
+                guard let player else { return }
+                let position = player.currentTime().seconds
+                let duration = player.currentItem?.duration.seconds
+                #if !os(tvOS)
+                    recorder.stop(position: position)
+                #else
+                    CatalogProgressStore.shared.save(
+                        title: title,
+                        episode: episode,
+                        position: position,
                         duration: duration,
                         finished: false,
                         scope: scope,
                     )
-                    if player.rate > 0 {
-                        tracker?.playing(position: time.seconds, duration: duration)
-                    } else {
-                        tracker?.paused(position: time.seconds, duration: duration)
-                    }
+                #endif
+                tracker?.stopped(position: position, duration: duration)
+                CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope)
+                statusObservation?.invalidate(); durationObservation?.invalidate()
+                if let observer {
+                    player.removeTimeObserver(observer)
                 }
+                player.pause(); self.player = nil
             }
-            player.play()
-        }
-        .onDisappear {
-            guard let player else { return }
-            let position = player.currentTime().seconds
-            let duration = player.currentItem?.duration.seconds
-            tracker?.stopped(position: position, duration: duration)
-            CatalogProgressStore.shared.save(
-                title: title,
-                episode: episode,
-                position: position,
-                duration: duration,
-                finished: false,
-                scope: scope,
-            )
-            if let observer {
-                player.removeTimeObserver(observer)
-            }
-            player.pause(); self.player = nil
-        }
         #endif
     }
 }

@@ -278,6 +278,18 @@ struct TrackerPlaybackTests {
         #expect(client.reports.first?.progress == 30)
     }
 
+    @Test func `closing before the initial resume seek does not erase progress`() async {
+        let client = FakeTrackerClient(service: .simkl, resendThrottle: 0)
+        let (session, binding) = session(client: client, resumeOffset: 300)
+        session.resolve(item: item, bindings: [binding])
+        session.playing(position: 0, duration: 1000)
+        await binding.channel.flush()
+        session.stopped(position: 0, duration: 1000)
+        await binding.channel.flush()
+        #expect(client.reports.last?.event == .stop)
+        #expect(client.reports.last?.progress == 30)
+    }
+
     @Test func `the first start uses the resume point, as the player reports 0 before seeking`() async {
         let client = FakeTrackerClient()
         let (session, binding) = session(client: client, resumeOffset: 300)

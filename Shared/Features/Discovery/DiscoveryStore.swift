@@ -7,6 +7,9 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
     var position: Double
     var duration: Double?
     var completed: Bool
+    var remotePercentage: Double?
+    var pendingSync: Bool?
+    var checkpointEvent: String?
     var updatedAt: Date
     var id: String {
         Self.key(title: title, episode: episode)
@@ -17,6 +20,9 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
     }
 
     var fraction: Double {
+        if let remotePercentage, pendingSync != true {
+            return remotePercentage / 100
+        }
         guard let duration, duration > 0 else { return 0 }; return min(1, position / duration)
     }
 }
@@ -47,6 +53,7 @@ final class CatalogProgressStore {
         duration: Double?,
         finished: Bool,
         scope: String,
+        event: String = "stop",
     ) {
         guard position.isFinite, position >= 0 else { return }
         let validDuration = duration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
@@ -60,7 +67,10 @@ final class CatalogProgressStore {
             episode: episode,
             position: position,
             duration: validDuration ?? previous?.duration,
-            completed: finished || validDuration.map { position / $0 >= 0.95 } == true,
+            completed: finished || validDuration.map { position / $0 >= 1 } == true,
+            remotePercentage: nil,
+            pendingSync: true,
+            checkpointEvent: event,
             updatedAt: Date(),
         )
         var records = records(scope: scope).filter { $0.id != record.id }
@@ -68,6 +78,67 @@ final class CatalogProgressStore {
         defaults.set(try? JSONEncoder().encode(Array(records.prefix(1000))), forKey: "strimr.catalog.progress.\(scope)")
         revision += 1
     }
+
+    private var activeKeys: Set<String> = []
+    func isActive(_ record: CatalogProgress, scope: String) -> Bool {
+        activeKeys.contains(scope + "|" + record.id)
+    }
+
+    func endPlayback(title: TMDBTitle, episode: TMDBEpisode?, scope: String) {
+        activeKeys.remove(scope + "|" + CatalogProgress.key(title: title, episode: episode))
+    }
+
+    func replace(_ records: [CatalogProgress], scope: String) {
+        defaults.set(
+            try? JSONEncoder().encode(Array(records.sorted { $0.updatedAt > $1.updatedAt }.prefix(1000))),
+            forKey: "strimr.catalog.progress.\(scope)",
+        )
+        revision += 1
+    }
+
+    func acknowledge(_ report: TrackerPlaybackReport, scope: String) {
+        guard report.event == .pause || report.event == .stop, let tmdb = report.item.ids.tmdb else { return }
+        var records = records(scope: scope)
+        guard let index = records.firstIndex(where: {
+            String($0.title.id) == tmdb && ($0.title.kind == .movie) == (report.item.kind == .movie) &&
+                $0.episode?.season_number == report.item.season && $0.episode?.episode_number == report.item.episode
+        }), records[index].updatedAt <= report.date else { return }
+        records[index].pendingSync = false
+        records[index].remotePercentage = report.progress
+        replace(records, scope: scope)
+    }
+
+    #if !os(tvOS)
+        func makeRecorder(title: TMDBTitle, episode: TMDBEpisode?, scope: String) -> PlaybackProgressRecorder {
+            let key = CatalogProgress.key(title: title, episode: episode)
+            activeKeys.insert(scope + "|" + key)
+            let destination = PlaybackProgressRecorder.Destination(
+                resumePosition: { [weak self] in
+                    guard let record = self?.progress(title: title, episode: episode, scope: scope),
+                          !record.completed else { return nil }
+                    return record.position > 0 ? record.position : nil
+                },
+                checkpoint: { [weak self] position, duration, event in
+                    self?.save(
+                        title: title,
+                        episode: episode,
+                        position: position,
+                        duration: duration,
+                        finished: event == .watched,
+                        scope: scope,
+                        event: event.rawValue,
+                    )
+                    if event == .stop || event == .watched {
+                        self?.activeKeys.remove(scope + "|" + key)
+                    }
+                },
+            )
+            return PlaybackProgressRecorder(
+                destination: destination,
+                duration: progress(title: title, episode: episode, scope: scope)?.duration,
+            )
+        }
+    #endif
 }
 
 /// Persisted per profile and Simkl account. Incremental pulls are always gated by activities.
@@ -91,11 +162,18 @@ final class DiscoveryStore {
     private let defaults: UserDefaults
     private let coordinator: TrackerCoordinator
     private let tmdb: TMDBClient
+    private let progress: CatalogProgressStore
     private var syncTask: Task<Void, Never>?
-    init(defaults: UserDefaults = .standard, coordinator: TrackerCoordinator? = nil, tmdb: TMDBClient = .shared) {
+    init(
+        defaults: UserDefaults = .standard,
+        coordinator: TrackerCoordinator? = nil,
+        tmdb: TMDBClient = .shared,
+        progress: CatalogProgressStore? = nil,
+    ) {
         self.defaults = defaults
         self.coordinator = coordinator ?? .shared
         self.tmdb = tmdb
+        self.progress = progress ?? .shared
     }
 
     var scope: String {
@@ -166,6 +244,7 @@ final class DiscoveryStore {
         isSyncing = true; errorMessage = nil
         defer { isSyncing = false }
         do {
+            await coordinator.flushCatalogPlaybackReports()
             let activities = try await client.activities() // Capture BEFORE the pull to avoid lost concurrent writes.
             if snapshot?.activities != activities || snapshot == nil {
                 var merged = snapshot?.entries ?? []
@@ -191,6 +270,39 @@ final class DiscoveryStore {
                 entries = merged
                 try defaults.set(JSONEncoder().encode(snapshot), forKey: "strimr.simkl.library.\(scope)")
             }
+            // A full saved-playback snapshot detects clears, rewinds and updates made on another Apple device.
+            let paused = try await client.pausedPlaybacks()
+            let result = await progress.reconcile(
+                paused: paused,
+                entries: entries,
+                scope: scope,
+                activities: activities,
+                tmdb: tmdb,
+                isCurrent: { self.scope == scope && self.coordinator.simklLibraryClient === client },
+                replay: { item, percent, date in
+                    guard self.scope == scope, self.coordinator.simklLibraryClient === client else { return false }
+                    return await self.coordinator.replayCatalogCheckpoint(item: item, progress: percent, date: date)
+                },
+            )
+            if result.replayed {
+                let refreshed = try await client.pausedPlaybacks()
+                _ = await progress.reconcile(
+                    paused: refreshed,
+                    entries: entries,
+                    scope: scope,
+                    activities: activities,
+                    tmdb: tmdb,
+                    isCurrent: { self.scope == scope && self.coordinator.simklLibraryClient === client },
+                    replay: { _, _, _ in false },
+                )
+            }
+            if result
+                .unmapped >
+                0
+            {
+                errorMessage =
+                    "Some Simkl playbacks have no verified TMDb/episode mapping and cannot be resumed automatically."
+            }
             lastSync = Date()
             // Only hydrate visible rails; My List can fetch additional metadata on demand.
             for entry in Array((planned + nextUp).prefix(40)) {
@@ -210,7 +322,7 @@ final class DiscoveryStore {
             } else {
                 retryAt = Date().addingTimeInterval(60)
             }
-            errorMessage = "Simkl sync failed. Your cached list is retained. \(error.localizedDescription)"
+            errorMessage = "Simkl sync failed. Cached lists and resume positions are retained; cross-device progress could not be refreshed. \(error.localizedDescription)"
         }
     }
 
@@ -235,5 +347,122 @@ final class DiscoveryStore {
         lastSync = nil
         retryAt = nil
         await sync(force: true)
+    }
+}
+
+extension CatalogProgressStore {
+    /// Reconciles a complete Simkl snapshot. An acknowledged local cache never outranks the remote service.
+    /// Only newer unsent checkpoints can be replayed; remote clears and rewinds replace synchronized cache.
+    func reconcile(
+        paused: [SimklPausedPlayback], entries: [SimklListEntry], scope: String,
+        activities: SimklActivities, tmdb: TMDBClient,
+        isCurrent: () -> Bool = { true },
+        replay: (TrackerItem, Double, Date) async -> Bool,
+    ) async -> (replayed: Bool, unmapped: Int) {
+        let local = records(scope: scope)
+        var resolved: [String: CatalogProgress] = [:]
+        var unmapped = 0
+        for (index, pause) in paused.enumerated() {
+            guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
+            guard let media = pause.media, media.anime_type == nil,
+                  pause.type == "movie" || pause.type == "episode",
+                  let date = pause.date else { unmapped += 1; continue }
+            let cached = local.first { pause.matches($0.title, episode: $0.episode) }
+            let library = entries.first { entry in
+                guard entry.kind == pause.kind, let ids = entry.media?.ids else { return false }
+                return (ids.simkl != nil && ids.simkl == media.ids.simkl) ||
+                    (ids.tmdb != nil && ids.tmdb == media.ids.tmdb) || (
+                        ids.imdb != nil && ids.imdb == media.ids.imdb
+                    ) ||
+                    (ids.tvdb != nil && ids.tvdb == media.ids.tvdb)
+            }
+            var title = cached?.title
+            if title == nil, let raw = media.ids.tmdb ?? library?.media?.ids.tmdb, let id = Int(raw), id > 0 {
+                title = .reference(id: id, kind: pause.kind, title: media.title ?? "Untitled", year: media.year)
+            }
+            if title ==
+                nil
+            {
+                title = try? await tmdb.find(imdb: media.ids.imdb, tvdb: media.ids.tvdb, kind: pause.kind)
+            }
+            guard var title else { unmapped += 1; continue }
+            if let detail = try? await tmdb.details(title) {
+                title = detail
+            }
+            var episode: TMDBEpisode?
+            if pause.kind == .tv {
+                guard let remote = pause.episode,
+                      let season = remote.tvdb_season ?? remote.season else { unmapped += 1; continue }
+                let number = remote.tvdb_number ?? remote.number
+                episode = cached?.episode
+                if index < 40, let episodes = try? await tmdb.episodes(tvID: title.id, season: season),
+                   let known = episodes.first(where: { $0.episode_number == number })
+                {
+                    episode = known
+                }
+                if episode == nil {
+                    episode = TMDBEpisode(
+                        id: -1,
+                        episode_number: number,
+                        season_number: season,
+                        name: remote.title ?? "Episode \(number)",
+                        overview: nil,
+                        air_date: nil,
+                        still_path: nil,
+                        runtime: nil,
+                        vote_average: nil,
+                    )
+                }
+            }
+            let duration = cached?.duration ?? (episode?.runtime ?? title.runtime).map { Double($0) * 60 }
+            let record = CatalogProgress(
+                title: title,
+                episode: episode,
+                position: PlaybackProgressConflict.position(
+                    percentage: pause.progress,
+                    duration: duration,
+                ) ?? 0,
+                duration: duration,
+                completed: false,
+                remotePercentage: pause.progress,
+                pendingSync: false,
+                checkpointEvent: nil,
+                updatedAt: date,
+            )
+            if resolved[record.id].map({ $0.updatedAt < date }) ?? true {
+                resolved[record.id] = record
+            }
+        }
+        var replayed = false
+        for record in local {
+            guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
+            if isActive(record, scope: scope) {
+                resolved[record.id] = record; continue
+            }
+            let remoteDate = resolved[record.id]?
+                .updatedAt ??
+                (record.title.kind == .movie ? activities.movies?.playback : activities.tv_shows?.playback)
+                .flatMap(PlaybackProgressConflict.date)
+            guard PlaybackProgressConflict.prefersLocal(
+                localDate: record.updatedAt,
+                isPending: record.pendingSync ?? !record.completed,
+                remoteDate: remoteDate,
+            ) else { continue }
+            guard let item = record.title.trackerItem(episode: record.episode),
+                  record.completed || record.duration.map({ $0 > 0 }) == true
+            else {
+                resolved[record.id] = record; continue
+            }
+            let percent = record.completed ? 100 : record.fraction * 100
+            let delivered = await replay(item, percent, record.updatedAt)
+            var updated = record
+            if delivered {
+                updated.pendingSync = false; updated.remotePercentage = percent; replayed = true
+            }
+            resolved[record.id] = updated
+        }
+        guard isCurrent(), !Task.isCancelled else { return (false, unmapped) }
+        replace(Array(resolved.values), scope: scope)
+        return (replayed, unmapped)
     }
 }

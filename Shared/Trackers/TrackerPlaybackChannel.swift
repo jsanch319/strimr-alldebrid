@@ -5,6 +5,7 @@ nonisolated struct TrackerPlaybackReport: Equatable, Sendable {
     let item: TrackerItem
     let progress: Double
     let date: Date
+    var minimumProgress: Int?
 }
 
 /// One service's real-time reports, delivered in order and one at a time. It outlives a playback, so the stop of an
@@ -21,6 +22,7 @@ final class TrackerPlaybackChannel {
     private let client: any TrackerClient
     private let isAvailable: @MainActor () -> Bool
     private let onFailure: FailureHandler
+    private let onDelivered: @MainActor (TrackerPlaybackReport) -> Void
     private let sleep: Sleep
     private let now: () -> Date
 
@@ -33,12 +35,14 @@ final class TrackerPlaybackChannel {
         client: any TrackerClient,
         isAvailable: @escaping @MainActor () -> Bool,
         onFailure: @escaping FailureHandler,
+        onDelivered: @escaping @MainActor (TrackerPlaybackReport) -> Void = { _ in },
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
         now: @escaping () -> Date = Date.init,
     ) {
         self.client = client
         self.isAvailable = isAvailable
         self.onFailure = onFailure
+        self.onDelivered = onDelivered
         self.sleep = sleep
         self.now = now
     }
@@ -68,6 +72,12 @@ final class TrackerPlaybackChannel {
         await drainTask?.value
     }
 
+    func sendAndWait(_ report: TrackerPlaybackReport) async -> Bool {
+        send(report)
+        await flush()
+        return lastSent == report
+    }
+
     private func drain() async {
         while !pending.isEmpty {
             await deliver(pending.removeFirst())
@@ -82,11 +92,22 @@ final class TrackerPlaybackChannel {
         }
         for attempt in 1 ... Self.writeLockAttempts {
             do {
-                try await client.report(report.event, item: report.item, progress: report.progress)
+                if let minimum = report.minimumProgress, let simkl = client as? SimklClient {
+                    try await simkl.report(
+                        report.event,
+                        item: report.item,
+                        progress: report.progress,
+                        minimumProgress: minimum,
+                    )
+                } else {
+                    try await client.report(report.event, item: report.item, progress: report.progress)
+                }
                 lastSent = report
+                onDelivered(report)
                 return
             } catch TrackerAPIError.conflict {
                 lastSent = report
+                onDelivered(report)
                 return
             } catch TrackerAPIError.notFound {
                 unmatchedItems.insert(report.item)
@@ -118,7 +139,8 @@ final class TrackerPlaybackSession {
         case finished
     }
 
-    private let resumeOffset: TimeInterval?
+    private var resumeOffset: TimeInterval?
+    private let minimumProgress: Int?
     private let now: () -> Date
     /// Retained here so the playback keeps its accounts after a profile switch.
     private var targets: [TrackerBinding] = []
@@ -127,8 +149,10 @@ final class TrackerPlaybackSession {
     private var buffered: [(action: Action, date: Date)] = []
     private var phase = Phase.idle
     private var hasStarted = false
+    private var hasObservedPosition = false
 
-    init(resumeOffset: TimeInterval?, now: @escaping () -> Date = Date.init) {
+    init(resumeOffset: TimeInterval?, minimumProgress: Int? = nil, now: @escaping () -> Date = Date.init) {
+        self.minimumProgress = minimumProgress
         self.resumeOffset = resumeOffset
         self.now = now
     }
@@ -143,6 +167,11 @@ final class TrackerPlaybackSession {
         for event in events {
             apply(event.action, date: event.date)
         }
+    }
+
+    func updateInitialResumeOffset(_ position: TimeInterval?) {
+        guard !hasStarted else { return }
+        resumeOffset = position
     }
 
     func playing(position: TimeInterval, duration: TimeInterval?) {
@@ -174,7 +203,7 @@ final class TrackerPlaybackSession {
         case let .playing(position, duration):
             guard phase != .playing else { return }
             // The player reports position 0 before it seeks to the resume point.
-            let effective = !hasStarted && position < 1 ? resumeOffset ?? position : position
+            let effective = effectivePosition(position)
             guard let progress = Self.progress(effective, duration) else { return }
             phase = .playing
             hasStarted = true
@@ -182,12 +211,11 @@ final class TrackerPlaybackSession {
         case let .paused(position, duration):
             guard phase == .playing else { return }
             phase = .paused
-            send(.pause, progress: Self.progress(position, duration), date: date)
+            send(.pause, progress: Self.progress(effectivePosition(position), duration), date: date)
         case let .stopped(position, duration):
             guard phase != .idle else { return }
             phase = .idle
-            // Trakt answers 422 below 1%, and a stop this early says nothing worth reporting.
-            guard let progress = Self.progress(position, duration), progress >= 1 else { return }
+            guard let progress = Self.progress(effectivePosition(position), duration) else { return }
             send(.stop, progress: progress, date: date)
         case .finished:
             guard phase != .idle else { return }
@@ -196,10 +224,27 @@ final class TrackerPlaybackSession {
         }
     }
 
+    private func effectivePosition(_ position: TimeInterval) -> TimeInterval {
+        if position >= 1 {
+            hasObservedPosition = true
+        }
+        return !hasObservedPosition && position < 1 ? resumeOffset ?? position : position
+    }
+
     private func send(_ event: TrackerPlaybackEvent, progress: Double?, date: Date) {
         guard let item, let progress else { return }
         for target in targets {
-            target.channel.send(TrackerPlaybackReport(event: event, item: item, progress: progress, date: date))
+            // Trakt rejects sub-1% stops; Simkl can save those short partial playbacks.
+            if event == .stop, progress < 1, target.service == .trakt {
+                continue
+            }
+            target.channel.send(TrackerPlaybackReport(
+                event: event,
+                item: item,
+                progress: progress,
+                date: date,
+                minimumProgress: target.service == .simkl ? minimumProgress : nil,
+            ))
         }
     }
 

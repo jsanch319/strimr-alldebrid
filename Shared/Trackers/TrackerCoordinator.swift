@@ -216,6 +216,12 @@ final class TrackerCoordinator {
                 guard let self, let binding else { return }
                 handlePlaybackFailure(report, error: error, binding: binding)
             },
+            onDelivered: { [weak self, weak binding] report in
+                guard let self, let binding, binding.service == .simkl else { return }
+                let scope = binding
+                    .profileID + ":" + (store.settings(.simkl, profileID: binding.profileID).username ?? "local")
+                CatalogProgressStore.shared.acknowledge(report, scope: scope)
+            },
             now: now,
         )
         return binding
@@ -244,9 +250,25 @@ final class TrackerCoordinator {
     func beginCatalogPlayback(item: TrackerItem, resumeOffset: TimeInterval?) -> TrackerPlaybackSession? {
         let targets = enabledBindings.filter { $0.service == .simkl }
         guard !targets.isEmpty else { return nil }
-        let session = TrackerPlaybackSession(resumeOffset: resumeOffset, now: now)
+        let session = TrackerPlaybackSession(resumeOffset: resumeOffset, minimumProgress: 100, now: now)
         session.resolve(item: item, bindings: targets)
         return session
+    }
+
+    func flushCatalogPlaybackReports() async {
+        await bindings[.simkl]?.channel.flush()
+    }
+
+    func replayCatalogCheckpoint(item: TrackerItem, progress: Double, date: Date) async -> Bool {
+        guard let binding = enabledBindings.first(where: { $0.service == .simkl }),
+              canSend(to: binding) else { return false }
+        return await binding.channel.sendAndWait(TrackerPlaybackReport(
+            event: .stop,
+            item: item,
+            progress: progress,
+            date: date,
+            minimumProgress: 100,
+        ))
     }
 
     // MARK: - Playback
@@ -276,7 +298,8 @@ final class TrackerCoordinator {
 
     private func handlePlaybackFailure(_ report: TrackerPlaybackReport, error: Error, binding: TrackerBinding) {
         guard binding.isActive, isEnabled(binding) else { return }
-        let wasWatched = report.event == .stop && report.progress >= binding.client.policy.watchedProgress
+        let wasWatched = report.event == .stop && report
+            .progress >= Double(report.minimumProgress ?? Int(binding.client.policy.watchedProgress))
         switch classify(error, binding: binding) {
         case .keep, .count:
             // Without this the watch would be lost: a failed `start` or `pause` loses nothing the next event won't fix.
