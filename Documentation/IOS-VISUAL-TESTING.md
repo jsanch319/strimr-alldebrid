@@ -33,7 +33,7 @@ xcrun xcresulttool export attachments --path build/CatalogVisualTests.xcresult \
 
 Use an installed simulator name or UDID. The `AllDebrid iOS compile check` GitHub Actions
 workflow also boots a fresh iPhone simulator, runs the visual tests, exports PNG attachments,
-and uploads `ios-catalog-visual-tests` including the full xcresult and test log. Screenshot names
+and uploads `ios-catalog-screenshots` plus `ios-catalog-visual-tests` (full xcresult and test log). Screenshot names
 are recorded in the exported `manifest.json`. Failure captures are retained too; a screenshot
 alone is not proof a test passed. The unauthenticated launch smoke is a separate, much narrower
 process-survival check, and its screenshot must also be visually inspected.

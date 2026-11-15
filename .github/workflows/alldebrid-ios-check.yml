@@ -101,14 +101,22 @@ jobs:
           if [[ -d build/CatalogVisualTests.xcresult ]]; then
             xcrun xcresulttool export attachments --path build/CatalogVisualTests.xcresult --output-path build/screenshots
           fi
-      - name: Upload visual screenshots and test results
+      - name: Upload visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-catalog-screenshots
+          path: |
+            build/screenshots
+            build/simulator.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload visual test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-catalog-visual-tests
           path: |
-            build/screenshots
-            build/simulator.json
             build/visual-tests.log
             build/CatalogVisualTests.xcresult
           if-no-files-found: ignore
