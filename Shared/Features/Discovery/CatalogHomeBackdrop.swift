@@ -71,6 +71,14 @@
             CatalogHomeBackdropModel.artworkURL(for: media)
         }
 
+        private var hidesAccessibility: Bool {
+            #if DEBUG && os(iOS) && targetEnvironment(simulator)
+                !CatalogVisualFixtures.isEnabled
+            #else
+                true
+            #endif
+        }
+
         var body: some View {
             GeometryReader { proxy in
                 ZStack {
@@ -111,11 +119,12 @@
             }
             .ignoresSafeArea()
             .allowsHitTesting(false)
-            .accessibilityHidden(true)
+            .accessibilityHidden(hidesAccessibility)
             .overlay(alignment: .bottomLeading) {
                 #if DEBUG && os(iOS) && targetEnvironment(simulator)
                     if CatalogVisualFixtures.isEnabled {
                         Text("Backdrop state").font(.system(size: 1)).foregroundStyle(.clear)
+                            .accessibilityElement(children: .ignore)
                             .accessibilityIdentifier("visual.backdrop")
                             .accessibilityValue(model.current?.url.lastPathComponent ?? "none")
                             .accessibilityHidden(false)
