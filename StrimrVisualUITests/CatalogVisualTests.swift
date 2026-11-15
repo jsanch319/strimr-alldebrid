@@ -162,7 +162,7 @@ final class CatalogVisualTests: XCTestCase {
         app.segmentedControls.buttons["Movies"].tap()
         XCTAssertFalse(card("tv:83867").exists)
         capture("13-My-List-Movies")
-        app.navigationBars.buttons["More"].tap()
+        app.navigationBars.buttons["BackButton"].tap()
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 15), app.debugDescription)
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "visual.backdrop").firstMatch.exists)
