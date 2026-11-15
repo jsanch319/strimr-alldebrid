@@ -239,6 +239,11 @@ final class CatalogHomeData {
                 }
                 loaded = true
             } catch { errorMessage = error.localizedDescription }
+            #if DEBUG && os(iOS) && targetEnvironment(simulator)
+                if CatalogVisualFixtures.isEnabled {
+                    return
+                }
+            #endif
             do {
                 if let key = try AllDebridCredentialStore().load() {
                     let snapshot = try await AllDebridAPIClient(apiKey: key).librarySnapshot()

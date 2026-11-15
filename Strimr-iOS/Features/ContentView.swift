@@ -63,6 +63,18 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay(alignment: .top) {
+            #if DEBUG && targetEnvironment(simulator)
+                if CatalogVisualFixtures.isEnabled {
+                    Text("SIMULATOR · FIXTURE DATA")
+                        .font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(.black.opacity(0.8), in: Capsule())
+                        .accessibilityIdentifier("visual.fixture-label")
+                        .allowsHitTesting(false)
+                }
+            #endif
+        }
         .onChange(of: offlineCoordinator.availability.hasNetworkPath) { _, hasNetworkPath in
             guard hasNetworkPath, sessionManager.status == .migrationFailed else { return }
             Task {
@@ -127,6 +139,13 @@ struct ContentView: View {
     }
 
     private func refreshAllDebridCredentialState() {
+        #if DEBUG && targetEnvironment(simulator)
+            if CatalogVisualFixtures.isEnabled {
+                hasAllDebridCredentials = true
+                allDebridCredentialError = nil
+                return
+            }
+        #endif
         do {
             hasAllDebridCredentials = try AllDebridCredentialStore().load() != nil
             allDebridCredentialError = nil

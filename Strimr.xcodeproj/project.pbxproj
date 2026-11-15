@@ -40,6 +40,7 @@
 			remoteGlobalIDString = E95F5852300A95A000D50438;
 			remoteInfo = "Strimr-macOS";
 		};
+		E9A8F100000000000000000A = {isa = PBXContainerItemProxy; containerPortal = E98A13B12ED8CBAD002F98B2; proxyType = 1; remoteGlobalIDString = E98A13B82ED8CBAD002F98B2; remoteInfo = "Strimr-iOS"; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -62,6 +63,7 @@
 		E98A13B92ED8CBAD002F98B2 /* Strimr-iOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Strimr-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9A7E5700000000000000001 /* StrimrTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StrimrTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9C448F32EF3034900D2895B /* Strimr-tvOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Strimr-tvOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		E9A8F1000000000000000001 /* StrimrVisualUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StrimrVisualUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -221,6 +223,7 @@
 			path = Config;
 			sourceTree = "<group>";
 		};
+		E9A8F1000000000000000002 /* StrimrVisualUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = StrimrVisualUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -261,6 +264,7 @@
 				E981BEBF2FEC3CD700C94B4A /* AetherEngine in Frameworks */,
 			);
 		};
+		E9A8F1000000000000000005 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -275,6 +279,7 @@
 				E984D56E30039AD10077A7EA /* StrimrTopShelf */,
 				E95F5854300A95A000D50438 /* Strimr-macOS */,
 				E9A7E5700000000000000002 /* StrimrTests */,
+				E9A8F1000000000000000002 /* StrimrVisualUITests */,
 				E9C448FE2EF3063500D2895B /* Frameworks */,
 				E98A13BA2ED8CBAD002F98B2 /* Products */,
 			);
@@ -288,6 +293,7 @@
 				E984D56B30039AD10077A7EA /* StrimrTopShelf.appex */,
 				E95F5853300A95A000D50438 /* Strimr.app */,
 				E9A7E5700000000000000001 /* StrimrTests.xctest */,
+				E9A8F1000000000000000001 /* StrimrVisualUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -388,6 +394,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				E9A7E5700000000000000002 /* StrimrTests */,
+				E9A8F1000000000000000002 /* StrimrVisualUITests */,
 			);
 			name = StrimrTests;
 			productName = StrimrTests;
@@ -422,6 +429,18 @@
 			productReference = E9C448F32EF3034900D2895B /* Strimr-tvOS.app */;
 			productType = "com.apple.product-type.application";
 		};
+		E9A8F1000000000000000003 /* StrimrVisualUITests */ = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = E9A8F1000000000000000007;
+            buildPhases = (E9A8F1000000000000000004, E9A8F1000000000000000005, E9A8F1000000000000000006,);
+            buildRules = ();
+            dependencies = (E9A8F100000000000000000B,);
+            fileSystemSynchronizedGroups = (E9A8F1000000000000000002,);
+            name = StrimrVisualUITests;
+            productName = StrimrVisualUITests;
+            productReference = E9A8F1000000000000000001;
+            productType = "com.apple.product-type.bundle.ui-testing";
+        };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -432,6 +451,7 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
+					E9A8F1000000000000000003 = {CreatedOnToolsVersion = 26.0; TestTargetID = E98A13B82ED8CBAD002F98B2; };
 					E95F5852300A95A000D50438 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -476,6 +496,7 @@
 				E95F5852300A95A000D50438 /* Strimr-macOS */,
 				E984D56A30039AD10077A7EA /* StrimrTopShelf */,
 				E9A7E5700000000000000003 /* StrimrTests */,
+				E9A8F1000000000000000003 /* StrimrVisualUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -509,6 +530,7 @@
 				E9E4DB4F2EF4534E0035147A /* Localizable.xcstrings in Resources */,
 			);
 		};
+		E9A8F1000000000000000006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -537,6 +559,7 @@
 			files = (
 			);
 		};
+		E9A8F1000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -550,6 +573,7 @@
 			target = E95F5852300A95A000D50438 /* Strimr-macOS */;
 			targetProxy = E9A7E570000000000000000A /* PBXContainerItemProxy */;
 		};
+		E9A8F100000000000000000B = {isa = PBXTargetDependency; target = E98A13B82ED8CBAD002F98B2; targetProxy = E9A8F100000000000000000A; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -1041,6 +1065,38 @@
 			};
 			name = Release;
 		};
+		E9A8F1000000000000000008 /* Debug */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                GENERATE_INFOPLIST_FILE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+                PRODUCT_BUNDLE_IDENTIFIER = app.strimr.visualtests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = iphoneos;
+                SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+                SWIFT_VERSION = 5.0;
+                TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_TARGET_NAME = "Strimr-iOS";
+                CODE_SIGN_STYLE = Automatic;
+            };
+            name = Debug;
+        };
+		E9A8F1000000000000000009 /* Release */ = {
+            isa = XCBuildConfiguration;
+            buildSettings = {
+                GENERATE_INFOPLIST_FILE = YES;
+                IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+                PRODUCT_BUNDLE_IDENTIFIER = app.strimr.visualtests;
+                PRODUCT_NAME = "$(TARGET_NAME)";
+                SDKROOT = iphoneos;
+                SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+                SWIFT_VERSION = 5.0;
+                TARGETED_DEVICE_FAMILY = "1,2";
+                TEST_TARGET_NAME = "Strimr-iOS";
+                CODE_SIGN_STYLE = Automatic;
+            };
+            name = Release;
+        };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1092,6 +1148,7 @@
 			);
 			defaultConfigurationName = Release;
 		};
+		E9A8F1000000000000000007 = {isa = XCConfigurationList; buildConfigurations = (E9A8F1000000000000000008, E9A8F1000000000000000009,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */

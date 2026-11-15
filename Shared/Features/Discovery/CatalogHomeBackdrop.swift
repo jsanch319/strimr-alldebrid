@@ -112,6 +112,16 @@
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+            .overlay(alignment: .bottomLeading) {
+                #if DEBUG && os(iOS) && targetEnvironment(simulator)
+                    if CatalogVisualFixtures.isEnabled {
+                        Text("Backdrop state").font(.system(size: 1)).foregroundStyle(.clear)
+                            .accessibilityIdentifier("visual.backdrop")
+                            .accessibilityValue(model.current?.url.lastPathComponent ?? "none")
+                            .accessibilityHidden(false)
+                    }
+                #endif
+            }
             .task(id: url) {
                 if model.current != nil, url != nil {
                     try? await Task.sleep(for: .milliseconds(160))

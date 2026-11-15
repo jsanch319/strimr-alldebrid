@@ -300,6 +300,11 @@ actor TMDBClient {
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            if CatalogVisualFixtures.isEnabled {
+                return try JSONDecoder().decode(T.self, from: CatalogVisualFixtures.response(path: path, query: query))
+            }
+        #endif
         guard let token = try tokenProvider(), !token.isEmpty else { throw TMDBError.missingToken }
         var components = URLComponents(string: "https://api.themoviedb.org/3/\(path)")!
         components.queryItems = query + [

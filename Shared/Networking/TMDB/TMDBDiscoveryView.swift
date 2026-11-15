@@ -179,6 +179,7 @@ struct TMDBDetailView: View {
     private var heading: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(item.displayTitle).font(.largeTitle.bold()).accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("catalog.detail.title")
             if item.kind == .tv {
                 let count = item.number_of_seasons ?? item.seasons?.filter { $0.season_number > 0 }.count
                 if let count,
@@ -210,6 +211,7 @@ struct TMDBDetailView: View {
             .buttonStyle(.plain).disabled(!canPlay)
             .accessibilityLabel("\(resumes ? "Resume" : "Play") \(item.displayTitle)")
             .accessibilityHint(actionSubtitle ?? "Select an available playback source")
+            .accessibilityIdentifier("catalog.detail.play")
             if let saved, saved.locallyCleared != true, saved.position > 0 || saved.fraction > 0 {
                 Button { selectedPlayback = PlaybackSelection(episode: selectedEpisode, restart: true) } label: {
                     Image(systemName: "arrow.counterclockwise").font(.title2.weight(.medium))

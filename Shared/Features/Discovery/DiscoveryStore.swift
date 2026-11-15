@@ -65,7 +65,18 @@ nonisolated struct CatalogProgress: Codable, Identifiable, Sendable {
 @MainActor
 @Observable
 final class CatalogProgressStore {
-    static let shared = CatalogProgressStore()
+    static let shared: CatalogProgressStore = {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            if CatalogVisualFixtures.isEnabled {
+                let suite = "strimr.visual-progress"
+                let defaults = UserDefaults(suiteName: suite)!
+                defaults.removePersistentDomain(forName: suite)
+                return CatalogProgressStore(defaults: defaults)
+            }
+        #endif
+        return CatalogProgressStore()
+    }()
+
     private(set) var revision = 0
     private let defaults: UserDefaults
     init(defaults: UserDefaults = .standard) {
@@ -272,6 +283,14 @@ final class DiscoveryStore {
     }
 
     func sync(force: Bool = false) async {
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            if CatalogVisualFixtures.isEnabled {
+                entries = CatalogVisualFixtures.entries
+                artwork = Dictionary(uniqueKeysWithValues: CatalogVisualFixtures.titles.map { ($0.catalogID, $0) })
+                CatalogVisualFixtures.seedProgress(progress, scope: scope)
+                return
+            }
+        #endif
         let currentScope = scope
         if loadedScope != currentScope {
             syncTask?.cancel(); syncTask = nil

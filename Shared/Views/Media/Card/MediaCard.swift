@@ -55,6 +55,7 @@ struct MediaCard: View {
                 }
                 onTap()
             }
+            .accessibilityIdentifier("catalog.card.\(media.playableItem?.id ?? media.primaryLabel)")
             .catalogBackdropCandidate(media.playableItem)
             .mediaCardContextMenu(media)
     }

@@ -40,7 +40,9 @@ final class TrackerCoordinator {
     static let shared = TrackerCoordinator(isDisabled: isDemoMode)
 
     private static var isDemoMode: Bool {
-        #if DEBUG
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            DemoMode.isEnabled || CatalogVisualFixtures.isEnabled
+        #elseif DEBUG
             DemoMode.isEnabled
         #else
             false

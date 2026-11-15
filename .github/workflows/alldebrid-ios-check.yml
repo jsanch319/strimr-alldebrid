@@ -6,6 +6,7 @@ on:
     paths:
       - 'Shared/**'
       - 'Strimr-iOS/**'
+      - 'StrimrVisualUITests/**'
       - 'Strimr.xcodeproj/**'
       - 'Config/**'
       - '.github/workflows/alldebrid-ios-check.yml'
@@ -16,7 +17,7 @@ permissions:
 jobs:
   simulator-compile:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -78,6 +79,37 @@ jobs:
           subprocess.run(["xcrun", "simctl", "io", identifier, "screenshot", "build/ios-launch-smoke.png"], check=True)
           print("iOS app startup smoke passed. This fresh simulator has no user API credentials; authenticated catalog interactions are not covered.")
           PYSMOKE
+      - name: Test credential-free catalog interactions and capture screens
+        if: env.STRIMR_SMOKE_ID != ''
+        shell: bash
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Strimr.xcodeproj \
+            -scheme Strimr-VisualTests \
+            -destination "platform=iOS Simulator,id=$STRIMR_SMOKE_ID" \
+            -parallel-testing-enabled NO \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/CatalogVisualTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build/visual-tests.log
+      - name: Export visual test screenshots
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d build/CatalogVisualTests.xcresult ]]; then
+            xcrun xcresulttool export attachments --path build/CatalogVisualTests.xcresult --output-path build/screenshots
+          fi
+      - name: Upload visual screenshots and test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-catalog-visual-tests
+          path: |
+            build/screenshots
+            build/visual-tests.log
+            build/CatalogVisualTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Clean up launch simulator
         if: always() && env.STRIMR_SMOKE_ID != ''
         shell: bash
