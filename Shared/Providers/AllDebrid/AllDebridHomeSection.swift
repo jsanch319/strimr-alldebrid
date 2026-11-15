@@ -138,21 +138,40 @@ struct AllDebridHomeSection: View {
 
 @MainActor
 struct AllDebridOnlyHomeView: View {
+    @Environment(LibraryStore.self) private var libraryStore
     @Environment(SessionManager.self) private var sessionManager
     @Environment(SettingsManager.self) private var settingsManager
     let onSignedOut: () -> Void
 
     var body: some View {
-        NavigationStack {
-            HomeView(viewModel: HomeViewModel(
-                sessionManager: sessionManager,
+        #if os(iOS)
+            MainTabView(
+                homeViewModel: HomeViewModel(
+                    sessionManager: sessionManager,
+                    settingsManager: settingsManager,
+                    serverFree: true,
+                ),
+                libraryViewModel: LibraryViewModel(
+                    sessionManager: sessionManager,
+                    libraryStore: libraryStore,
+                    settingsManager: settingsManager,
+                ),
                 settingsManager: settingsManager,
-                serverFree: true,
-            ))
+            )
             .task { TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID) }
-            .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
-                onSignedOut()
+            .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in onSignedOut() }
+        #else
+            NavigationStack {
+                HomeView(viewModel: HomeViewModel(
+                    sessionManager: sessionManager,
+                    settingsManager: settingsManager,
+                    serverFree: true,
+                ))
+                .task { TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID) }
+                .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
+                    onSignedOut()
+                }
             }
-        }
+        #endif
     }
 }

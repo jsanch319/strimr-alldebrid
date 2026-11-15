@@ -36,6 +36,7 @@ final class CatalogHomeData {
     }
 
     private var loaded = false
+    private var loadTask: Task<Void, Never>?
 
     var progressRecords: [CatalogProgress] {
         _ = progress.revision
@@ -190,6 +191,16 @@ final class CatalogHomeData {
     }
 
     func load(force: Bool = false) async {
+        if let loadTask {
+            await loadTask.value; return
+        }
+        let task = Task { await performLoad(force: force) }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func performLoad(force: Bool) async {
         errorMessage = nil
         await discovery.sync(force: force)
         recommendations = []

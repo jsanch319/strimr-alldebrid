@@ -110,3 +110,26 @@ The referenced StreamUp screenshot was not attached to this workspace. Public re
 ## Hybrid resume validation
 
 Automated tests cover exact fractional seconds after acknowledgement and relaunch; Simkl percentage fallback using actual loaded duration; ignoring pre-seek startup positions; lifecycle checkpoints during buffering; completion/restart/clear fences; distinct movie/TV/season/episode identities; expiry without local loss; older and newer remote conflicts; progress arriving during replay; and persistence beyond 1,000 records. Existing server ProgressSynchronizer tests continue to exercise the shared newest-change conflict policy, and original player/tracker tests remain required. Real-device engine seeking, app suspension/interruptions, force-termination, different-file editions, and account-to-account/device-to-device behavior still require manual verification.
+
+## Native iOS catalog navigation and dynamic Home backdrop
+
+The AllDebrid-only entry now enters the original `MainTabView`, which selects a server-free native `TabView` branch. The media-server branch and coordinator routes remain unchanged. There is one Home, using the existing `HomeView`/catalog view model, not a second discovery Home.
+
+The six destinations are:
+
+| Destination | Content |
+| --- | --- |
+| Home | Original iOS hero/vertical rails, combined Continue Watching, discovery and Streaming Services |
+| Search | Existing paginated TMDb multi-search, independent of AllDebrid file availability |
+| Movies | Trending, popular, upcoming and top-rated TMDb movies; actual history-based movie recommendations |
+| TV Shows | Trending, popular and top-rated TMDb series; existing details/seasons/episodes and TV recommendations |
+| My List | Simkl Plan to Watch, All/Movies/TV filters, real posters, explicit unmapped-title text, account access and pull-to-refresh |
+| Settings | Existing settings plus AllDebrid, Simkl and TMDb configuration; playback/audio/subtitles/interface and other existing options |
+
+The bottom bar declares Home, Search, Movies, TV Shows and More. Search uses Strimr's existing dedicated native search role, so the OS can render it as a separate search affordance. More contains My List and Settings, using the original app-managed overflow pattern rather than UIKit adding a second navigation bar. Each primary tab and More retain independent NavigationStacks. Compact traits are applied only to the tab container to retain bottom placement on regular-width iOS windows; destination content receives the original horizontal size class. No custom player or tab-bar skin is introduced. The original profile/user-menu chrome remains, with catalog account settings and without unavailable server-only Favorites/Downloads links in the server-free menu.
+
+The attached tvOS Home screenshot is used for **background behavior**, not its top navigation or focus/layout. iOS keeps its original hero title, scrolling, row spacing and native landscape Continue Watching artwork/progress/remaining-time captions. The featured carousel reports its current title; Home requests that exact title's TMDb backdrop behind the page. Row detail/play actions select the corresponding title backdrop; the next featured-page change resumes featured-title background selection. Episodes use their own series backdrop, never an unrelated poster or episode still. Missing/failed artwork clears to the neutral native background.
+
+Backdrop rendering reuses the decoded `ArtworkResourceView` cache, `ImageCornerColorSampler`, and `MediaBackdropGradient` used by Strimr's native artwork infrastructure. The incoming image is prepared before replacing the old layer; a half-second opacity transition, ambient blur and directional gradients blend it behind readable text. Request generations prevent a late image replacing a newer title. Reduce Motion disables the crossfade and keeps one image layer. The existing hero artwork and controls remain unchanged. Simkl sync, hybrid resume, source selection and native players are untouched by this navigation update. Catalog loads coalesce across tabs.
+
+Automated checks cover the six-destination overflow partition, movie/TV feed separation, episode-to-series backdrop identity, missing/failed image behavior, cached current-image reuse, Reduce Motion layers and late-request rejection, alongside the existing player/resume/tracker/server tests. Physical iPhone/iPad layout, actual tab-bar placement/search-role behavior across OS versions, retained deep navigation during size changes, screenshot fidelity, contrast/blur and transition smoothness still require device/simulator UI testing. Compilation and model tests do not establish those visual outcomes.

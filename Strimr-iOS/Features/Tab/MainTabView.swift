@@ -29,6 +29,15 @@ struct MainTabView: View {
     }
 
     var body: some View {
+        if homeViewModel.isServerFree {
+            CatalogTabView(homeViewModel: homeViewModel)
+                .environmentObject(coordinator)
+        } else {
+            serverTabView
+        }
+    }
+
+    private var serverTabView: some View {
         tabView
             .environmentObject(coordinator)
             .mediaCardActions(registry: registry, presenter: coordinator, showMedia: coordinator.showMediaDetail)

@@ -12,6 +12,7 @@
         let interactionCount: Int
         let onPlay: (MediaItem) -> Void
         let onDetails: (MediaItem) -> Void
+        var onFeaturedChange: ((MediaItem?) -> Void)?
 
         @State private var selection: MediaIdentity?
         @State private var restart = 0
@@ -63,6 +64,9 @@
                 if let selection, !slides.contains(where: { $0.id == selection }) {
                     self.selection = slides.first?.id
                 }
+            }
+            .onChange(of: currentID, initial: true) { _, id in
+                onFeaturedChange?(slides.first { $0.id == id }?.media)
             }
             .onChange(of: interactionCount) {
                 restart += 1
