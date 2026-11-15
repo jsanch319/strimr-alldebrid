@@ -81,13 +81,20 @@ enum AllDebridTitleMatcher {
                 with: "",
                 options: .regularExpression,
             )
-            let cleaned = normalized(beforeEpisode)
-                .replacingOccurrences(of: #"\s+(?:19|20)\d{2}$"#, with: "", options: .regularExpression)
-            return cleaned == normalizedTitle
+            let candidate = normalized(beforeEpisode)
+            if candidate == normalizedTitle {
+                return true
+            }
+            guard candidate.hasPrefix(normalizedTitle + " ") else { return false }
+            let suffix = String(candidate.dropFirst(normalizedTitle.count)).trimmingCharacters(in: .whitespaces)
+            guard suffix.range(of: #"^(?:19|20)\d{2}$"#, options: .regularExpression) != nil else { return false }
+            return Int(title.date.prefix(4)).map { String($0) == suffix } ?? true
         }
     }
 
     static func episodeNumbers(in text: String) -> (season: Int, episode: Int)? {
+        guard text.range(of: #"(?i)s\d+e\d+(?:[ ._-]*e\d+|-\d+)"#, options: .regularExpression) == nil
+        else { return nil }
         let pattern = #"(?i)(?:\b|_)s(\d{1,3})e(\d{1,4})(?!\d|e\d)|(?:\b|_)(\d{1,3})x(\d{1,4})(?!\d)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))

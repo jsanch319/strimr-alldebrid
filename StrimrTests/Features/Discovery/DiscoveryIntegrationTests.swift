@@ -46,6 +46,12 @@ struct DiscoveryIntegrationTests {
             filename: "S02E03.mkv",
             context: "Example Show/Season 2",
         ))
+        #expect(!AllDebridTitleMatcher.matches(
+            title: .reference(id: 4, kind: .tv, title: "Example Show", year: 2020),
+            episode: episode,
+            filename: "Example.Show.2015.S02E03.mkv",
+        ))
+        #expect(!AllDebridTitleMatcher.matches(title: title, episode: episode, filename: "Example.Show.S02E03-E04.mkv"))
         #expect(!AllDebridTitleMatcher.matches(title: title, episode: episode, filename: "Example.Show.S01E03.mkv"))
         #expect(!AllDebridTitleMatcher.matches(title: title, episode: episode, filename: "Another.Show.S02E03.mkv"))
         #expect(!AllDebridTitleMatcher.matches(title: title, episode: episode, filename: "Example.Show.S02E03E04.mkv"))
