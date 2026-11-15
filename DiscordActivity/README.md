@@ -73,15 +73,38 @@ For the native Strimr button, set these public values in the local
 
 ```xcconfig
 DISCORD_APPLICATION_CLIENT_ID = your-public-application-id
-DISCORD_ACTIVITY_URL = https://your-activity-host.example
+DISCORD_ACTIVITY_URL = https://your-deployed-activity-host.example
 ```
 
-The native detail-screen button opens the Discord Activity URL with only safe media
-metadata in its query string. The player controls also provide the action while
-watching; that entry point carries the current position, play/pause state, duration,
-and safe selected-source identifier into the new room. Discord must be installed to
-open the Activity. If configuration is missing, or Discord cannot open it, Strimr
-shows a clear message. Neither configured value is a secret.
+The Activity is not deployed by the iOS build. Deploy the `DiscordActivity/` app as a
+long-running Node.js web service with HTTPS and WebSocket support. For example, create
+a Render Web Service from this repository with root directory `DiscordActivity`,
+build command `npm ci && npm run build`, and start command `npm start`. Configure the
+server-only environment values from `DiscordActivity/.env.example` in the hosting
+service's secret settings. Do not put the bot token, OAuth client secret, or room
+signing key in `Config.xcconfig`, GitHub variables, or the iOS app.
+
+After deployment, copy the service's HTTPS origin (for example,
+`https://strimr-watch-together.onrender.com`, with no path or trailing slash) into
+`DISCORD_ACTIVITY_URL`. In the Discord Developer Portal, enable Activities and map `/`
+to that host. Add `/api` and `/ws` mappings to the same host as well; `/ws` must permit
+WebSocket upgrades. Enable iOS under Activities' supported platforms and configure
+the Entry Point command. The app ID is the public Application ID shown in the portal,
+not the OAuth client secret.
+
+The native detail and player buttons open Discord's Activity deep link for that
+Application ID with safe media/playback metadata only. iOS checks that Discord is
+installed before opening the link. To make a SideStore IPA launch the deployed
+Activity, add the following **repository Actions variables** (Settings → Secrets and
+variables → Actions → Variables):
+
+- `DISCORD_APPLICATION_CLIENT_ID`: public Discord Application ID.
+- `DISCORD_ACTIVITY_URL`: deployed HTTPS origin described above.
+
+The iOS build and SideStore workflows embed those public values in the app's Info.plist.
+Without them, the safe placeholders from `Config-example.xcconfig` are used and the
+Watch Together button reports that configuration is required. Neither value is a
+secret.
 
 ## Build, test, run
 

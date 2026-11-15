@@ -14,5 +14,5 @@ SENTRY_DSN_TVOS =
 SENTRY_DSN_MACOS =
 
 // Public Discord Activity configuration. The Discord client secret belongs only on the Activity server.
-DISCORD_APPLICATION_CLIENT_ID =
-DISCORD_ACTIVITY_URL =
+DISCORD_APPLICATION_CLIENT_ID = YOUR_DISCORD_APPLICATION_CLIENT_ID
+DISCORD_ACTIVITY_URL = https://your-strimr-activity-host.example

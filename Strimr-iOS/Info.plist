@@ -17,6 +17,7 @@
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
+		<string>discord</string>
 		<string>infuse</string>
 		<string>vlc-x-callback</string>
 	</array>

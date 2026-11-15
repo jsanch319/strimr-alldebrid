@@ -11,13 +11,35 @@ enum DiscordWatchTogetherConfiguration {
         duration: Double? = nil,
         selectedSourceIdentifier: String? = nil,
     ) -> URL? {
-        guard let applicationID = Bundle.main.object(forInfoDictionaryKey: "DiscordApplicationClientID") as? String,
-              !applicationID.isEmpty,
+        activityLaunchURL(
+            for: media,
+            applicationID: Bundle.main.object(forInfoDictionaryKey: "DiscordApplicationClientID") as? String,
+            activityURL: Bundle.main.object(forInfoDictionaryKey: "DiscordActivityURL") as? String,
+            position: position,
+            isPlaying: isPlaying,
+            duration: duration,
+            selectedSourceIdentifier: selectedSourceIdentifier,
+        )
+    }
+
+    static func activityLaunchURL(
+        for media: MediaItem,
+        applicationID: String?,
+        activityURL: String?,
+        position: Double = 0,
+        isPlaying: Bool = false,
+        duration: Double? = nil,
+        selectedSourceIdentifier: String? = nil,
+    ) -> URL? {
+        let applicationID = applicationID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !applicationID.isEmpty,
               applicationID.allSatisfy(\.isNumber),
-              let activityURL = Bundle.main.object(forInfoDictionaryKey: "DiscordActivityURL") as? String,
+              let activityURL,
               let configuredActivityURL = URL(string: activityURL),
               configuredActivityURL.scheme == "https",
               configuredActivityURL.host != nil,
+              configuredActivityURL.user == nil,
+              configuredActivityURL.password == nil,
               var components = URLComponents(string: "https://discord.com/activities/\(applicationID)")
         else { return nil }
 
@@ -55,18 +77,13 @@ enum DiscordWatchTogetherConfiguration {
 
         @MainActor
         static func openActivityURL(_ url: URL, completion: @escaping (LaunchResult) -> Void) {
-            guard let discordURL = URL(string: "discord://") else {
+            guard let discordURL = URL(string: "discord://"),
+                  UIApplication.shared.canOpenURL(discordURL) else {
                 completion(.discordNotInstalled)
                 return
             }
-            UIApplication.shared.open(discordURL) { isDiscordInstalled in
-                guard isDiscordInstalled else {
-                    completion(.discordNotInstalled)
-                    return
-                }
-                UIApplication.shared.open(url) { opened in
-                    completion(opened ? .opened : .activityUnavailable)
-                }
+            UIApplication.shared.open(url) { opened in
+                completion(opened ? .opened : .activityUnavailable)
             }
         }
     #endif

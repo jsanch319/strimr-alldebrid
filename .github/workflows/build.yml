@@ -13,9 +13,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure iOS build
+        env:
+          DISCORD_APPLICATION_CLIENT_ID: ${{ vars.DISCORD_APPLICATION_CLIENT_ID }}
+          DISCORD_ACTIVITY_URL: ${{ vars.DISCORD_ACTIVITY_URL }}
         run: |
           cp Config/Config-example.xcconfig Config/Config.xcconfig
           printf '\nPRODUCT_BUNDLE_IDENTIFIER = app.strimr.alldebrid.ci\n' >> Config/Config.xcconfig
+          if [[ -n "$DISCORD_APPLICATION_CLIENT_ID" ]]; then
+            printf 'DISCORD_APPLICATION_CLIENT_ID = %s\n' "$DISCORD_APPLICATION_CLIENT_ID" >> Config/Config.xcconfig
+          fi
+          if [[ -n "$DISCORD_ACTIVITY_URL" ]]; then
+            printf 'DISCORD_ACTIVITY_URL = %s\n' "$DISCORD_ACTIVITY_URL" >> Config/Config.xcconfig
+          fi
           touch Config/Config-TopShelf.xcconfig
 
       - name: iOS build
