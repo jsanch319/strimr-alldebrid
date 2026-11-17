@@ -60,13 +60,27 @@ nonisolated enum ArtworkProgressSampler {
             bucket.count += 1; bucket.red += r; bucket.green += g; bucket.blue += b
             buckets[key] = bucket
         }
-        let ranked = buckets.map { key, bucket in
-            let n = Double(bucket.count)
-            let color = ProgressArtworkColor(red: bucket.red / n, green: bucket.green / n, blue: bucket.blue / n)
-            let high = max(color.red, color.green, color.blue), low = min(color.red, color.green, color.blue)
-            let saturation = high > 0 ? (high - low) / high : 0
-            return (key: key, color: color, score: sqrt(n) * (0.12 + saturation * 2) * (0.4 + high))
-        }.sorted { $0.score == $1.score ? $0.key < $1.key : $0.score > $1.score }
+        var ranked: [(key: Int, color: ProgressArtworkColor, score: Double)] = []
+        for (key, bucket) in buckets {
+            let count = Double(bucket.count)
+            let color = ProgressArtworkColor(
+                red: bucket.red / count,
+                green: bucket.green / count,
+                blue: bucket.blue / count,
+            )
+            let high: Double = max(color.red, max(color.green, color.blue))
+            let low: Double = min(color.red, min(color.green, color.blue))
+            let saturation: Double = high > 0 ? (high - low) / high : 0
+            let vibrance: Double = (0.12 + saturation * 2) * (0.4 + high)
+            let score: Double = count.squareRoot() * vibrance
+            ranked.append((key: key, color: color, score: score))
+        }
+        ranked.sort { left, right in
+            if left.score == right.score {
+                return left.key < right.key
+            }
+            return left.score > right.score
+        }
         var selected: [ProgressArtworkColor] = []
         for candidate in ranked {
             guard selected.allSatisfy({ abs($0.red - candidate.color.red) + abs($0.green - candidate.color.green)
