@@ -318,14 +318,12 @@ actor TMDBClient {
                 if !ranked.isEmpty {
                     return ranked
                 }
-            } catch {
-                if error.isCancellation {
-                    throw error
-                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw error
+            } catch TMDBError.response(404) {
                 // A season without video metadata can still use the official series trailer.
-                if case TMDBError.response(404) = error {} else {
-                    throw error
-                }
             }
         }
         let videos: TrailerVideos = try await get("\(kind.rawValue)/\(id)/videos", localized: false)
