@@ -18,9 +18,39 @@ nonisolated struct ProgressArtworkColor: Hashable, Sendable {
         return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
     }
 
+    var maximum: Double {
+        max(red, max(green, blue))
+    }
+
+    var saturation: Double {
+        maximum > 0 ? (maximum - min(red, min(green, blue))) / maximum : 0
+    }
+
+    var hue: Double? {
+        let delta = maximum - min(red, min(green, blue))
+        guard delta > 0.01, saturation >= 0.2 else { return nil }
+        var value: Double = if maximum == red {
+            (green - blue) / delta
+        } else if maximum == green {
+            (blue - red) / delta + 2
+        } else {
+            (red - green) / delta + 4
+        }
+        if value < 0 {
+            value += 6
+        }
+        return value / 6
+    }
+
+    func distance(to other: Self) -> Double {
+        abs(red - other.red) + abs(green - other.green) + abs(blue - other.blue)
+    }
+
     /// At least 4.5:1 against the lightest possible composited track, even over white artwork.
     var legible: Self {
-        var result = self
+        // Raise value before adding white, preserving saturated source hues instead of turning dark reds/blues gray.
+        var result = saturation >= 0.3 && maximum > 0
+            ? Self(red: red / maximum, green: green / maximum, blue: blue / maximum) : self
         for _ in 0 ..< 24 where result.luminance < 0.36 {
             result = Self(red: result.red * 0.9 + 0.1, green: result.green * 0.9 + 0.1, blue: result.blue * 0.9 + 0.1)
         }
@@ -60,7 +90,8 @@ nonisolated enum ArtworkProgressSampler {
             bucket.count += 1; bucket.red += r; bucket.green += g; bucket.blue += b
             buckets[key] = bucket
         }
-        var ranked: [(key: Int, color: ProgressArtworkColor, score: Double)] = []
+        struct Candidate { let key: Int; let color: ProgressArtworkColor; let score: Double; let count: Int }
+        var ranked: [Candidate] = []
         for (key, bucket) in buckets {
             let count = Double(bucket.count)
             let color = ProgressArtworkColor(
@@ -68,12 +99,11 @@ nonisolated enum ArtworkProgressSampler {
                 green: bucket.green / count,
                 blue: bucket.blue / count,
             )
-            let high: Double = max(color.red, max(color.green, color.blue))
-            let low: Double = min(color.red, min(color.green, color.blue))
-            let saturation: Double = high > 0 ? (high - low) / high : 0
-            let vibrance: Double = (0.12 + saturation * 2) * (0.4 + high)
-            let score: Double = count.squareRoot() * vibrance
-            ranked.append((key: key, color: color, score: score))
+            let saturation = color.saturation
+            let vibrance: Double = (0.05 + saturation * saturation * 3) * (0.4 + color.maximum)
+            let population: Double = count.squareRoot().squareRoot()
+            let score: Double = population * vibrance
+            ranked.append(Candidate(key: key, color: color, score: score, count: bucket.count))
         }
         ranked.sort { left, right in
             if left.score == right.score {
@@ -81,14 +111,28 @@ nonisolated enum ArtworkProgressSampler {
             }
             return left.score > right.score
         }
+        // Gray sky/walls must not crowd out a title's red cape, blue suit or other vibrant accents.
+        let rich = ranked.filter { $0.color.saturation >= 0.3 && $0.color.maximum > 0.12 && $0.count >= 2 }
+        let richPixels = rich.reduce(0) { $0 + $1.count }
+        let totalPixels = buckets.values.reduce(0) { $0 + $1.count }
+        let candidates = richPixels >= max(6, totalPixels / 100) ? rich : ranked
         var selected: [ProgressArtworkColor] = []
-        for candidate in ranked {
-            guard selected.allSatisfy({ abs($0.red - candidate.color.red) + abs($0.green - candidate.color.green)
-                    + abs($0.blue - candidate.color.blue) > 0.3 }) else { continue }
+        for candidate in candidates {
+            let distinctHue = selected.allSatisfy { existing in
+                guard let left = existing.hue, let right = candidate.color.hue else { return false }
+                let difference = abs(left - right)
+                return min(difference, 1 - difference) >= 0.09
+            }
+            guard selected.isEmpty || distinctHue else { continue }
             selected.append(candidate.color)
             if selected.count == 3 {
                 break
             }
+        }
+        // Artwork with one or two hues can still supply different source shades; never invent unrelated hues.
+        for candidate in candidates where selected.count < 3 {
+            guard selected.allSatisfy({ $0.distance(to: candidate.color) > 0.3 }) else { continue }
+            selected.append(candidate.color)
         }
         guard !selected.isEmpty else { return [] }
         if selected.count == 1 {
