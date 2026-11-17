@@ -246,11 +246,10 @@ actor TMDBClient {
                 if logo.iso_639_1 == "en" {
                     return 1
                 }
-                return 2
+                return logo.iso_639_1 == nil ? 2 : 3
             }
             return logos.filter {
                 $0.file_path.lowercased().hasSuffix(".png") && $0.width > 0 && $0.height > 0
-                    && ($0.iso_639_1 == nil || $0.iso_639_1 == preferred || $0.iso_639_1 == "en")
             }.sorted {
                 if rank($0) != rank($1) {
                     return rank($0) < rank($1)
@@ -273,9 +272,8 @@ actor TMDBClient {
     ) async throws -> [TitleLogo] {
         guard id > 0 else { return [] }
         let preferred = language.components(separatedBy: "-")[0].lowercased()
-        let response: TitleImages = try await get("\(kind.rawValue)/\(id)/images", query: [
-            URLQueryItem(name: "include_image_language", value: "\(preferred),en,null"),
-        ])
+        // Fetch all published variants so an original-language logo remains usable when localized ones are absent.
+        let response: TitleImages = try await get("\(kind.rawValue)/\(id)/images", localized: false)
         return TitleLogo.preferred(response.logos, language: preferred)
     }
 
@@ -423,7 +421,9 @@ actor TMDBClient {
         return result.results.map { var title = $0; title.media_type = kind.rawValue; return title }
     }
 
-    private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+    private func get<T: Decodable>(
+        _ path: String, query: [URLQueryItem] = [], localized: Bool = true,
+    ) async throws -> T {
         #if DEBUG && os(iOS) && targetEnvironment(simulator)
             if CatalogVisualFixtures.isEnabled {
                 return try JSONDecoder().decode(T.self, from: CatalogVisualFixtures.response(path: path, query: query))
@@ -431,10 +431,9 @@ actor TMDBClient {
         #endif
         guard let token = try tokenProvider(), !token.isEmpty else { throw TMDBError.missingToken }
         var components = URLComponents(string: "https://api.themoviedb.org/3/\(path)")!
-        components.queryItems = query + [
-            URLQueryItem(name: "language", value: Locale.preferredLanguages.first ?? "en-US"),
-            URLQueryItem(name: "include_adult", value: "false"),
-        ]
+        let language = localized ? [URLQueryItem(name: "language", value: Locale.preferredLanguages.first ?? "en-US")] :
+            []
+        components.queryItems = query + language + [URLQueryItem(name: "include_adult", value: "false")]
         let url = components.url!
         let key = url.absoluteString
         if let (expiry, data) = cache[key], expiry > Date() {

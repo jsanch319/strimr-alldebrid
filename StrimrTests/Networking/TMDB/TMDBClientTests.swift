@@ -14,14 +14,16 @@ struct TMDBClientTests {
             }
             let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })
             let logos = try await client.titleLogos(id: 42, kind: kind, language: "fr-FR")
-            #expect(logos.map(\.file_path) == ["/french.png", "/english.png", "/neutral.png"])
+            #expect(logos.map(\.file_path) == ["/french.png", "/english.png", "/neutral.png", "/german.png"])
             #expect(try await client.titleLogos(id: 42, kind: kind, language: "fr-FR") == logos)
             #expect(stub.requests.count == 1)
             let request = try #require(stub.requests.first)
             #expect(request.url?.path == "/3/\(kind.rawValue)/42/images")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-token")
             let query = try URLComponents(url: #require(request.url), resolvingAgainstBaseURL: false)?.queryItems
-            #expect(query?.first { $0.name == "include_image_language" }?.value == "fr,en,null")
+            #expect(query?.contains { $0.name == "include_image_language" || $0.name == "language" } == false)
+            let germanOnly = logos.filter { $0.iso_639_1 == "de" }
+            #expect(TMDBClient.TitleLogo.preferred(germanOnly, language: "en").first?.file_path == "/german.png")
             #expect(try await client.titleLogos(id: 0, kind: kind).isEmpty)
             #expect(stub.requests.count == 1)
         }
