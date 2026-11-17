@@ -148,11 +148,7 @@ private struct ArtworkProgressOverlay: ViewModifier {
     @State private var resource: ArtworkResource?
     func body(content: Content) -> some View {
         content
-            .onPreferenceChange(ProgressArtworkPreference.self) {
-                if progress != nil {
-                    resource = $0
-                }
-            }
+            .onPreferenceChange(ProgressArtworkPreference.self) { resource = $0 }
             .overlay(alignment: .bottom) {
                 if let progress {
                     #if os(iOS)
