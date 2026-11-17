@@ -308,6 +308,7 @@ final class PlayerController {
             } catch {
                 guard !Task.isCancelled, !error.isCancellation else { return }
                 deactivateASSRendering()
+                nowPlayingController?.stop()
                 if let live, !live.nativeRemoteHLS, LiveLoadOptions.isDemuxFailure(error),
                    let onLiveDemuxFailure
                 {
@@ -1316,9 +1317,11 @@ final class PlayerController {
         case .loading, .seeking:
             break
         case let .error(message):
+            nowPlayingController?.stop()
             deactivateASSRendering()
             errorMessage = message
         case .ended:
+            nowPlayingController?.stop()
             isPaused = false
             guard hasStartedPlayback, !isStopping else { return }
             hasStartedPlayback = false

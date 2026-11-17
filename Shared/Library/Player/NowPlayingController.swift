@@ -29,6 +29,7 @@ final class NowPlayingController {
     private var isLive = false
     private var artwork: MPMediaItemArtwork?
     private var artworkTask: Task<Void, Never>?
+    private var identityGeneration = UUID()
     private var commandCenter: MPRemoteCommandCenter?
     private var commandTargets: [(command: MPRemoteCommand, target: Any)] = []
     private var cancellables: Set<AnyCancellable> = []
@@ -56,7 +57,9 @@ final class NowPlayingController {
     }
 
     func begin(_ item: NowPlayingItem?, isLive: Bool) {
+        identityGeneration = UUID()
         artworkTask?.cancel()
+        attachCommands(to: nil)
         self.item = item
         self.isLive = isLive
         artwork = nil
@@ -87,6 +90,7 @@ final class NowPlayingController {
     }
 
     func stop() {
+        identityGeneration = UUID()
         artworkTask?.cancel()
         artworkTask = nil
         item = nil
@@ -99,6 +103,10 @@ final class NowPlayingController {
         #else
             engine.setVideoNowPlayingInfo([:])
             engine.setAudioNowPlayingInfo([:])
+            // A paused background session can hold a manually published card after its item was released.
+            for session in [engine.videoNowPlayingSession, engine.audioNowPlayingSession].compactMap(\.self) {
+                session.nowPlayingInfoCenter.nowPlayingInfo = nil
+            }
         #endif
     }
 
@@ -113,30 +121,23 @@ final class NowPlayingController {
     }
 
     private func loadArtwork() {
-        guard let item, let path = item.artworkPath, let service = item.artworkService else { return }
+        guard let item else { return }
+        let generation = identityGeneration
         artworkTask = Task { [weak self] in
-            guard let resource = try? await service.artwork(path: path, width: 600, height: nil) else { return }
-            let data: Data? = switch resource {
-            case let .data(data):
-                data
-            case let .url(url):
-                try? await URLSession.shared.data(from: url).0
+            for resource in await item.artworkResources() {
+                guard !Task.isCancelled else { return }
+                guard let image = await ArtworkResourceView.platformImage(for: resource) else { continue }
+                guard !Task.isCancelled, let self, identityGeneration == generation else { return }
+                artwork = Self.makeArtwork(from: image)
+                publishIdentity()
+                return
             }
-            guard !Task.isCancelled, let data, let artwork = Self.makeArtwork(from: data) else { return }
-            self?.artwork = artwork
-            self?.publishIdentity()
         }
     }
 
-    /// The system calls the artwork handler off the main thread, so neither may be isolated to the main actor.
-    private nonisolated static func makeArtwork(from data: Data) -> MPMediaItemArtwork? {
-        #if os(macOS)
-            guard let image = NSImage(data: data) else { return nil }
-            return MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in image }
-        #else
-            guard let image = UIImage(data: data)?.preparingForDisplay() else { return nil }
-            return MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in image }
-        #endif
+    /// The handler can run off the main thread; its image is already decoded in the shared artwork cache.
+    private nonisolated static func makeArtwork(from image: PlatformImage) -> MPMediaItemArtwork {
+        MPMediaItemArtwork(boundsSize: image.size) { @Sendable _ in image }
     }
 
     // MARK: - Commands
@@ -199,7 +200,11 @@ final class NowPlayingController {
 
     private func add(_ command: MPRemoteCommand, _ decode: @escaping @Sendable (MPRemoteCommandEvent) -> Command?) {
         command.isEnabled = true
-        let perform: @MainActor (Command) -> Void = { [weak self] in self?.perform($0) }
+        let generation = identityGeneration
+        let perform: @MainActor (Command) -> Void = { [weak self] command in
+            guard let self, identityGeneration == generation else { return }
+            perform(command)
+        }
         // MediaPlayer may deliver commands off the main thread.
         let target = command.addTarget { @Sendable event in
             guard let decoded = decode(event) else { return .commandFailed }

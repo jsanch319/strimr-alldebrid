@@ -46,13 +46,15 @@ struct ArtworkResourceView: View {
 
     /// The decoded artwork, for callers that lay it out themselves; nil when it cannot be loaded.
     static func image(for resource: ArtworkResource) async -> Image? {
-        let image: PlatformImage? = switch resource {
-        case let .url(url):
-            try? await RemoteArtworkImage.image(for: url)
-        case let .data(data):
-            await DataArtworkImage.image(for: data)
+        await platformImage(for: resource).map(Image.init(platformImage:))
+    }
+
+    /// System media artwork shares the same decoded cache as on-screen artwork.
+    static func platformImage(for resource: ArtworkResource) async -> PlatformImage? {
+        switch resource {
+        case let .url(url): try? await RemoteArtworkImage.image(for: url)
+        case let .data(data): await DataArtworkImage.image(for: data)
         }
-        return image.map(Image.init(platformImage:))
     }
 }
 
@@ -212,9 +214,9 @@ private struct RemoteArtworkImage: View {
 }
 
 #if os(macOS)
-    private typealias PlatformImage = NSImage
+    typealias PlatformImage = NSImage
 #else
-    private typealias PlatformImage = UIImage
+    typealias PlatformImage = UIImage
 #endif
 
 /// `UIImage(data:)` decodes lazily on the main actor at first render, which stalls tvOS focus moves once artwork
