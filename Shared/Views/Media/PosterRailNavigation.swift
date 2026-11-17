@@ -1,9 +1,9 @@
 import SwiftUI
 
 extension View {
-    func posterRailNavigation(_ pagination: PosterRailPagination? = nil) -> some View {
+    func posterRailNavigation(_ pagination: PosterRailPagination? = nil, ids: [String] = []) -> some View {
         #if os(iOS)
-            modifier(PosterRailNavigation(pagination: pagination))
+            modifier(PosterRailNavigation(pagination: pagination, ids: ids))
         #else
             self
         #endif
@@ -28,9 +28,11 @@ extension View {
     private struct PosterRailNavigation: ViewModifier {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         let pagination: PosterRailPagination?
+        let ids: [String]
         @State private var position = ScrollPosition(x: 0)
         @State private var geometry: RailGeometry?
         @State private var interacted = false
+        @State private var visibleIDs: Set<String> = []
 
         func body(content: Content) -> some View {
             content
@@ -47,12 +49,16 @@ extension View {
                         prefetch()
                     }
                 }
+                .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.98) { values in
+                    visibleIDs = Set(values)
+                    prefetch()
+                }
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: 8) {
                         arrow(
                             "chevron.left",
                             label: "Previous posters",
-                            enabled: (geometry?.offset ?? 0) > 2,
+                            enabled: (geometry?.offset ?? 0) > 2 && !firstVisible,
                             forward: false,
                         )
                         Spacer(minLength: 8)
@@ -76,9 +82,17 @@ extension View {
                 }
         }
 
+        private var firstVisible: Bool {
+            ids.first.map { visibleIDs.contains($0) } ?? false
+        }
+
+        private var lastVisible: Bool {
+            ids.last.map { visibleIDs.contains($0) } ?? false
+        }
+
         private var canAdvance: Bool {
             guard let geometry else { return false }
-            return geometry.offset < geometry.maximum - 2 || pagination?.hasMore == true
+            return (ids.isEmpty ? geometry.offset < geometry.maximum - 2 : !lastVisible) || pagination?.hasMore == true
         }
 
         private func arrow(_ symbol: String, label: String, enabled: Bool, forward: Bool) -> some View {
@@ -103,12 +117,18 @@ extension View {
                 if forward, target >= geometry.maximum, pagination?.hasMore == true {
                     await pagination?.loadMore()
                 }
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) { position.scrollTo(x: target) }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                    if target <= 0 {
+                        position.scrollTo(edge: .leading)
+                    } else {
+                        position.scrollTo(x: target)
+                    }
+                }
             }
         }
 
         private func prefetch() {
-            guard interacted, let geometry, geometry.offset + geometry.width * 0.6 >= geometry.maximum,
+            guard interacted, let geometry, lastVisible || geometry.offset + geometry.width * 0.6 >= geometry.maximum,
                   let pagination, pagination.hasMore, !pagination.loading, pagination.error == nil else { return }
             Task { await pagination.loadMore() }
         }

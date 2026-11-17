@@ -17,6 +17,7 @@ struct SeerrMediaCarousel: View {
                     }
                 }
             }
+            .scrollTargetLayout()
             .padding(.vertical, LayoutMetrics.railVerticalInset)
         }
         #if !os(tvOS)
@@ -25,7 +26,7 @@ struct SeerrMediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
-        .posterRailNavigation(pagination)
+        .posterRailNavigation(pagination, ids: items.map(\.posterPagingID))
         #if os(tvOS)
             .scrollClipDisabled()
             .focusSection()

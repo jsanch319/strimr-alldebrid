@@ -160,7 +160,7 @@ struct StreamingServicesSection: View {
                     .padding(.vertical, 8)
             }
             .scrollTargetBehavior(.viewAligned)
-            .posterRailNavigation()
+            .posterRailNavigation(ids: StreamingService.all.map(\.id))
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
             if let error = data.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.secondary)

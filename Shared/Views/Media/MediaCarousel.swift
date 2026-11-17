@@ -75,6 +75,7 @@ struct MediaCarousel: View {
                     viewAllCard(action: onViewAll)
                 }
             }
+            .scrollTargetLayout()
             .padding(.vertical, LayoutMetrics.railVerticalInset)
         }
         #if !os(tvOS)
@@ -83,7 +84,7 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
-        .posterRailNavigation(rowPagination)
+        .posterRailNavigation(rowPagination, ids: displayedItems.map(\.id))
         #if os(iOS)
             .task(id: PagingContext(hub: hub, generation: registry?.generation ?? 0)) {
                 nativePager = nil
