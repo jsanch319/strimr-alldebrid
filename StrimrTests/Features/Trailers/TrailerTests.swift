@@ -35,7 +35,10 @@ struct TrailerTests {
         async let hero = client.trailers(id: 693_134, kind: .movie)
         async let details = client.trailers(id: 693_134, kind: .movie)
         let results = try await [hero, details]
-        #expect(results.allSatisfy(\.isEmpty))
+        #expect(results.count == 2)
+        for result in results {
+            #expect(result.isEmpty)
+        }
         #expect(stub.requests.count == 1)
     }
 
@@ -80,10 +83,8 @@ struct TrailerTests {
         }
         let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })
         #expect(try await client.trailers(id: 99, kind: .movie).isEmpty)
-        #expect(try TrailerEmbedConfiguration.html(
-            source: .youTube("<script>"),
-            origin: #require(URL(string: "https://app.example")),
-        ) == nil)
+        let origin = try #require(URL(string: "https://app.example"))
+        #expect(TrailerEmbedConfiguration.html(source: .youTube("<script>"), origin: origin) == nil)
     }
 
     @Test func `YouTube embeds identify the native app require manual play and do not loop or suppress controls`(
@@ -169,20 +170,13 @@ struct TrailerTests {
     }
 
     @Test func `direct streams need an explicit provider contract and never reuse extracted YouTube URLs`() throws {
-        #expect(try AuthorizedTrailerStream(
-            catalogID: "movie:1",
-            url: #require(URL(string: "https://video.googlevideo.com/movie.mp4")),
-            provider: "Unknown",
-        ) == nil)
-        #expect(try AuthorizedTrailerStream(
-            catalogID: "movie:1",
-            url: #require(URL(string: "http://provider.example/trailer.mp4")),
-            provider: "Provider",
-        ) == nil)
-        let stream = try #require(try AuthorizedTrailerStream(
-            catalogID: "movie:1",
-            url: #require(URL(string: "https://provider.example/trailer.m3u8")),
-            provider: "Authorized provider",
+        let extractedURL = try #require(URL(string: "https://video.googlevideo.com/movie.mp4"))
+        let insecureURL = try #require(URL(string: "http://provider.example/trailer.mp4"))
+        let authorizedURL = try #require(URL(string: "https://provider.example/trailer.m3u8"))
+        #expect(AuthorizedTrailerStream(catalogID: "movie:1", url: extractedURL, provider: "Unknown") == nil)
+        #expect(AuthorizedTrailerStream(catalogID: "movie:1", url: insecureURL, provider: "Provider") == nil)
+        let stream = try #require(AuthorizedTrailerStream(
+            catalogID: "movie:1", url: authorizedURL, provider: "Authorized provider",
         ))
         #expect(!stream.permitsAdFreeLooping)
         #expect(TrailerSource.direct(stream).supportsInlinePreview)
