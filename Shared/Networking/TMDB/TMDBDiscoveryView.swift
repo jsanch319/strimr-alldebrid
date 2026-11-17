@@ -126,6 +126,12 @@ struct TMDBDetailView: View {
     @State private var initialized = false
     @State private var expandedSynopsis = false
     @State private var detailViewportWidth: CGFloat = 390
+    #if os(iOS)
+        @State private var trailer: TrailerSelection?
+        @State private var presentedTrailer: TrailerSelection?
+        @State private var trailerMessage: String?
+        @State private var loadingTrailer = false
+    #endif
     private let discovery = DiscoveryStore.shared
     private let progress = CatalogProgressStore.shared
     private struct PlaybackSelection: Identifiable {
@@ -198,9 +204,24 @@ struct TMDBDetailView: View {
                 artworkSpace
                 heading
                 playbackActions
-                Button("Select Source", systemImage: "list.bullet") {
-                    selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)
-                }.disabled(!canPlay)
+                HStack(spacing: 16) {
+                    Button("Select Source", systemImage: "list.bullet") {
+                        selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)
+                    }.disabled(!canPlay)
+                    #if os(iOS)
+                        Button("Watch Trailer", systemImage: "film") { presentedTrailer = trailer }
+                            .disabled(trailer == nil || loadingTrailer)
+                            .accessibilityIdentifier("catalog.detail.watch-trailer")
+                    #endif
+                }
+                #if os(iOS)
+                    if loadingTrailer {
+                        ProgressView("Finding official trailer…").font(.caption)
+                    }
+                    if let trailerMessage {
+                        Text(trailerMessage).font(.caption).foregroundStyle(.secondary)
+                    }
+                #endif
                 trackingActions
                 metadata
                 synopsis
@@ -258,7 +279,34 @@ struct TMDBDetailView: View {
         }
         .task { await loadDetails() }
         .task(id: season) { await loadSeason() }
+        #if os(iOS)
+            .task(id: season) { await loadTrailer() }
+            .fullScreenCover(item: $presentedTrailer) { TrailerFullscreenView(selection: $0) }
+        #endif
     }
+
+    #if os(iOS)
+        private func loadTrailer() async {
+            trailer = nil; trailerMessage = nil; loadingTrailer = true
+            defer {
+                if !Task.isCancelled {
+                    loadingTrailer = false
+                }
+            }
+            do {
+                let videos = try await TMDBClient.shared.trailers(id: item.id, kind: item.kind, season: season)
+                guard !Task.isCancelled else { return }
+                if let source = videos.first?.source {
+                    trailer = TrailerSelection(title: item.displayTitle, source: source)
+                } else {
+                    trailerMessage = "No supported official trailer is available for this title."
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                trailerMessage = "Trailer unavailable: " + error.localizedDescription
+            }
+        }
+    #endif
 
     private var artworkSpace: some View {
         #if os(iOS)

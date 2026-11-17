@@ -28,6 +28,23 @@ struct SettingsPlaybackView: View {
                 )
             }
 
+            #if os(iOS)
+                Section("Trailer Previews") {
+                    Toggle("Automatic Trailer Previews", isOn: Binding(
+                        get: { settingsManager.playback.automaticTrailerPreviews },
+                        set: { enabled in settingsManager.updatePlayback { $0.automaticTrailerPreviews = enabled } },
+                    ))
+                    Toggle("Allow Previews on Cellular", isOn: Binding(
+                        get: { settingsManager.playback.trailerPreviewsOnCellular },
+                        set: { enabled in settingsManager.updatePlayback { $0.trailerPreviewsOnCellular = enabled } },
+                    ))
+                    Text(
+                        "Authorized direct previews start muted. Reduce Motion, Low Power Mode and Low Data Mode disable automatic previews. YouTube and Vimeo trailers open only after you tap Watch Trailer.",
+                    )
+                    .font(.footnote).foregroundStyle(.secondary)
+                }
+            #endif
+
             externalPlayerSection
 
             #if os(iOS)

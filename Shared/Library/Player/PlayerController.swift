@@ -123,6 +123,7 @@ final class PlayerController {
     @ObservationIgnored private var sidecarASSHeaderCancellable: AnyCancellable?
     @ObservationIgnored private lazy var assCoordinator = ASSRenderCoordinator(engine: engine)
     @ObservationIgnored private var nowPlayingController: NowPlayingController?
+    @ObservationIgnored private let trailerPlaybackOwner = UUID()
     #if os(iOS)
         @ObservationIgnored private var backgroundRestoreTask: Task<Void, Never>?
         @ObservationIgnored private var backgroundRestoreResumesPlayback = false
@@ -241,6 +242,7 @@ final class PlayerController {
         self.providerStreamIDsByFFIndex = providerStreamIDsByFFIndex
         externalSubtitleProviderStreamIDs = [:]
         errorMessage = nil
+        TrailerPlaybackCoordinator.shared.beginFeature(trailerPlaybackOwner)
         nowPlayingController?.begin(nowPlaying, isLive: isLive)
 
         Task { @MainActor [weak self] in
@@ -309,6 +311,7 @@ final class PlayerController {
                 guard !Task.isCancelled, !error.isCancellation else { return }
                 deactivateASSRendering()
                 nowPlayingController?.stop()
+                TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
                 if let live, !live.nativeRemoteHLS, LiveLoadOptions.isDemuxFailure(error),
                    let onLiveDemuxFailure
                 {
@@ -817,6 +820,7 @@ final class PlayerController {
             backgroundRestoreTask = nil
         #endif
         nowPlayingController?.stop()
+        TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
         engine.stop()
     }
 
@@ -1318,10 +1322,12 @@ final class PlayerController {
             break
         case let .error(message):
             nowPlayingController?.stop()
+            TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
             deactivateASSRendering()
             errorMessage = message
         case .ended:
             nowPlayingController?.stop()
+            TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
             isPaused = false
             guard hasStartedPlayback, !isStopping else { return }
             hasStartedPlayback = false

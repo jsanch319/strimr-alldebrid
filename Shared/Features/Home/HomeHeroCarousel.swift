@@ -4,6 +4,18 @@
     /// Pages of featured titles at the top of the home, on iOS, iPadOS and macOS.
     struct HomeHeroCarousel: View {
         @Environment(\.scenePhase) private var scenePhase
+        #if os(iOS)
+            @Environment(SettingsManager.self) private var settingsManager
+            @State private var preview = DirectTrailerPreview()
+            @State private var settled = true
+            @State private var covered = false
+            @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+            @State private var trailer: TrailerSelection?
+            @State private var trailerID: MediaIdentity?
+            @State private var presentedTrailer: TrailerSelection?
+            private let network = TrailerNetworkState.shared
+            private let trailerCoordinator = TrailerPlaybackCoordinator.shared
+        #endif
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -30,7 +42,14 @@
                 // sliding in and the scroll coming to rest off the page.
                 HStack(spacing: 0) {
                     ForEach(slides) { slide in
-                        HomeHeroPage(slide: slide, onPlay: onPlay, onDetails: onDetails, compact: compact)
+                        HomeHeroPage(slide: slide, onPlay: performPlay, onDetails: performDetails, compact: compact)
+                        #if os(iOS)
+                            .environment(\.heroTrailerPresentation, currentID == slide.id ? HeroTrailerPresentation(
+                                preview: preview.active ? preview : nil,
+                                selection: trailerID == slide.id ? trailer : nil,
+                                watch: { watchTrailer() },
+                            ) : nil)
+                        #endif
                             .containerRelativeFrame(.horizontal)
                     }
                 }
@@ -39,6 +58,12 @@
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .scrollPosition(id: $selection, anchor: .leading)
             .onScrollPhaseChange { _, phase in
+                #if os(iOS)
+                    settled = phase == .idle
+                    if phase != .idle {
+                        preview.stop(); covered = false
+                    }
+                #endif
                 if phase != .idle {
                     restart += 1
                 }
@@ -74,6 +99,9 @@
                 }
             }
             .onChange(of: currentID, initial: true) { _, id in
+                #if os(iOS)
+                    preview.stop()
+                #endif
                 onFeaturedChange?(slides.first { $0.id == id }?.media)
             }
             .onChange(of: interactionCount) {
@@ -82,11 +110,123 @@
             .task(id: AutoAdvanceKey(
                 slide: currentID,
                 restart: restart,
-                isActive: isVisible && scenePhase == .active && !reduceMotion && !isVoiceOverEnabled,
+                isActive: isVisible && scenePhase == .active && !reduceMotion && !isVoiceOverEnabled && canAdvance,
             )) {
                 await autoAdvance()
             }
+            #if os(iOS)
+            .task(id: currentID) { await loadTrailer() }
+            .task(id: previewKey) { await preparePreview() }
+            .onAppear { isVisible = true; covered = false }
+            .onDisappear { isVisible = false; preview.stop() }
+            .onChange(of: scenePhase) {
+                _, phase in if phase != .active {
+                    preview.stop()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+                lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+                if lowPower {
+                    preview.stop()
+                }
+            }
+            .fullScreenCover(item: $presentedTrailer, onDismiss: { covered = false }) { selection in
+                TrailerFullscreenView(selection: selection)
+            }
+            #endif
         }
+
+        private var canAdvance: Bool {
+            #if os(iOS)
+                !preview.active && !covered && !trailerCoordinator.manualTrailerActive && !trailerCoordinator
+                    .featurePlaybackActive
+            #else
+                true
+            #endif
+        }
+
+        private func performPlay(_ media: MediaItem) {
+            #if os(iOS)
+                covered = true; preview.stop()
+            #endif
+            onPlay(media)
+        }
+
+        private func performDetails(_ media: MediaItem) {
+            #if os(iOS)
+                covered = true; preview.stop()
+            #endif
+            onDetails(media)
+        }
+
+        #if os(iOS)
+            private var currentSlide: HomeHeroSlide? {
+                slides.first { $0.id == currentID }
+            }
+
+            private var directStream: AuthorizedTrailerStream? {
+                guard let slide = currentSlide, let stream = slide.authorizedTrailer,
+                      let kind = PlayerTitleLogoIdentity(media: slide.media).kind,
+                      let id = PlayerTitleLogoIdentity(media: slide.media).tmdbID,
+                      stream.catalogID == "\(kind.rawValue):\(id)" else { return nil }
+                return stream
+            }
+
+            private var previewAllowed: Bool {
+                TrailerPreviewPolicy.allowsAutoplay(
+                    enabled: settingsManager.playback.automaticTrailerPreviews && currentSlide?.isResume == false,
+                    visible: isVisible && !covered, active: scenePhase == .active, settled: settled,
+                    reduceMotion: reduceMotion || isVoiceOverEnabled, lowPower: lowPower,
+                    connected: network.connected, expensive: network.expensive, constrained: network.constrained,
+                    allowsCellular: settingsManager.playback.trailerPreviewsOnCellular,
+                    anotherPlayerActive: trailerCoordinator.featurePlaybackActive || trailerCoordinator
+                        .manualTrailerActive,
+                )
+            }
+
+            private struct PreviewKey: Equatable {
+                let media: MediaIdentity?
+                let restart: Int
+                let stream: AuthorizedTrailerStream?
+                let allowed: Bool
+            }
+
+            private var previewKey: PreviewKey {
+                PreviewKey(media: currentID, restart: restart, stream: directStream, allowed: previewAllowed)
+            }
+
+            private func preparePreview() async {
+                preview.stop()
+                guard previewAllowed, let stream = directStream else { return }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                guard !Task.isCancelled, previewAllowed, directStream == stream else { return }
+                preview.start(stream)
+            }
+
+            private func loadTrailer() async {
+                trailer = nil; trailerID = nil
+                guard let slide = currentSlide else { return }
+                if let stream = directStream {
+                    trailer = TrailerSelection(
+                        title: slide.media.primaryLabel,
+                        source: .direct(stream),
+                    ); trailerID = slide.id
+                    return
+                }
+                let identity = PlayerTitleLogoIdentity(media: slide.media)
+                guard let id = identity.tmdbID, let kind = identity.kind else { return }
+                do {
+                    let videos = try await TMDBClient.shared.trailers(id: id, kind: kind)
+                    guard !Task.isCancelled, currentID == slide.id, let source = videos.first?.source else { return }
+                    trailer = TrailerSelection(title: slide.media.primaryLabel, source: source); trailerID = slide.id
+                } catch { /* Static artwork and normal Play/Details remain usable. */ }
+            }
+
+            private func watchTrailer() {
+                guard trailerID == currentID, let trailer else { return }
+                covered = true; preview.stop(); presentedTrailer = trailer
+            }
+        #endif
 
         /// A large share of an iPhone in portrait, capped where the screen is tall or wide.
         private static func height(for available: CGFloat) -> CGFloat {
@@ -185,7 +325,9 @@
         }
 
         private func autoAdvance() async {
-            guard isVisible, scenePhase == .active, !reduceMotion, !isVoiceOverEnabled, slides.count > 1 else {
+            guard isVisible, scenePhase == .active, !reduceMotion, !isVoiceOverEnabled, canAdvance,
+                  slides.count > 1
+            else {
                 autoAdvanceStartedAt = nil
                 return
             }
@@ -197,6 +339,9 @@
     }
 
     private struct HomeHeroPage: View {
+        #if os(iOS)
+            @Environment(\.heroTrailerPresentation) private var trailerPresentation
+        #endif
         @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
         let slide: HomeHeroSlide
@@ -219,10 +364,29 @@
                         )
                     }
 
+                #if os(iOS)
+                    if let preview = trailerPresentation?.preview {
+                        TrailerPreviewSurface(preview: preview).id(preview.generation)
+                            .opacity(preview.ready ? 1 : 0).mask(Self.fadeMask)
+                            .allowsHitTesting(false)
+                    }
+                #endif
+
                 details
                     .padding(.horizontal, LayoutMetrics.pageMargin)
                     .padding(.bottom, compact ? 30 : 36)
             }
+            #if os(iOS)
+            .overlay(alignment: .topTrailing) {
+                if let preview = trailerPresentation?.preview, preview.ready {
+                    Button { preview.toggleMute() } label: {
+                        Image(systemName: preview.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .padding(10).background(.ultraThinMaterial, in: Circle())
+                    }.buttonStyle(.plain).padding(16)
+                        .accessibilityLabel(preview.muted ? "Unmute trailer preview" : "Mute trailer preview")
+                }
+            }
+            #endif
             .clipped()
             .contentShape(Rectangle())
             .onTapGesture { onDetails(slide.media) }
@@ -267,6 +431,13 @@
                 }
                 .padding(.top, 4)
                 .controlSize(horizontalSizeClass == .compact ? .small : .regular)
+                #if os(iOS)
+                    if let presentation = trailerPresentation, presentation.selection != nil {
+                        Button(action: presentation.watch) { Label("Watch Trailer", systemImage: "film") }
+                            .actionButtonStyle(.secondary).controlSize(.small)
+                            .accessibilityIdentifier("home.hero.watch-trailer")
+                    }
+                #endif
             }
             .frame(maxWidth: 520, alignment: .leading)
             .accessibilityElement(children: .contain)

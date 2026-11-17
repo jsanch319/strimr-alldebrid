@@ -277,7 +277,66 @@ actor TMDBClient {
         return TitleLogo.preferred(response.logos, language: preferred)
     }
 
+    private nonisolated struct TrailerVideos: Decodable { let results: [TMDBTrailerVideo] }
+
+    private var trailerRequests: [String: (id: UUID, task: Task<[TMDBTrailerVideo], Error>)] = [:]
+
+    /// Share in-flight metadata work across hero/details; completed responses use the existing bounded cache.
+    func trailers(
+        id: Int,
+        kind: TMDBTitle.Kind,
+        season: Int? = nil,
+        language: String = Locale.preferredLanguages.first ?? "en",
+    ) async throws -> [TMDBTrailerVideo] {
+        let key = "\(kind.rawValue):\(id):\(season.map(String.init) ?? "series"):\(language)"
+        if let pending = trailerRequests[key] {
+            return try await pending.task.value
+        }
+        let requestID = UUID()
+        let task = Task { try await self.loadTrailers(id: id, kind: kind, season: season, language: language) }
+        trailerRequests[key] = (requestID, task)
+        defer {
+            if trailerRequests[key]?.id == requestID {
+                trailerRequests[key] = nil
+            }
+        }
+        return try await task.value
+    }
+
+    /// All official languages remain available; only selection is localized.
+    private func loadTrailers(
+        id: Int,
+        kind: TMDBTitle.Kind,
+        season: Int?,
+        language: String,
+    ) async throws -> [TMDBTrailerVideo] {
+        guard id > 0 else { return [] }
+        if kind == .tv, let season, season >= 0 {
+            do {
+                let videos: TrailerVideos = try await get("tv/\(id)/season/\(season)/videos", localized: false)
+                let ranked = TMDBTrailerVideo.preferred(videos.results, language: language)
+                if !ranked.isEmpty {
+                    return ranked
+                }
+            } catch {
+                if error.isCancellation {
+                    throw error
+                }
+                // A season without video metadata can still use the official series trailer.
+                if case TMDBError.response(404) = error {} else {
+                    throw error
+                }
+            }
+        }
+        let videos: TrailerVideos = try await get("\(kind.rawValue)/\(id)/videos", localized: false)
+        return TMDBTrailerVideo.preferred(videos.results, language: language)
+    }
+
     func reset() {
+        for pending in trailerRequests.values {
+            pending.task.cancel()
+        }
+        trailerRequests.removeAll()
         cache.removeAll(); retryAt = nil
     }
 

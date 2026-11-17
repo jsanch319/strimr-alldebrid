@@ -77,6 +77,25 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertLessThan(play.frame.maxY, app.tabBars.firstMatch.frame.minY)
     }
 
+    func testMovieAndTVTrailerEntryPreservesFeaturePlaybackActions() {
+        for (tabName, id) in [("Movies", "movie:693134"), ("TV Shows", "tv:95396")] {
+            tab(tabName)
+            let title = card(id)
+            XCTAssertTrue(title.waitForExistence(timeout: 25), app.debugDescription)
+            title.tap()
+            let trailer = app.buttons["catalog.detail.watch-trailer"]
+            XCTAssertTrue(trailer.waitForExistence(timeout: 20), app.debugDescription)
+            XCTAssertTrue(trailer.isEnabled, app.debugDescription)
+            scrollTo(trailer)
+            trailer.tap()
+            XCTAssertTrue(app.staticTexts["trailer.title"].waitForExistence(timeout: 20), app.debugDescription)
+            XCTAssertTrue(app.staticTexts["trailer.title"].label.hasPrefix("Trailer · "))
+            capture("26-Trailer-Entry-" + tabName)
+            app.buttons["trailer.close"].tap()
+            XCTAssertTrue(app.buttons["catalog.detail.play"].waitForExistence(timeout: 15), app.debugDescription)
+        }
+    }
+
     func testHomeContinueWatchingAndScrolling() {
         XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 30))
         assertLoadedBackdrop()

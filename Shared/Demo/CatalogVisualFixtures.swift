@@ -35,6 +35,13 @@
             let components = path.split(separator: "/").map(String.init)
             let values = Dictionary(query.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last })
             let encoder = JSONEncoder()
+            if components.last == "videos" {
+                // Explicitly labeled UI fixture. The tests open the provider entry but never start playback.
+                return Data(
+                    #"{"results":[{"id":"visual-trailer","name":"Trailer UI fixture","site":"YouTube","key":"Way9Dexny3w","type":"Trailer","official":true,"iso_639_1":"en","size":1080}]}"#
+                        .utf8,
+                )
+            }
             if components.count == 2, let id = Int(components[1]),
                let title = titles.first(where: { $0.kind.rawValue == components[0] && $0.id == id })
             {
