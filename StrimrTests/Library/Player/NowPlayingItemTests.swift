@@ -134,6 +134,24 @@ struct NowPlayingItemTests {
         #expect(!disabled.backgroundAudio)
     }
 
+    @Test func `late artwork identity refresh preserves a held background clock and discards old identity`() {
+        let item = NowPlayingItem(title: "New movie", skipBackwardSeconds: 10, skipForwardSeconds: 30)
+        let updated = item.updatingIdentity(in: [
+            MPMediaItemPropertyTitle: "Old episode",
+            MPMediaItemPropertyArtist: "Old series",
+            MPMediaItemPropertyArtwork: "stale artwork",
+            MPNowPlayingInfoPropertyElapsedPlaybackTime: 137.25,
+            MPNowPlayingInfoPropertyPlaybackRate: 0.0,
+            MPMediaItemPropertyPlaybackDuration: 3600.0,
+        ], artwork: nil, isLive: false)
+        #expect(updated[MPMediaItemPropertyTitle] as? String == "New movie")
+        #expect(updated[MPMediaItemPropertyArtist] == nil)
+        #expect(updated[MPMediaItemPropertyArtwork] == nil)
+        #expect(updated[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double == 137.25)
+        #expect(updated[MPNowPlayingInfoPropertyPlaybackRate] as? Double == 0)
+        #expect(updated[MPMediaItemPropertyPlaybackDuration] as? Double == 3600)
+    }
+
     @Test func `the card only advances while playing and not buffering`() {
         #expect(NowPlayingPlayback.rate(isPlaying: true, isBuffering: false, requestedRate: 1.5) == 1.5)
         #expect(NowPlayingPlayback.rate(isPlaying: true, isBuffering: true, requestedRate: 1.5) == 0)

@@ -65,6 +65,21 @@ struct NowPlayingItem {
         return (original == url ? [url] : [original, url].compactMap(\.self)).map(ArtworkResource.url)
     }
 
+    /// A paused background session may have released its video item and be holding a static card.
+    /// Refresh its identity without losing the player's saved timing or retaining the previous artwork.
+    func updatingIdentity(in current: [String: Any], artwork: MPMediaItemArtwork?, isLive: Bool) -> [String: Any] {
+        var updated = identityInfo(artwork: artwork, isLive: isLive)
+        for key in [
+            MPNowPlayingInfoPropertyElapsedPlaybackTime,
+            MPNowPlayingInfoPropertyPlaybackRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate,
+            MPMediaItemPropertyPlaybackDuration,
+        ] {
+            updated[key] = current[key]
+        }
+        return updated
+    }
+
     /// Identity keys only: position, duration and rate come from the player.
     func identityInfo(artwork: MPMediaItemArtwork?, isLive: Bool) -> [String: Any] {
         var info: [String: Any] = [

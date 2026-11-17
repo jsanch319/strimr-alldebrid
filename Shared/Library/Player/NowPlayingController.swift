@@ -121,6 +121,18 @@ final class NowPlayingController {
             let info = item?.identityInfo(artwork: artwork, isLive: isLive) ?? [:]
             engine.setVideoNowPlayingInfo(info)
             engine.setAudioNowPlayingInfo(info)
+            // Background pause can release the AVPlayerItem while retaining a static session card.
+            // Artwork completing afterwards must refresh that card as well, without restarting its clock.
+            if let item {
+                for session in [engine.videoNowPlayingSession, engine.audioNowPlayingSession].compactMap(\.self)
+                    where !session.automaticallyPublishesNowPlayingInfo
+                {
+                    guard let held = session.nowPlayingInfoCenter.nowPlayingInfo else { continue }
+                    session.nowPlayingInfoCenter.nowPlayingInfo = item.updatingIdentity(
+                        in: held, artwork: artwork, isLive: isLive,
+                    )
+                }
+            }
         #endif
     }
 
