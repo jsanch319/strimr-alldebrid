@@ -289,7 +289,7 @@ private struct PlayerControlsHeader: View {
 
             PlayerAirPlayButton(onPresentationChanged: onAirPlayPresentationChanged)
                 .frame(width: PlayerIconButton.Size.small.diameter, height: PlayerIconButton.Size.small.diameter)
-                .background(.ultraThinMaterial, in: Circle())
+                .videoOverlayGlass(in: Circle())
 
             if showsPictureInPicture {
                 PlayerPictureInPictureButton(action: onStartPictureInPicture)
