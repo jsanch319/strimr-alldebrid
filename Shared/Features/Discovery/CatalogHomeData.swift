@@ -248,15 +248,8 @@ final class CatalogHomeData {
         let key = scope + seeds.map(\.catalogID).joined(separator: "|")
         if key != personalKey || force {
             personalKey = key
-            personalPager = CatalogTitlePager { page in
-                var results: [TMDBTitle] = []
-                var pages = 0
-                for title in seeds {
-                    let response = try await TMDBClient.shared.recommendationPage(title, page: page)
-                    results += response.results
-                    pages = max(pages, response.total_pages ?? (response.results.isEmpty ? page : 500))
-                }
-                return TMDBClient.TitlePage(results: results, total_pages: pages)
+            personalPager = CatalogTitlePager.recommendations(seeds: seeds) { title, page in
+                try await TMDBClient.shared.recommendationPage(title, page: page)
             }
             await personalPager?.loadNext()
             guard scope == discovery.scope else { return }

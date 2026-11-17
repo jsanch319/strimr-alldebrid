@@ -89,8 +89,8 @@ final class SeerrDiscoverViewModel {
             var seen = Set(items.map(\.posterPagingID))
             items += response.results.filter { seen.insert($0.posterPagingID).inserted }
             setRow(key, items: items)
-            rowPages[key] = response.page
-            rowTotals[key] = response.results.isEmpty ? response.page : min(500, response.totalPages)
+            rowPages[key] = page + 1
+            rowTotals[key] = response.results.isEmpty ? page + 1 : min(500, response.totalPages)
         } catch {
             if !Task.isCancelled, generation == pagingGeneration {
                 pagingErrors[key] = error.localizedDescription

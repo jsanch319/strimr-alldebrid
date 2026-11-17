@@ -282,8 +282,8 @@ final class SeerrMediaDetailViewModel {
             } else {
                 recommendations = items
             }
-            relatedPages[key] = response.page
-            relatedTotals[key] = response.results.isEmpty ? response.page : min(500, response.totalPages)
+            relatedPages[key] = page + 1
+            relatedTotals[key] = response.results.isEmpty ? page + 1 : min(500, response.totalPages)
         } catch {
             if !Task.isCancelled {
                 relatedErrors[key] = error.localizedDescription

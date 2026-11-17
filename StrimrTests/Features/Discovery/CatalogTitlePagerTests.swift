@@ -78,6 +78,19 @@ struct CatalogTitlePagerTests {
         #expect(firstPages == [1, 2]); #expect(secondPages == [1]); #expect(second.hasMore)
     }
 
+    @Test func `recommendation seeds stop independently without repeated exhausted source calls`() async throws {
+        let a = try title(1), b = try title(2)
+        var requested: [String] = []
+        let pager = CatalogTitlePager.recommendations(seeds: [a, b, a]) { title, page in
+            requested.append("\(title.id):\(page)")
+            return .init(results: [title], total_pages: title.id == 1 ? 1 : 3)
+        }
+        await pager.loadNext(); await pager.loadNext(); await pager.loadNext(); await pager.loadNext()
+        #expect(requested == ["1:1", "2:1", "2:2", "2:3"])
+        #expect(pager.items.map(\.id) == [1, 2])
+        #expect(!pager.hasMore)
+    }
+
     @Test func `rate limits retain posters and block repeated network attempts`() async throws {
         let a = try title(1)
         var requests = 0

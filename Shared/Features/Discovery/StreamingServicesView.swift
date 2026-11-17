@@ -371,7 +371,7 @@ private struct StreamingProviderView: View {
             var seen = Set(titles.map(\.catalogID))
             titles += result.results.filter { seen.insert($0.catalogID).inserted }
             page += 1
-            totalPages = min(result.total_pages, 500)
+            totalPages = result.results.isEmpty ? page : min(result.total_pages, 500)
         } catch {
             if !Task.isCancelled, requestedKind == kind, requestGeneration == generation {
                 errorMessage = error.localizedDescription

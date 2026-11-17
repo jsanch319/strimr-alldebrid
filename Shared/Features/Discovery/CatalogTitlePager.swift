@@ -50,6 +50,25 @@ final class CatalogTitlePager {
         }
     }
 
+    /// A short recommendation stream must not be requested again for every page of a longer seed.
+    static func recommendations(
+        seeds: [TMDBTitle],
+        loader: @escaping (TMDBTitle, Int) async throws -> TMDBClient.TitlePage,
+    ) -> CatalogTitlePager {
+        var totals: [String: Int] = [:]
+        var seenSeeds = Set<String>()
+        let seeds = seeds.filter { seenSeeds.insert($0.catalogID).inserted }
+        return CatalogTitlePager { page in
+            var results: [TMDBTitle] = []
+            for seed in seeds where page <= (totals[seed.catalogID] ?? 500) {
+                let response = try await loader(seed, page)
+                results += response.results
+                totals[seed.catalogID] = min(response.total_pages ?? (response.results.isEmpty ? page - 1 : 500), 500)
+            }
+            return TMDBClient.TitlePage(results: results, total_pages: totals.values.max() ?? 0)
+        }
+    }
+
     var pagination: PosterRailPagination {
         PosterRailPagination(hasMore: hasMore, loading: loading, error: error, loadMore: { await self.loadNext() })
     }
