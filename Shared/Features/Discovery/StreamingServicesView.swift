@@ -160,7 +160,7 @@ struct StreamingServicesSection: View {
                     .padding(.vertical, 8)
             }
             .scrollTargetBehavior(.viewAligned)
-            .posterRailNavigation(ids: StreamingService.all.map(\.id))
+            .posterRailPagination(ids: StreamingService.all.map(\.id))
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
             if let error = data.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -255,7 +255,9 @@ private struct StreamingServiceCard: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text(service.name).font(.title2.bold())
                     Text(service.description).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(2)
-                    Image(systemName: "arrow.right").font(.subheadline.weight(.semibold)).padding(.top, 3)
+                    #if !os(iOS)
+                        Image(systemName: "arrow.right").font(.subheadline.weight(.semibold)).padding(.top, 3)
+                    #endif
                 }
                 .frame(width: width * 0.45, alignment: .leading)
             }

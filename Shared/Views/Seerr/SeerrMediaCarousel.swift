@@ -26,7 +26,7 @@ struct SeerrMediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
-        .posterRailNavigation(pagination, ids: items.map(\.posterPagingID))
+        .posterRailPagination(pagination, ids: items.map(\.posterPagingID))
         #if os(tvOS)
             .scrollClipDisabled()
             .focusSection()

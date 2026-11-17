@@ -119,7 +119,7 @@ final class CatalogVisualTests: XCTestCase {
         capture("16-Manual-Source-Entry-No-Credentials")
     }
 
-    func testHorizontalPaginationArrowsAndSwipe() {
+    func testHorizontalSwipePaginationWithoutArrows() {
         app.terminate()
         app.launchEnvironment["STRIMR_VISUAL_PAGINATION"] = "1"
         app.launch()
@@ -127,36 +127,31 @@ final class CatalogVisualTests: XCTestCase {
         tab("Movies")
         let row = app.otherElements["catalog.row.Trending Movies"]
         XCTAssertTrue(row.waitForExistence(timeout: 25), app.debugDescription)
-        let next = row.buttons["poster.rail.next"]
-        let previous = row.buttons["poster.rail.previous"]
-        XCTAssertTrue(next.waitForExistence(timeout: 15))
-        XCTAssertFalse(previous.isEnabled, row.debugDescription)
-        XCTAssertTrue(next.isHittable, row.debugDescription)
-        capture("17A-Horizontal-Pagination-Start")
-        next.tap()
+        XCTAssertFalse(row.buttons["poster.rail.next"].exists)
+        XCTAssertFalse(row.buttons["poster.rail.previous"].exists)
+        XCTAssertFalse(row.buttons["Next posters"].exists)
+        XCTAssertFalse(row.buttons["Previous posters"].exists)
+        let original = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+        XCTAssertTrue(original.exists)
+        let otherRow = app.otherElements["catalog.row.Popular Movies"]
+        let otherOriginal = otherRow.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134")
+            .firstMatch
+        XCTAssertTrue(otherOriginal.exists)
+        let otherX = otherOriginal.frame.minX
+        capture("17-Swipe-Pagination-Start-No-Arrows")
+        row.swipeLeft()
         let appended = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336").firstMatch
         XCTAssertTrue(appended.waitForExistence(timeout: 25), app.debugDescription)
         row.swipeLeft()
-        let terminal = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: next)
-        XCTAssertEqual(XCTWaiter.wait(for: [terminal], timeout: 10), .completed, row.debugDescription)
-        XCTAssertTrue(previous.isEnabled)
-        previous.tap()
-        let original = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
-        XCTAssertTrue(original.waitForExistence(timeout: 10))
-        capture("17-Horizontal-Pagination-Arrows")
-        // Fresh process: reach the page boundary by touch instead of using the next arrow.
-        app.terminate(); app.launch()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45))
-        tab("Movies")
-        let swipeRow = app.otherElements["catalog.row.Trending Movies"]
-        XCTAssertTrue(swipeRow.waitForExistence(timeout: 25))
-        swipeRow.swipeLeft()
-        XCTAssertTrue(
-            swipeRow.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336")
-                .firstMatch.waitForExistence(timeout: 25),
-            app.debugDescription,
-        )
-        capture("18-Horizontal-Pagination-Swipe")
+        XCTAssertTrue(appended.isHittable, row.debugDescription)
+        XCTAssertEqual(row.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336").count, 1)
+        XCTAssertEqual(otherOriginal.frame.minX, otherX, accuracy: 1)
+        capture("18-Swipe-Pagination-Appended-No-Arrows")
+        row.swipeRight()
+        XCTAssertTrue(original.isHittable, row.debugDescription)
+        XCTAssertTrue(appended.exists)
+        XCTAssertEqual(otherOriginal.frame.minX, otherX, accuracy: 1)
+        capture("19-Swipe-Pagination-Returned-No-Arrows")
     }
 
     func testMoviesAndMovieDetails() {

@@ -84,7 +84,7 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
-        .posterRailNavigation(rowPagination, ids: displayedItems.map(\.id))
+        .posterRailPagination(rowPagination, ids: displayedItems.map(\.id))
         #if os(iOS)
             .task(id: PagingContext(hub: hub, generation: registry?.generation ?? 0)) {
                 nativePager = nil
