@@ -99,12 +99,20 @@ private struct CatalogBrowseTab: View {
             VStack(alignment: .leading, spacing: 24) {
                 ForEach(tab.feeds) { feed in
                     if let titles = data.feeds[feed], !titles.isEmpty {
-                        TMDBPosterRow(heading: feed.title, titles: titles)
+                        TMDBPosterRow(
+                            heading: feed.title,
+                            titles: titles,
+                            pagination: data.pagination(for: "catalog:\(feed.id)"),
+                        )
                     }
                 }
                 let recommended = data.recommendations.filter { $0.kind == kind }
                 if !recommended.isEmpty {
-                    TMDBPosterRow(heading: "Recommended For You", titles: recommended)
+                    TMDBPosterRow(
+                        heading: "Recommended For You",
+                        titles: recommended,
+                        pagination: data.pagination(for: "catalog:recommended"),
+                    )
                 }
                 if let error = data.errorMessage {
                     Text(error).foregroundStyle(.secondary)

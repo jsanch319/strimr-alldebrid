@@ -160,6 +160,7 @@ struct StreamingServicesSection: View {
                     .padding(.vertical, 8)
             }
             .scrollTargetBehavior(.viewAligned)
+            .posterRailNavigation()
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
             if let error = data.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -309,6 +310,13 @@ private struct StreamingProviderView: View {
                             showsLabels: settingsManager.interface.showsCardLabels,
                         ) {
                             selection = title
+                        }
+                        .onAppear {
+                            if titles.suffix(4).contains(where: { $0.catalogID == title.catalogID }),
+                               page < totalPages, !loading, errorMessage == nil
+                            {
+                                Task { await load(reset: false) }
+                            }
                         }
                     }
                 }.padding(.horizontal, LayoutMetrics.pageMargin)

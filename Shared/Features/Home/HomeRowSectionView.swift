@@ -6,6 +6,7 @@ struct HomeRowSectionView: View {
     let row: HomeRow
     let showsLabels: Bool
     var canOpenWithoutServer = false
+    var pagination: PosterRailPagination?
     let onViewAll: (Hub) -> Void
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -20,6 +21,7 @@ struct HomeRowSectionView: View {
                 items: row.items,
                 showsLabels: showsLabels,
                 onViewAll: carouselViewAllAction,
+                pagination: pagination,
                 onSelectMedia: select,
             )
             .environment(\.mediaCardOffersDetails, playsOnSelect)

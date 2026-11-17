@@ -16,6 +16,7 @@ struct TMDBPosterRow: View {
     @Environment(SettingsManager.self) private var settingsManager
     let heading: String
     let titles: [TMDBTitle]
+    var pagination: PosterRailPagination?
     @State private var selection: TMDBTitle?
     var body: some View {
         MediaHubSection(title: heading) {
@@ -23,11 +24,14 @@ struct TMDBPosterRow: View {
                 layout: .portrait,
                 items: titles.map { .playable(CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil)) },
                 showsLabels: settingsManager.interface.showsCardLabels,
+                pagination: pagination,
                 onSelectMedia: { media in
                     selection = titles.first { $0.catalogID == media.id }
                 },
             )
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("catalog.row.\(heading)")
         .navigationDestination(item: $selection) { TMDBDetailView(title: $0) }
     }
 }
@@ -44,7 +48,11 @@ struct TMDBDetailView: View {
     @State private var changingWatched = false
     @State private var confirmRemoval = false
     @State private var detail: TMDBTitle?
-    @State private var recommendations: [TMDBTitle] = []
+    @State private var recommendationPager: CatalogTitlePager
+    private var recommendations: [TMDBTitle] {
+        recommendationPager.items
+    }
+
     @State private var episodes: [TMDBEpisode] = []
     @State private var season: Int?
     @State private var selectedEpisode: TMDBEpisode?
@@ -62,6 +70,9 @@ struct TMDBDetailView: View {
     }
 
     init(title: TMDBTitle, initialSeason: Int? = nil, initialEpisode: TMDBEpisode? = nil) {
+        _recommendationPager = State(initialValue: CatalogTitlePager { page in
+            try await TMDBClient.shared.recommendationPage(title, page: page)
+        })
         self.title = title; self.initialSeason = initialSeason; self.initialEpisode = initialEpisode
         _selectedEpisode = State(initialValue: initialEpisode)
         _season = State(initialValue: initialSeason ?? initialEpisode?.season_number)
@@ -130,7 +141,11 @@ struct TMDBDetailView: View {
                 genresAndStudio
                 episodeSection
                 if !recommendations.isEmpty {
-                    TMDBPosterRow(heading: "Recommendations", titles: recommendations)
+                    TMDBPosterRow(
+                        heading: "Recommendations",
+                        titles: recommendations,
+                        pagination: recommendationPager.pagination,
+                    )
                 }
                 if let error {
                     Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -436,8 +451,9 @@ struct TMDBDetailView: View {
                     ?? item.seasons?.first?.season_number
             }
         } catch { self.error = error.localizedDescription }
-        do { recommendations = try await TMDBClient.shared.recommendations(title) }
-        catch { self.error = error.localizedDescription }
+        if firstLoad {
+            await recommendationPager.loadNext()
+        }
     }
 
     private func loadSeason() async {

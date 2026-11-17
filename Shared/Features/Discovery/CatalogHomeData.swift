@@ -21,7 +21,9 @@ final class CatalogHomeData {
     private var recommendationResults: [TMDBTitle] = []
     private var recommendationScope: String?
     var recommendations: [TMDBTitle] {
-        recommendationScope == discovery.scope ? recommendationResults : []
+        guard recommendationScope == discovery.scope else { return [] }
+        let known = Set(discovery.entries.compactMap(\.catalogID))
+        return recommendationResults.filter { !known.contains($0.catalogID) }
     }
 
     private(set) var isSearching = false
@@ -38,6 +40,32 @@ final class CatalogHomeData {
         self.discovery = discovery ?? .shared
         self.progress = progress ?? .shared
         self.feeds = feeds
+    }
+
+    private var pagers: [TMDBClient.Feed: CatalogTitlePager] = [:]
+    private var personalPager: CatalogTitlePager?
+    private var personalKey = ""
+
+    func pagination(for rowID: String) -> PosterRailPagination? {
+        if rowID == "catalog:recommended", let personalPager {
+            return PosterRailPagination(
+                hasMore: personalPager.hasMore,
+                loading: personalPager.loading,
+                error: personalPager.error,
+            ) {
+                await personalPager.loadNext()
+                guard self.personalPager === personalPager,
+                      self.recommendationScope == self.discovery.scope else { return }
+                self.recommendationResults = personalPager.items
+            }
+        }
+        guard let feed = TMDBClient.Feed.allCases.first(where: { rowID == "catalog:\($0.id)" }),
+              let pager = pagers[feed] else { return nil }
+        return PosterRailPagination(hasMore: pager.hasMore, loading: pager.loading, error: pager.error) {
+            await pager.loadNext()
+            guard self.pagers[feed] === pager else { return }
+            self.feeds[feed] = pager.items
+        }
     }
 
     private var loaded = false
@@ -213,29 +241,37 @@ final class CatalogHomeData {
             recommendationResults = []
             recommendationScope = scope
         }
-        var nextRecommendations: [TMDBTitle] = []
-        var recommendationsLoaded = true
-        // Personalization comes only from this account's actual watch history, never synthetic seeds.
         let seeds = discovery.entries.filter { $0.status == "completed" || $0.last_watched_at != nil }
             .sorted { ($0.last_watched_at ?? "") > ($1.last_watched_at ?? "") }.prefix(2)
-        let known = Set(discovery.entries.compactMap(\.catalogID))
-        var seen = known
-        for entry in seeds {
-            guard let title = discovery.title(for: entry) else { continue }
-            do {
-                let results = try await TMDBClient.shared.recommendations(title)
-                nextRecommendations += results.filter { seen.insert($0.catalogID).inserted }
-            } catch { errorMessage = error.localizedDescription; recommendationsLoaded = false }
-        }
-        guard scope == discovery.scope else { return }
-        // Keep the recommendation row (and its detail navigation) mounted during tab refreshes.
-        if recommendationsLoaded {
-            recommendationResults = nextRecommendations
+            .compactMap { discovery.title(for: $0) }
+        let key = scope + seeds.map(\.catalogID).joined(separator: "|")
+        if key != personalKey || force {
+            personalKey = key
+            personalPager = CatalogTitlePager { page in
+                var results: [TMDBTitle] = []
+                var pages = 0
+                for title in seeds {
+                    let response = try await TMDBClient.shared.recommendationPage(title, page: page)
+                    results += response.results
+                    pages = max(pages, response.total_pages ?? (response.results.isEmpty ? page : 500))
+                }
+                return TMDBClient.TitlePage(results: results, total_pages: pages)
+            }
+            await personalPager?.loadNext()
+            guard scope == discovery.scope else { return }
+            recommendationResults = personalPager?.items ?? []
         }
         if !loaded || force {
             do {
                 for feed in TMDBClient.Feed.allCases {
-                    feeds[feed] = try await TMDBClient.shared.feed(feed)
+                    let pager = CatalogTitlePager { page in try await TMDBClient.shared.feedPage(feed, page: page) }
+                    pagers[feed] = pager
+                    await pager.loadNext()
+                    if let error = pager.error {
+                        errorMessage = error
+                    } else {
+                        feeds[feed] = pager.items
+                    }
                 }
                 loaded = true
             } catch { errorMessage = error.localizedDescription }
@@ -272,7 +308,7 @@ final class CatalogHomeData {
     }
 
     func searchMore(query: String? = nil) async {
-        guard query != nil || !isSearching else { return }
+        guard query != nil || (!isSearching && hasMoreSearchResults) else { return }
         let requested = query ?? searchQuery
         guard !requested.isEmpty, requested == searchQuery else { return }
         isSearching = true
@@ -282,13 +318,14 @@ final class CatalogHomeData {
             }
         }
         do {
-            let result = try await TMDBClient.shared.search(requested, page: searchPage + 1)
+            let response = try await TMDBClient.shared.searchPage(requested, page: searchPage + 1)
+            let result = response.results
             try Task.checkCancellation()
             guard requested == searchQuery else { return }
             var seen = Set(searchResults.map(\.catalogID))
             searchResults += result.filter { seen.insert($0.catalogID).inserted }
             searchPage += 1
-            hasMoreSearchResults = !result.isEmpty && searchPage < 500
+            hasMoreSearchResults = searchPage < min(response.total_pages ?? (result.isEmpty ? searchPage : 500), 500)
         } catch {
             if !Task.isCancelled, requested == searchQuery {
                 errorMessage = error.localizedDescription

@@ -119,6 +119,44 @@ final class CatalogVisualTests: XCTestCase {
         capture("16-Manual-Source-Entry-No-Credentials")
     }
 
+    func testHorizontalPaginationArrowsAndSwipe() {
+        app.terminate()
+        app.launchEnvironment["STRIMR_VISUAL_PAGINATION"] = "1"
+        app.launch()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45))
+        tab("Movies")
+        let row = app.otherElements["catalog.row.Trending Movies"]
+        XCTAssertTrue(row.waitForExistence(timeout: 25), app.debugDescription)
+        let next = row.buttons["Next posters"]
+        let previous = row.buttons["Previous posters"]
+        XCTAssertTrue(next.waitForExistence(timeout: 15))
+        XCTAssertFalse(previous.isEnabled)
+        next.tap()
+        let appended = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336").firstMatch
+        XCTAssertTrue(appended.waitForExistence(timeout: 25), app.debugDescription)
+        row.swipeLeft()
+        let terminal = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: next)
+        XCTAssertEqual(XCTWaiter.wait(for: [terminal], timeout: 10), .completed)
+        XCTAssertTrue(previous.isEnabled)
+        previous.tap()
+        let original = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+        XCTAssertTrue(original.waitForExistence(timeout: 10))
+        capture("17-Horizontal-Pagination-Arrows")
+        // Fresh process: reach the page boundary by touch instead of using the next arrow.
+        app.terminate(); app.launch()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45))
+        tab("Movies")
+        let swipeRow = app.otherElements["catalog.row.Trending Movies"]
+        XCTAssertTrue(swipeRow.waitForExistence(timeout: 25))
+        swipeRow.swipeLeft()
+        XCTAssertTrue(
+            swipeRow.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336")
+                .firstMatch.waitForExistence(timeout: 25),
+            app.debugDescription,
+        )
+        capture("18-Horizontal-Pagination-Swipe")
+    }
+
     func testMoviesAndMovieDetails() {
         tab("Movies")
         XCTAssertTrue(app.staticTexts["Trending Movies"].waitForExistence(timeout: 25))

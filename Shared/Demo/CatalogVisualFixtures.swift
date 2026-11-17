@@ -75,6 +75,13 @@
             if components.last == "recommendations", components.count > 1, let id = Int(components[1]) {
                 results.removeAll { $0.id == id }
             }
+            if ProcessInfo.processInfo.environment["STRIMR_VISUAL_PAGINATION"] == "1", path == "trending/movie/week" {
+                let page = Int(values["page"] ?? "1") ?? 1
+                let split = page == 1 ? Array(results.prefix(3)) : page == 2 ? Array(results.suffix(2)) : []
+                return try JSONSerialization.data(withJSONObject: [
+                    "results": JSONSerialization.jsonObject(with: encoder.encode(split)), "total_pages": 2,
+                ])
+            }
             if let page = Int(values["page"] ?? "1"), page > 1 {
                 results = []
             }

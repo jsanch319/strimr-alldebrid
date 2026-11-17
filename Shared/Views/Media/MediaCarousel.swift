@@ -18,6 +18,7 @@ struct MediaCarousel: View {
     let layout: Layout
     let items: [MediaDisplayItem]
     let showsLabels: Bool
+    var pagination: PosterRailPagination?
     let onViewAll: (() -> Void)?
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -26,8 +27,10 @@ struct MediaCarousel: View {
         items: [MediaDisplayItem],
         showsLabels: Bool,
         onViewAll: (() -> Void)? = nil,
+        pagination: PosterRailPagination? = nil,
         onSelectMedia: @escaping (MediaDisplayItem) -> Void,
     ) {
+        self.pagination = pagination
         self.layout = layout
         self.items = items
         self.showsLabels = showsLabels
@@ -56,6 +59,7 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
+        .posterRailNavigation(pagination)
         .onScrollPhaseChange {
             _, phase in if phase != .idle {
                 catalogBackdrop?.clearTapPriority()

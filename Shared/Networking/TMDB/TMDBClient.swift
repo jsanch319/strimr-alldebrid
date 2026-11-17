@@ -195,7 +195,12 @@ actor TMDBClient {
         }
     }
 
-    private nonisolated struct Page: Decodable { var results: [TMDBTitle] }
+    nonisolated struct TitlePage: Decodable, Sendable {
+        var results: [TMDBTitle]
+        var total_pages: Int? = nil
+    }
+
+    private typealias Page = TitlePage
     private nonisolated struct Episodes: Decodable { let episodes: [TMDBEpisode] }
     private var cache: [String: (Date, Data)] = [:]
     private var retryAt: Date?
@@ -213,16 +218,34 @@ actor TMDBClient {
         cache.removeAll(); retryAt = nil
     }
 
+    func feedPage(_ feed: Feed, page: Int) async throws -> TitlePage {
+        try await titlePage(path: feed.path, kind: feed.kind, page: page)
+    }
+
+    func recommendationPage(_ title: TMDBTitle, page: Int) async throws -> TitlePage {
+        try await titlePage(path: "\(title.kind.rawValue)/\(title.id)/recommendations", kind: title.kind, page: page)
+    }
+
+    private func titlePage(path: String, kind: TMDBTitle.Kind, page: Int) async throws -> TitlePage {
+        var response: TitlePage = try await get(path, query: [URLQueryItem(name: "page", value: String(page))])
+        response.results = response.results.map { var title = $0; title.media_type = kind.rawValue; return title }
+        return response
+    }
+
     func feed(_ feed: Feed, page: Int = 1) async throws -> [TMDBTitle] {
         try await titles(path: feed.path, kind: feed.kind, page: page)
     }
 
     func search(_ query: String, page: Int = 1) async throws -> [TMDBTitle] {
-        let result: Page = try await get(
-            "search/multi",
-            query: [URLQueryItem(name: "query", value: query), URLQueryItem(name: "page", value: String(page))],
-        )
-        return result.results.filter { $0.media_type == "movie" || $0.media_type == "tv" }
+        try await searchPage(query, page: page).results
+    }
+
+    func searchPage(_ query: String, page: Int) async throws -> TitlePage {
+        var result: TitlePage = try await get("search/multi", query: [
+            URLQueryItem(name: "query", value: query), URLQueryItem(name: "page", value: String(page)),
+        ])
+        result.results = result.results.filter { $0.media_type == "movie" || $0.media_type == "tv" }
+        return result
     }
 
     func details(_ title: TMDBTitle) async throws -> TMDBTitle {

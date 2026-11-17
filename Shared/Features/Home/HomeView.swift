@@ -74,6 +74,7 @@ struct HomeView: View {
                         row: row,
                         showsLabels: settingsManager.interface.showsCardLabels,
                         canOpenWithoutServer: viewModel.isServerFree,
+                        pagination: viewModel.catalog?.pagination(for: row.id),
                         onViewAll: { hub in
                             if viewModel
                                 .isServerFree
@@ -193,7 +194,11 @@ struct HomeView: View {
             case .tmdbSettings:
                 TMDBSettingsView { Task { await viewModel.reload() } }
             case let .catalogHub(hub):
-                NavigationStack { CatalogHubView(hub: hub, onSelect: { media in selectedSheet = nil; select(media) }) }
+                NavigationStack { CatalogHubView(
+                    hub: hub,
+                    data: viewModel.catalog,
+                    onSelect: { media in selectedSheet = nil; select(media) },
+                ) }
             case let .hub(hub):
                 NavigationStack {
                     ServerScopedView(server: hub.server) { services in
@@ -300,17 +305,22 @@ struct HomeView: View {
 private struct CatalogHubView: View {
     @Environment(\.dismiss) private var dismiss
     let hub: Hub
+    var data: CatalogHomeData?
     var showsCloseButton = true
     var usesBackdrop = true
     let onSelect: (MediaDisplayItem) -> Void
     var body: some View {
-        HubDetailView(viewModel: HubDetailViewModel(hub: hub), onSelectMedia: onSelect)
-            .catalogBackdrop(media: hub.items.first?.playableItem, enabled: usesBackdrop)
-            .toolbar {
-                if showsCloseButton {
-                    ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } }
-                }
+        CatalogResultsGrid(
+            items: data?.rows.first { $0.hub.id == hub.id }?.items ?? hub.items,
+            pagination: data?.pagination(for: hub.id),
+            onSelect: onSelect,
+        )
+        .catalogBackdrop(media: hub.items.first?.playableItem, enabled: usesBackdrop)
+        .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } }
             }
+        }
     }
 }
 
@@ -321,13 +331,16 @@ struct CatalogSearchView: View {
     @State private var query = ""
     var body: some View {
         VStack {
-            CatalogHubView(
-                hub: data.searchRow.hub,
-                showsCloseButton: showsCloseButton,
-                usesBackdrop: false,
+            CatalogResultsGrid(
+                items: data.searchRow.items,
+                pagination: PosterRailPagination(
+                    hasMore: data.hasMoreSearchResults,
+                    loading: data.isSearching,
+                    error: data.errorMessage,
+                    loadMore: { await data.searchMore() },
+                ),
                 onSelect: onSelect,
             )
-            .id(data.searchRow.hub)
             if data.isSearching {
                 ProgressView()
             }
@@ -346,5 +359,40 @@ struct CatalogSearchView: View {
         .navigationTitle("tabs.search")
         .searchable(text: $query, prompt: "Search movies and TV shows")
         .task(id: query) { await data.search(query) }
+    }
+}
+
+/// Uses the original grid/cards with stable identity instead of replacing a state-owned hub snapshot.
+private struct CatalogResultsGrid: View {
+    @Environment(SettingsManager.self) private var settings
+    let items: [MediaDisplayItem]
+    let pagination: PosterRailPagination?
+    let onSelect: (MediaDisplayItem) -> Void
+    var body: some View {
+        ScrollView {
+            PosterGrid(spacing: 12, rowSpacing: 20) { width in
+                ForEach(items, id: \.id) { item in
+                    PortraitMediaCard(media: item, width: width, showsLabels: settings.interface.showsCardLabels) {
+                        onSelect(item)
+                    }
+                    .onAppear {
+                        if items.suffix(4).contains(where: { $0.id == item.id }),
+                           let pagination, pagination.hasMore, !pagination.loading, pagination.error == nil
+                        {
+                            Task { await pagination.loadMore() }
+                        }
+                    }
+                }
+            }.padding(.horizontal, LayoutMetrics.pageMargin).padding(.vertical, 20)
+            if let pagination {
+                if pagination.loading {
+                    ProgressView().padding()
+                } else if pagination.hasMore {
+                    Button(pagination.error == nil ? "Load More" : "Retry loading titles") {
+                        Task { await pagination.loadMore() }
+                    }.padding()
+                }
+            }
+        }
     }
 }
