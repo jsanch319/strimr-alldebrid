@@ -230,6 +230,55 @@ actor TMDBClient {
         self.tokenProvider = tokenProvider
     }
 
+    nonisolated struct TitleLogo: Decodable, Hashable, Sendable {
+        let file_path: String
+        let iso_639_1: String?
+        let width: Int
+        let height: Int
+        let vote_average: Double?
+
+        static func preferred(_ logos: [Self], language: String) -> [Self] {
+            let preferred = language.components(separatedBy: "-")[0].lowercased()
+            func rank(_ logo: Self) -> Int {
+                if logo.iso_639_1 == preferred {
+                    return 0
+                }
+                if logo.iso_639_1 == "en" {
+                    return 1
+                }
+                return 2
+            }
+            return logos.filter {
+                $0.file_path.lowercased().hasSuffix(".png") && $0.width > 0 && $0.height > 0
+                    && ($0.iso_639_1 == nil || $0.iso_639_1 == preferred || $0.iso_639_1 == "en")
+            }.sorted {
+                if rank($0) != rank($1) {
+                    return rank($0) < rank($1)
+                }
+                if $0.width != $1.width {
+                    return $0.width > $1.width
+                }
+                return $0.file_path < $1.file_path
+            }
+        }
+    }
+
+    private nonisolated struct TitleImages: Decodable { let logos: [TitleLogo] }
+
+    /// TMDb supplies the actual branded PNG; it is never synthesized from the title text.
+    func titleLogos(
+        id: Int,
+        kind: TMDBTitle.Kind,
+        language: String = Locale.preferredLanguages.first ?? "en",
+    ) async throws -> [TitleLogo] {
+        guard id > 0 else { return [] }
+        let preferred = language.components(separatedBy: "-")[0].lowercased()
+        let response: TitleImages = try await get("\(kind.rawValue)/\(id)/images", query: [
+            URLQueryItem(name: "include_image_language", value: "\(preferred),en,null"),
+        ])
+        return TitleLogo.preferred(response.logos, language: preferred)
+    }
+
     func reset() {
         cache.removeAll(); retryAt = nil
     }

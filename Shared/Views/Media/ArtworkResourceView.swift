@@ -49,6 +49,18 @@ struct ArtworkResourceView: View {
         await platformImage(for: resource).map(Image.init(platformImage:))
     }
 
+    /// Keep original logo pixels and alpha; reject opaque artwork masquerading as a transparent logo.
+    static func transparentImage(for resource: ArtworkResource) async -> Image? {
+        guard let image = await platformImage(for: resource) else { return nil }
+        #if os(macOS)
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        #else
+            guard let cgImage = image.cgImage else { return nil }
+        #endif
+        guard await PlayerTitleLogoPolicy.hasTransparency(cgImage) else { return nil }
+        return Image(platformImage: image)
+    }
+
     /// System media artwork shares the same decoded cache as on-screen artwork.
     static func platformImage(for resource: ArtworkResource) async -> PlatformImage? {
         switch resource {

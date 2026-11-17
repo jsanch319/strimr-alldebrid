@@ -78,101 +78,106 @@ struct PlayerControlsView: View {
     }
 
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                PlayerControlsHeader(
-                    media: media,
-                    onDismiss: onDismiss,
-                    tracksMenu: tracksMenu,
-                    tracksMenuActions: tracksMenuActions,
-                    onWatchTogether: onWatchTogether,
-                    onAirPlayPresentationChanged: onAirPlayPresentationChanged,
-                    onShowSettings: onShowSettings,
-                    sleepTimer: sleepTimer,
-                    isSharePlay: isSharePlay,
-                    showsPictureInPicture: showsPictureInPicture,
-                    isPictureInPictureEnabled: isPictureInPictureEnabled,
-                    onStartPictureInPicture: onStartPictureInPicture,
-                )
-                .hiddenWhenLocked(isLocked)
-
-                Spacer(minLength: 0)
-
-                VStack(spacing: 18) {
-                    PlayerAuxiliaryControlsRow(
-                        isLocked: isLocked,
-                        onToggleLock: onToggleLock,
-                        skipMarkerTitle: skipMarkerTitle,
-                        onSkipMarker: onSkipMarker,
-                        badges: playbackBadges,
+        GeometryReader { geometry in
+            ZStack {
+                VStack(spacing: 0) {
+                    PlayerControlsHeader(
+                        media: isLive ? media : nil,
+                        onDismiss: onDismiss,
+                        tracksMenu: tracksMenu,
+                        tracksMenuActions: tracksMenuActions,
+                        onWatchTogether: onWatchTogether,
+                        onAirPlayPresentationChanged: onAirPlayPresentationChanged,
+                        onShowSettings: onShowSettings,
+                        sleepTimer: sleepTimer,
+                        isSharePlay: isSharePlay,
+                        showsPictureInPicture: showsPictureInPicture,
+                        isPictureInPictureEnabled: isPictureInPictureEnabled,
+                        onStartPictureInPicture: onStartPictureInPicture,
                     )
-                    .padding(.horizontal, 24)
-                    .opacity(isScrubbing ? 0 : 1)
-                    .allowsHitTesting(!isScrubbing)
+                    .hiddenWhenLocked(isLocked)
 
-                    Group {
-                        if isLive {
-                            LiveTVPlayerStatusRow(
-                                behindLiveSeconds: behindLiveSeconds,
-                                isAtLiveEdge: isAtLiveEdge,
-                                onGoLive: onGoLive,
-                                lastChannel: lastLiveChannel,
-                                onShowChannels: onShowLiveChannels,
-                                onLastChannel: onLastLiveChannel,
-                            )
-                            .controlSize(.small)
-                            .padding(.horizontal, 12)
-                        } else {
-                            ZStack(alignment: .bottom) {
-                                PlayerTimelineView(
-                                    position: $position,
-                                    duration: duration,
-                                    bufferedAhead: bufferedAhead,
-                                    playbackPosition: bufferBasePosition,
-                                    playbackRate: playbackRate,
-                                    showsEndsAtTime: showsEndsAtTime,
-                                    chapters: chapters,
-                                    showsChaptersOnTimeline: showsChaptersOnTimeline,
-                                    skipSegments: skipSegments,
-                                    scrubPreview: scrubPreview,
-                                    onEditingChanged: onScrubbingChanged,
+                    Spacer(minLength: 0)
+
+                    VStack(spacing: 18) {
+                        PlayerAuxiliaryControlsRow(
+                            media: isLive ? nil : media,
+                            compact: geometry.size.height < 450,
+                            stacksTitle: geometry.size.width < 500 && geometry.size.height >= 450,
+                            isLocked: isLocked,
+                            onToggleLock: onToggleLock,
+                            skipMarkerTitle: skipMarkerTitle,
+                            onSkipMarker: onSkipMarker,
+                            badges: playbackBadges,
+                        )
+                        .padding(.horizontal, 24)
+                        .opacity(isScrubbing ? 0 : 1)
+                        .allowsHitTesting(!isScrubbing)
+
+                        Group {
+                            if isLive {
+                                LiveTVPlayerStatusRow(
+                                    behindLiveSeconds: behindLiveSeconds,
+                                    isAtLiveEdge: isAtLiveEdge,
+                                    onGoLive: onGoLive,
+                                    lastChannel: lastLiveChannel,
+                                    onShowChannels: onShowLiveChannels,
+                                    onLastChannel: onLastLiveChannel,
                                 )
+                                .controlSize(.small)
+                                .padding(.horizontal, 12)
+                            } else {
+                                ZStack(alignment: .bottom) {
+                                    PlayerTimelineView(
+                                        position: $position,
+                                        duration: duration,
+                                        bufferedAhead: bufferedAhead,
+                                        playbackPosition: bufferBasePosition,
+                                        playbackRate: playbackRate,
+                                        showsEndsAtTime: showsEndsAtTime,
+                                        chapters: chapters,
+                                        showsChaptersOnTimeline: showsChaptersOnTimeline,
+                                        skipSegments: skipSegments,
+                                        scrubPreview: scrubPreview,
+                                        onEditingChanged: onScrubbingChanged,
+                                    )
 
-                                if hasInfoPanel {
-                                    PlayerInfoPanelDisclosureButton(action: onShowInfoPanel)
-                                        .opacity(isScrubbing ? 0 : 1)
-                                        .allowsHitTesting(!isScrubbing)
-                                        .offset(y: 18)
+                                    if hasInfoPanel {
+                                        PlayerInfoPanelDisclosureButton(action: onShowInfoPanel)
+                                            .opacity(isScrubbing ? 0 : 1)
+                                            .allowsHitTesting(!isScrubbing)
+                                            .offset(y: 18)
+                                    }
                                 }
                             }
                         }
+                        .hiddenWhenLocked(isLocked)
                     }
-                    .hiddenWhenLocked(isLocked)
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
 
-            PrimaryControls(
-                isPaused: isPaused,
-                onSeekBackward: onSeekBackward,
-                onPlayPause: onPlayPause,
-                onSeekForward: onSeekForward,
-                seekBackwardSeconds: seekBackwardSeconds,
-                seekForwardSeconds: seekForwardSeconds,
-                isLive: isLive,
-                canSwitchPreviousChannel: canSwitchPreviousChannel,
-                canSwitchNextChannel: canSwitchNextChannel,
-                onPreviousChannel: onPreviousChannel,
-                onNextChannel: onNextChannel,
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            .hiddenWhenLocked(isLocked)
-        }
-        .background {
-            PlayerControlsBackground()
+                PrimaryControls(
+                    isPaused: isPaused,
+                    onSeekBackward: onSeekBackward,
+                    onPlayPause: onPlayPause,
+                    onSeekForward: onSeekForward,
+                    seekBackwardSeconds: seekBackwardSeconds,
+                    seekForwardSeconds: seekForwardSeconds,
+                    isLive: isLive,
+                    canSwitchPreviousChannel: canSwitchPreviousChannel,
+                    canSwitchNextChannel: canSwitchNextChannel,
+                    onPreviousChannel: onPreviousChannel,
+                    onNextChannel: onNextChannel,
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .hiddenWhenLocked(isLocked)
+            }
+            .background {
+                PlayerControlsBackground()
+                    .hiddenWhenLocked(isLocked)
+            }
         }
     }
 }
@@ -193,6 +198,9 @@ private struct PlayerControlBadge: Identifiable {
 }
 
 private struct PlayerAuxiliaryControlsRow: View {
+    var media: MediaItem?
+    var compact: Bool
+    var stacksTitle: Bool
     var isLocked: Bool
     var onToggleLock: () -> Void
     var skipMarkerTitle: String?
@@ -200,25 +208,38 @@ private struct PlayerAuxiliaryControlsRow: View {
     var badges: [PlayerControlBadge]
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 16) {
-            ControlsLockButton(isLocked: isLocked, action: onToggleLock)
-
-            Spacer(minLength: 12)
-
-            VStack(alignment: .trailing, spacing: 8) {
-                if hasSkipMarker {
-                    if !badges.isEmpty {
+        VStack(alignment: .leading, spacing: 8) {
+            if let media, stacksTitle {
+                PlayerTitleLogoView(media: media, compact: compact)
+                    .hiddenWhenLocked(isLocked)
+            }
+            HStack(alignment: .bottom, spacing: 16) {
+                if let media, !stacksTitle {
+                    PlayerTitleLogoView(media: media, compact: compact)
+                        .frame(maxWidth: compact ? 210 : 280, alignment: .leading)
+                        .hiddenWhenLocked(isLocked)
+                } else {
+                    ControlsLockButton(isLocked: isLocked, action: onToggleLock)
+                }
+                Spacer(minLength: 12)
+                if media != nil, !stacksTitle {
+                    ControlsLockButton(isLocked: isLocked, action: onToggleLock)
+                }
+                VStack(alignment: .trailing, spacing: 8) {
+                    if hasSkipMarker {
+                        if !badges.isEmpty {
+                            badgesRow
+                        }
+                        if let skipMarkerTitle, let onSkipMarker {
+                            SkipMarkerButton(title: skipMarkerTitle, action: onSkipMarker)
+                        }
+                    } else if !badges.isEmpty {
                         badgesRow
                     }
-                    if let skipMarkerTitle, let onSkipMarker {
-                        SkipMarkerButton(title: skipMarkerTitle, action: onSkipMarker)
-                    }
-                } else if !badges.isEmpty {
-                    badgesRow
                 }
+                .fixedSize(horizontal: false, vertical: true)
+                .hiddenWhenLocked(isLocked)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .hiddenWhenLocked(isLocked)
         }
     }
 
