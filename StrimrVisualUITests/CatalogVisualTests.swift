@@ -85,9 +85,11 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(trending.frame.minY, watching.frame.maxY)
         // Half the actual portrait artwork (2:3), rather than its caption, must clear the native tab bar.
         XCTAssertLessThan(poster.frame.minY + poster.frame.width * 0.75, app.tabBars.firstMatch.frame.minY)
-        XCTAssertTrue(watching.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "left")).firstMatch
+        XCTAssertTrue(watching.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "left"))
+            .firstMatch
             .exists)
-        XCTAssertFalse(watching.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "%")).firstMatch.exists)
+        XCTAssertFalse(watching.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "%"))
+            .firstMatch.exists)
         capture("22-Compact-Continue-Watching-And-Trending")
         scrollTo(card("movie:693134"))
         XCTAssertTrue(card("tv:95396:s1:e2").exists, app.debugDescription)
