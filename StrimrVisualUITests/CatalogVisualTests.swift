@@ -130,7 +130,7 @@ final class CatalogVisualTests: XCTestCase {
         let next = row.buttons["poster.rail.next"]
         let previous = row.buttons["poster.rail.previous"]
         XCTAssertTrue(next.waitForExistence(timeout: 15))
-        XCTAssertFalse(previous.isEnabled)
+        XCTAssertFalse(previous.isEnabled, row.debugDescription)
         XCTAssertTrue(next.isHittable, row.debugDescription)
         capture("17A-Horizontal-Pagination-Start")
         next.tap()
@@ -138,7 +138,7 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertTrue(appended.waitForExistence(timeout: 25), app.debugDescription)
         row.swipeLeft()
         let terminal = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == false"), object: next)
-        XCTAssertEqual(XCTWaiter.wait(for: [terminal], timeout: 10), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [terminal], timeout: 10), .completed, row.debugDescription)
         XCTAssertTrue(previous.isEnabled)
         previous.tap()
         let original = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch

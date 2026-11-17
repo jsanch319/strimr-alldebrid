@@ -29,7 +29,7 @@ extension View {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         let pagination: PosterRailPagination?
         let ids: [String]
-        @State private var position = ScrollPosition(x: 0)
+        @State private var position = ScrollPosition(edge: .leading)
         @State private var geometry: RailGeometry?
         @State private var interacted = false
         @State private var visibleIDs: Set<String> = []
@@ -58,7 +58,7 @@ extension View {
                         arrow(
                             "chevron.left",
                             label: "Previous posters",
-                            enabled: (geometry?.offset ?? 0) > 2 && !firstVisible,
+                            enabled: interacted && (geometry?.offset ?? 0) > 2 && !firstVisible,
                             forward: false,
                         )
                         Spacer(minLength: 8)
@@ -80,6 +80,15 @@ extension View {
                         .accessibilityHint(error)
                     }
                 }
+        }
+
+        private var diagnosticValue: String {
+            #if DEBUG && targetEnvironment(simulator)
+                if CatalogVisualFixtures.isEnabled {
+                    return "offset=\(geometry?.offset ?? -1), maximum=\(geometry?.maximum ?? -1), width=\(geometry?.width ?? -1), more=\(pagination?.hasMore ?? false), first=\(ids.first ?? "none"), last=\(ids.last ?? "none"), visible=\(visibleIDs.sorted().joined(separator: ","))"
+                }
+            #endif
+            return ""
         }
 
         private var firstVisible: Bool {
@@ -107,6 +116,7 @@ extension View {
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.3)
             .accessibilityLabel(label)
+            .accessibilityValue(diagnosticValue)
         }
 
         private func move(forward: Bool) {
