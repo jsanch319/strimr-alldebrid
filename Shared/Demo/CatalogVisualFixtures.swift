@@ -95,13 +95,18 @@
         @MainActor
         static func seedProgress(_ store: CatalogProgressStore, scope: String) {
             guard store.records(scope: scope).isEmpty else { return }
-            for (index, title) in titles.prefix(2).enumerated() {
+            let paletteTesting = ProcessInfo.processInfo.environment["STRIMR_VISUAL_PROGRESS_COLORS"] == "1"
+            let selected = paletteTesting
+                ? [1_061_474, 27205, 693_134].compactMap { id in titles.first { $0.id == id } }
+                : Array(titles.prefix(2))
+            for (index, title) in selected.enumerated() {
                 let episode = title.kind == .tv ? payload.episodes[1] : nil
+                let duration = Double((episode?.runtime ?? title.runtimeMinutes ?? 55) * 60)
                 store.save(
                     title: title,
                     episode: episode,
-                    position: index == 0 ? 7200.5 : 1200.25,
-                    duration: Double((episode?.runtime ?? title.runtimeMinutes ?? 55) * 60),
+                    position: paletteTesting ? duration * 0.45 : index == 0 ? 7200.5 : 1200.25,
+                    duration: duration,
                     finished: false,
                     scope: scope,
                 )

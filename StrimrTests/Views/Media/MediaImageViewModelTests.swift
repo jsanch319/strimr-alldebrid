@@ -21,6 +21,16 @@ struct MediaImageViewModelTests {
         MediaImageViewModel(services: .fake(), artworkKind: kind, media: .playable(item))
     }
 
+    @Test func `replacing artwork changes image identity while resume checkpoints retain it`() {
+        let original = MediaItem.make(id: "movie", server: server, viewOffset: 100, artPath: "first")
+        let checkpoint = MediaItem.make(id: "movie", server: server, viewOffset: 150, artPath: "first")
+        let replaced = MediaItem.make(id: "movie", server: server, viewOffset: 150, artPath: "second")
+        #expect(viewModel(original, kind: .cardArt).artworkIdentity == viewModel(checkpoint, kind: .cardArt)
+            .artworkIdentity)
+        #expect(viewModel(original, kind: .cardArt).artworkIdentity != viewModel(replaced, kind: .cardArt)
+            .artworkIdentity)
+    }
+
     @Test func `spoiler protection hides the episode image of a landscape card`() {
         let model = viewModel(episode(), kind: .cardArt)
 

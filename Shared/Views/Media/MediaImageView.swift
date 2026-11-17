@@ -115,7 +115,7 @@ struct MediaImageView: View {
         // The content keeps its first model in `@State`. Lists keyed by position reuse a cell for another item
         // when they reorder, which would leave the previous item's artwork next to the new title.
         MediaImageContent(viewModel: viewModel)
-            .id(viewModel.media.id)
+            .id(viewModel.artworkIdentity)
     }
 }
 
@@ -155,6 +155,7 @@ private struct MediaImageContent: View {
                 placeholder
             }
         }
+        .preference(key: ProgressArtworkPreference.self, value: viewModel.resource)
         .overlay(alignment: .topLeading) {
             if isSpoilerProtected {
                 SpoilerProtectionIndicator()

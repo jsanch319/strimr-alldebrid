@@ -121,6 +121,31 @@ final class CatalogVisualTests: XCTestCase {
         capture("04-Home-Scrolled")
     }
 
+    func testArtworkMatchedProgressOnLightDarkAndColorfulArtwork() {
+        app.terminate()
+        app.launchEnvironment["STRIMR_VISUAL_PROGRESS_COLORS"] = "1"
+        app.launch()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 45))
+        let progressRow = app.otherElements["home.row.catalog:continue"]
+        XCTAssertTrue(progressRow.waitForExistence(timeout: 25), app.debugDescription)
+        for (index, fixture) in [
+            ("movie:693134", "23-Gradient-Progress-Light-Dune"),
+            ("movie:27205", "24-Gradient-Progress-Dark-Inception"),
+            ("movie:1061474", "25-Gradient-Progress-Colorful-Superman"),
+        ].enumerated() {
+            if index > 0 {
+                let start = progressRow.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
+                let end = progressRow.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.5))
+                start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+            }
+            let artworkCard = progressRow.descendants(matching: .any)
+                .matching(identifier: "catalog.card." + fixture.0).firstMatch
+            XCTAssertTrue(artworkCard.waitForExistence(timeout: 25), app.debugDescription)
+            XCTAssertTrue(artworkCard.isHittable, app.debugDescription)
+            capture(fixture.1)
+        }
+    }
+
     func testAutoPlayUsesLoadingEntryAndKeepsExplicitManualSelector() {
         tab("Movies")
         let dune = card("movie:693134")

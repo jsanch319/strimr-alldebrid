@@ -25,6 +25,20 @@ struct ArtworkResourceView: View {
         Color.surfaceSubtle
     }
 
+    /// Shares the exact decoded image/cache with rendering; sampling a tiny bitmap happens off the main actor.
+    static func progressColors(for resource: ArtworkResource) async -> [ProgressArtworkColor] {
+        let image: PlatformImage? = switch resource {
+        case let .url(url): try? await RemoteArtworkImage.image(for: url)
+        case let .data(data): await DataArtworkImage.image(for: data)
+        }
+        #if os(macOS)
+            guard let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [] }
+        #else
+            guard let cgImage = image?.cgImage else { return [] }
+        #endif
+        return await ArtworkProgressSampler.colors(from: cgImage)
+    }
+
     /// Warms the image caches so a view created afterwards renders the artwork on its first frame.
     static func preload(_ resource: ArtworkResource) async {
         _ = await image(for: resource)
@@ -164,17 +178,28 @@ private struct RemoteArtworkImage: View {
         }
     }
 
+    private static var inFlight: [URL: Task<PlatformImage, Error>] = [:]
+
     static func image(for url: URL) async throws -> PlatformImage {
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let status = (response as? HTTPURLResponse)?.statusCode, !(200 ..< 300).contains(status) {
-            throw URLError(.badServerResponse)
+        if let task = inFlight[url] {
+            return try await task.value
         }
-        guard let (image, cost) = await ArtworkDecoder.decode(data) else { throw URLError(.cannotDecodeContentData) }
-        cache.setObject(image, forKey: url as NSURL, cost: cost)
-        return image
+        let task = Task {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let status = (response as? HTTPURLResponse)?.statusCode, !(200 ..< 300).contains(status) {
+                throw URLError(.badServerResponse)
+            }
+            guard let (image, cost) = await ArtworkDecoder.decode(data)
+            else { throw URLError(.cannotDecodeContentData) }
+            cache.setObject(image, forKey: url as NSURL, cost: cost)
+            return image
+        }
+        inFlight[url] = task
+        defer { inFlight[url] = nil }
+        return try await task.value
     }
 
     private func platformImage(_ image: PlatformImage) -> Image {
@@ -220,6 +245,7 @@ struct ArtworkPathView: View {
 
     var body: some View {
         ArtworkResourceView(resource: resource, contentMode: contentMode)
+            .preference(key: ProgressArtworkPreference.self, value: resource)
             .task(id: path) {
                 guard let path else {
                     resource = nil

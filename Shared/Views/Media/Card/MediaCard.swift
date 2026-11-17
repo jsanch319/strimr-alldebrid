@@ -97,14 +97,7 @@ struct MediaCard: View {
             WatchStatusBadge(media: media)
         }
         .downloadStatusOverlay(media)
-        .overlay(alignment: .bottomLeading) {
-            if let progress {
-                CardProgressBar(progress: progress)
-                    .accessibilityHidden(compactResume)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-            }
-        }
+        .artworkProgress(progress, hidePercentage: compactResume)
     }
 
     private var compactRemainingTime: String? {

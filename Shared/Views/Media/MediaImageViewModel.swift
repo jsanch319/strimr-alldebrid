@@ -32,6 +32,18 @@ final class MediaImageViewModel {
         self.media = media
     }
 
+    /// Progress updates retain the decoded image; replacing artwork for the same title rebuilds its image state.
+    var artworkIdentity: [String] {
+        [
+            media.id,
+            artworkKind.rawValue,
+            media.preferredArtPath ?? "",
+            media.preferredThumbPath ?? "",
+            media.playableItem?.seriesArtworkPath ?? "",
+            media.playableItem?.seasonPosterPath ?? "",
+        ]
+    }
+
     /// Whether the series artwork preferences replace the default artwork of an episode or season card.
     func followsSeriesArtworkPreference(
         landscape: LandscapeEpisodeArtwork,
