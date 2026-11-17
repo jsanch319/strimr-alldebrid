@@ -82,6 +82,7 @@ struct LibraryRecommendedView: View {
                 layout: .landscape,
                 items: hub.items,
                 showsLabels: settingsManager.interface.showsCardLabels,
+                hub: hub,
                 onSelectMedia: onSelectMedia,
             )
         } else {
@@ -89,6 +90,7 @@ struct LibraryRecommendedView: View {
                 layout: .portrait,
                 items: hub.items,
                 showsLabels: settingsManager.interface.showsCardLabels,
+                hub: hub,
                 onSelectMedia: onSelectMedia,
             )
         }

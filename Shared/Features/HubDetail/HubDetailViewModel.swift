@@ -13,12 +13,23 @@ final class HubDetailViewModel {
     @ObservationIgnored private let service: (any MediaHomeService)?
     @ObservationIgnored private var hasLoaded = false
     @ObservationIgnored private var reachedEnd = false
+    @ObservationIgnored private var nextOffset = 0
+    var canLoadMore: Bool {
+        !reachedEnd && service != nil
+    }
+
     @ObservationIgnored private var totalItemCount: Int?
     @ObservationIgnored private let pageSize = 50
 
-    init(hub: Hub, services: MediaServices) {
+    init(hub: Hub, services: MediaServices, seedsLoadedItems: Bool = false) {
         self.hub = hub
         service = services.home
+        if seedsLoadedItems {
+            items = hub.items
+            nextOffset = hub.items.count
+            hasLoaded = true
+            reachedEnd = !hub.hasMoreItems
+        }
     }
 
     /// Already loaded catalog rows use the same hub UI without impersonating a media server.
@@ -41,6 +52,7 @@ final class HubDetailViewModel {
         items = []
         reachedEnd = false
         totalItemCount = nil
+        nextOffset = 0
         await loadPage(start: 0, isInitialLoad: true)
     }
 
@@ -51,7 +63,7 @@ final class HubDetailViewModel {
 
     func loadMore() async {
         guard !items.isEmpty else { return }
-        await loadPage(start: items.count, isInitialLoad: false)
+        await loadPage(start: nextOffset, isInitialLoad: false)
     }
 
     private func loadPage(start: Int, isInitialLoad: Bool) async {
@@ -74,18 +86,21 @@ final class HubDetailViewModel {
         do {
             let response = try await service.items(in: hub, startIndex: start, limit: pageSize)
             let newItems = response.items
+            nextOffset = start + newItems.count
             totalItemCount = response.totalCount ?? totalItemCount
 
             if isInitialLoad {
-                items = newItems
+                var seen = Set<String>()
+                items = newItems.filter { seen.insert($0.id).inserted }
             } else {
-                items.append(contentsOf: newItems)
+                var seen = Set(items.map(\.id))
+                items += newItems.filter { seen.insert($0.id).inserted }
             }
 
             if newItems.isEmpty {
                 reachedEnd = true
             } else if let totalItemCount {
-                reachedEnd = items.count >= totalItemCount
+                reachedEnd = nextOffset >= totalItemCount
             }
         } catch {
             guard !Task.isCancelled, !error.isCancellation else { return }

@@ -22,6 +22,7 @@ struct HomeRowSectionView: View {
                 showsLabels: showsLabels,
                 onViewAll: carouselViewAllAction,
                 pagination: pagination,
+                hub: row.hub,
                 onSelectMedia: select,
             )
             .environment(\.mediaCardOffersDetails, playsOnSelect)

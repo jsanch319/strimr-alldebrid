@@ -15,6 +15,28 @@ struct MediaCarousel: View {
         @State private var isViewAllFocused = false
     #endif
 
+    @Environment(MediaServices.self) private var scopedServices: MediaServices?
+    @Environment(ServerRegistry.self) private var registry: ServerRegistry?
+    @State private var nativePager: HubDetailViewModel?
+    var hub: Hub?
+    private struct PagingContext: Hashable { let hub: Hub?; let generation: Int }
+    private var displayedItems: [MediaDisplayItem] {
+        nativePager?.items ?? items
+    }
+
+    private var rowPagination: PosterRailPagination? {
+        if let pagination {
+            return pagination
+        }
+        guard let nativePager else { return nil }
+        return PosterRailPagination(
+            hasMore: nativePager.canLoadMore,
+            loading: nativePager.isLoadingMore,
+            error: nativePager.errorMessage,
+            loadMore: { await nativePager.loadMore() },
+        )
+    }
+
     let layout: Layout
     let items: [MediaDisplayItem]
     let showsLabels: Bool
@@ -28,8 +50,10 @@ struct MediaCarousel: View {
         showsLabels: Bool,
         onViewAll: (() -> Void)? = nil,
         pagination: PosterRailPagination? = nil,
+        hub: Hub? = nil,
         onSelectMedia: @escaping (MediaDisplayItem) -> Void,
     ) {
+        self.hub = hub
         self.pagination = pagination
         self.layout = layout
         self.items = items
@@ -41,7 +65,7 @@ struct MediaCarousel: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: LayoutMetrics.railSpacing(for: layout)) {
-                ForEach(items, id: \.id) { item in
+                ForEach(displayedItems, id: \.id) { item in
                     card(for: item)
                     #if os(tvOS)
                         .focused($focusedItemID, equals: item.id)
@@ -59,30 +83,41 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
-        .posterRailNavigation(pagination)
-        .onScrollPhaseChange {
-            _, phase in if phase != .idle {
-                catalogBackdrop?.clearTapPriority()
+        .posterRailNavigation(rowPagination)
+        #if os(iOS)
+            .task(id: PagingContext(hub: hub, generation: registry?.generation ?? 0)) {
+                nativePager = nil
+                if let hub, hub.canOpenDetail, hub.hasMoreItems,
+                   let services = hub.server.flatMap({ registry?.services(for: $0) }) ?? scopedServices,
+                   hub.server == nil || services.identity == hub.server
+                {
+                    nativePager = HubDetailViewModel(hub: hub, services: services, seedsLoadedItems: true)
+                }
             }
-        }
+        #endif
+            .onScrollPhaseChange {
+                _, phase in if phase != .idle {
+                    catalogBackdrop?.clearTapPriority()
+                }
+            }
         #if os(tvOS)
-        .scrollClipDisabled()
-        .focusSection()
-        .onChange(of: focusedItemID) { oldID, newID in
-            guard let newID else { return }
-            // `defaultFocus` is ignored when entering a focus section with the remote, so redirect by hand.
-            if oldID == nil, let target = entryItemID, target != newID {
-                focusedItemID = target
-                return
+            .scrollClipDisabled()
+            .focusSection()
+            .onChange(of: focusedItemID) { oldID, newID in
+                guard let newID else { return }
+                // `defaultFocus` is ignored when entering a focus section with the remote, so redirect by hand.
+                if oldID == nil, let target = entryItemID, target != newID {
+                    focusedItemID = target
+                    return
+                }
+                lastFocusedItemID = newID
             }
-            lastFocusedItemID = newID
-        }
-        .onChange(of: isViewAllFocused) { _, isFocused in
-            // Moving back from "View all" lands on the last card, which must not be redirected.
-            if isFocused {
-                lastFocusedItemID = items.last?.id
+            .onChange(of: isViewAllFocused) { _, isFocused in
+                // Moving back from "View all" lands on the last card, which must not be redirected.
+                if isFocused {
+                    lastFocusedItemID = items.last?.id
+                }
             }
-        }
         #endif
     }
 

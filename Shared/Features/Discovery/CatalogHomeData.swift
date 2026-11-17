@@ -30,6 +30,7 @@ final class CatalogHomeData {
     private(set) var hasMoreSearchResults = false
     private var searchPage = 0
     private var searchQuery = ""
+    private var searchGeneration = UUID()
     private let discovery: DiscoveryStore
     private let progress: CatalogProgressStore
     init(
@@ -291,6 +292,8 @@ final class CatalogHomeData {
 
     func search(_ query: String) async {
         errorMessage = nil
+        searchGeneration = UUID()
+        let generation = searchGeneration
         searchQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         searchResults = []; searchPage = 0; hasMoreSearchResults = false
         guard !searchQuery.isEmpty else { isSearching = false; return }
@@ -299,21 +302,22 @@ final class CatalogHomeData {
             isSearching = true
             try await Task.sleep(for: .milliseconds(350))
             try Task.checkCancellation()
-            await searchMore(query: requested)
+            await searchMore(query: requested, generation: generation)
         } catch {
-            if requested == searchQuery {
+            if requested == searchQuery, generation == searchGeneration {
                 isSearching = false
             }
         }
     }
 
-    func searchMore(query: String? = nil) async {
-        guard query != nil || (!isSearching && hasMoreSearchResults) else { return }
+    func searchMore(query: String? = nil, generation: UUID? = nil) async {
+        let generation = generation ?? searchGeneration
+        guard generation == searchGeneration, query != nil || (!isSearching && hasMoreSearchResults) else { return }
         let requested = query ?? searchQuery
         guard !requested.isEmpty, requested == searchQuery else { return }
         isSearching = true
         defer {
-            if requested == searchQuery {
+            if requested == searchQuery, generation == searchGeneration {
                 isSearching = false
             }
         }
@@ -321,13 +325,13 @@ final class CatalogHomeData {
             let response = try await TMDBClient.shared.searchPage(requested, page: searchPage + 1)
             let result = response.results
             try Task.checkCancellation()
-            guard requested == searchQuery else { return }
+            guard requested == searchQuery, generation == searchGeneration else { return }
             var seen = Set(searchResults.map(\.catalogID))
             searchResults += result.filter { seen.insert($0.catalogID).inserted }
             searchPage += 1
             hasMoreSearchResults = searchPage < min(response.total_pages ?? (result.isEmpty ? searchPage : 500), 500)
         } catch {
-            if !Task.isCancelled, requested == searchQuery {
+            if !Task.isCancelled, requested == searchQuery, generation == searchGeneration {
                 errorMessage = error.localizedDescription
             }
         }

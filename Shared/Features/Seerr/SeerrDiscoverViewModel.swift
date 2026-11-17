@@ -16,6 +16,87 @@ final class SeerrDiscoverViewModel {
     var isLoading = false
     var errorMessage: String?
     var pendingRequestsCount = 0
+    private var rowPages: [String: Int] = [:]
+    private var rowTotals: [String: Int] = [:]
+    private var pagingRows: Set<String> = []
+    private var pagingErrors: [String: String] = [:]
+    private var pagingGeneration = UUID()
+
+    func pagination(for key: String) -> PosterRailPagination {
+        PosterRailPagination(
+            hasMore: (rowPages[key] ?? 0) < (rowTotals[key] ?? 0),
+            loading: pagingRows.contains(key),
+            error: pagingErrors[key],
+            loadMore: { await self.loadNext(key) },
+        )
+    }
+
+    private func rowItems(_ key: String) -> [SeerrMedia] {
+        switch key {
+        case "trending": trending
+        case "popularMovies": popularMovies
+        case "popularTV": popularTV
+        case "upcomingMovies": upcomingMovies
+        default: upcomingTV
+        }
+    }
+
+    private func setRow(_ key: String, items: [SeerrMedia]) {
+        switch key {
+        case "trending": trending = items
+        case "popularMovies": popularMovies = items
+        case "popularTV": popularTV = items
+        case "upcomingMovies": upcomingMovies = items
+        default: upcomingTV = items
+        }
+    }
+
+    private func firstPage(_ response: SeerrPaginatedResponse<SeerrMedia>, key: String, preserving: Bool) {
+        guard !preserving || (rowPages[key] ?? 0) <= 1 else { return }
+        var seen = Set<String>()
+        setRow(key, items: response.results.filter { seen.insert($0.posterPagingID).inserted })
+        rowPages[key] = response.page
+        rowTotals[key] = min(500, response.totalPages)
+    }
+
+    private func loadNext(_ key: String) async {
+        guard let baseURL, isLoggedIn, !pagingRows.contains(key),
+              let page = rowPages[key], page < (rowTotals[key] ?? 0) else { return }
+        let generation = pagingGeneration
+        pagingRows.insert(key); pagingErrors[key] = nil
+        defer {
+            if generation == pagingGeneration {
+                pagingRows.remove(key)
+            }
+        }
+        do {
+            let repository = SeerrDiscoverRepository(baseURL: baseURL)
+            let response: SeerrPaginatedResponse<SeerrMedia>
+            let date = Self.upcomingDateFormatter.string(from: Date())
+            switch key {
+            case "trending": response = try await repository.getTrending(page: page + 1)
+            case "popularMovies": response = try await repository.discoverMovies(page: page + 1)
+            case "popularTV": response = try await repository.discoverTV(page: page + 1)
+            case "upcomingMovies": response = try await repository.discoverMovies(
+                    page: page + 1,
+                    primaryReleaseDateGte: date,
+                )
+            default: response = try await repository.discoverTV(page: page + 1, firstAirDateGte: date)
+            }
+            try Task.checkCancellation()
+            guard generation == pagingGeneration, baseURL == self.baseURL else { return }
+            var items = rowItems(key)
+            var seen = Set(items.map(\.posterPagingID))
+            items += response.results.filter { seen.insert($0.posterPagingID).inserted }
+            setRow(key, items: items)
+            rowPages[key] = response.page
+            rowTotals[key] = response.results.isEmpty ? response.page : min(500, response.totalPages)
+        } catch {
+            if !Task.isCancelled, generation == pagingGeneration {
+                pagingErrors[key] = error.localizedDescription
+            }
+        }
+    }
 
     init(store: SeerrStore) {
         self.store = store
@@ -43,6 +124,7 @@ final class SeerrDiscoverViewModel {
     }
 
     func reload() async {
+        pagingGeneration = UUID(); rowPages = [:]; rowTotals = [:]; pagingRows = []; pagingErrors = [:]
         trending = []
         popularMovies = []
         popularTV = []
@@ -78,11 +160,11 @@ final class SeerrDiscoverViewModel {
                 firstAirDateGte: upcomingDate,
             )
 
-            trending = trendingPage.results
-            popularMovies = moviesPage.results
-            popularTV = tvPage.results
-            upcomingMovies = upcomingMoviesPage.results
-            upcomingTV = upcomingTVPage.results
+            firstPage(trendingPage, key: "trending", preserving: preservingExistingContent)
+            firstPage(moviesPage, key: "popularMovies", preserving: preservingExistingContent)
+            firstPage(tvPage, key: "popularTV", preserving: preservingExistingContent)
+            firstPage(upcomingMoviesPage, key: "upcomingMovies", preserving: preservingExistingContent)
+            firstPage(upcomingTVPage, key: "upcomingTV", preserving: preservingExistingContent)
         } catch {
             handleLoadError(preservingExistingContent: preservingExistingContent)
         }
@@ -129,5 +211,11 @@ final class SeerrDiscoverViewModel {
         } else {
             errorMessage = String(localized: .init("common.errors.tryAgainLater"))
         }
+    }
+}
+
+extension SeerrMedia {
+    var posterPagingID: String {
+        "\(mediaType?.rawValue ?? "unknown"):\(id)"
     }
 }
