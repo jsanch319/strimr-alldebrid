@@ -57,6 +57,7 @@ final class NowPlayingController {
     }
 
     func begin(_ item: NowPlayingItem?, isLive: Bool) {
+        guard let item else { stop(); return }
         identityGeneration = UUID()
         artworkTask?.cancel()
         attachCommands(to: nil)
@@ -64,8 +65,9 @@ final class NowPlayingController {
         self.isLive = isLive
         artwork = nil
         #if !os(macOS)
-            if let item {
-                engine.remoteSkipInterval = item.skipForwardSeconds
+            engine.remoteSkipInterval = item.skipForwardSeconds
+            for session in [engine.videoNowPlayingSession, engine.audioNowPlayingSession].compactMap(\.self) {
+                session.automaticallyPublishesNowPlayingInfo = true
             }
         #endif
         publishIdentity()
@@ -105,6 +107,8 @@ final class NowPlayingController {
             engine.setAudioNowPlayingInfo([:])
             // A paused background session can hold a manually published card after its item was released.
             for session in [engine.videoNowPlayingSession, engine.audioNowPlayingSession].compactMap(\.self) {
+                // Prevent a finished AVPlayerItem from republishing embedded/stale metadata after clearing.
+                session.automaticallyPublishesNowPlayingInfo = false
                 session.nowPlayingInfoCenter.nowPlayingInfo = nil
             }
         #endif
