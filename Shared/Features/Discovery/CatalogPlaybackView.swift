@@ -14,7 +14,7 @@ struct CatalogSourcesView: View {
     @State private var error: String?
     @State private var request: Request?
     @State private var resumes = true
-    @State private var automatic = false
+    @State private var automatic = true
     @State private var pendingFailure: String?
     @State private var restartApplied = false
     @State private var initialized = false
@@ -22,6 +22,7 @@ struct CatalogSourcesView: View {
     init(title: TMDBTitle, episode: TMDBEpisode?, startsFromBeginning: Bool = false, forceManual: Bool = false) {
         self.title = title; self.episode = episode; self.forceManual = forceManual
         _resumes = State(initialValue: !startsFromBeginning)
+        _automatic = State(initialValue: !forceManual)
     }
 
     private struct Request: Identifiable {
@@ -40,7 +41,7 @@ struct CatalogSourcesView: View {
             Group {
                 if automatic {
                     VStack(spacing: 20) {
-                        if loading || request != nil {
+                        if loading || request != nil || !initialized {
                             ProgressView("Opening playback…")
                         }
                         if let error {

@@ -99,6 +99,26 @@ final class CatalogVisualTests: XCTestCase {
         capture("04-Home-Scrolled")
     }
 
+    func testAutoPlayUsesLoadingEntryAndKeepsExplicitManualSelector() {
+        tab("Movies")
+        let dune = card("movie:693134")
+        XCTAssertTrue(dune.waitForExistence(timeout: 25))
+        dune.tap()
+        let play = app.buttons["catalog.detail.play"]
+        XCTAssertTrue(play.waitForExistence(timeout: 15))
+        play.tap()
+        // No live credentials: verify the playback entry/error path, never a fabricated playable source.
+        XCTAssertTrue(app.navigationBars["Play"].waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertFalse(app.navigationBars["Select Source"].exists)
+        capture("15-Auto-Play-Entry-No-Credentials")
+        app.buttons["Close"].tap()
+        let manual = app.buttons["Select Source"]
+        XCTAssertTrue(manual.waitForExistence(timeout: 15))
+        manual.tap()
+        XCTAssertTrue(app.navigationBars["Select Source"].waitForExistence(timeout: 20))
+        capture("16-Manual-Source-Entry-No-Credentials")
+    }
+
     func testMoviesAndMovieDetails() {
         tab("Movies")
         XCTAssertTrue(app.staticTexts["Trending Movies"].waitForExistence(timeout: 25))
