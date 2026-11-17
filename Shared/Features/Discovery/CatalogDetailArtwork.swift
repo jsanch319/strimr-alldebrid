@@ -47,11 +47,6 @@ struct CatalogDetailArtworkSource: Hashable {
                                 .frame(width: proxy.size.width, height: proxy.size.height)
                                 .clipped().blur(radius: 32).opacity(0.18)
                             layer.image.resizable().scaledToFit()
-                                .frame(
-                                    width: proxy.size.width,
-                                    height: source.imageHeight(width: proxy.size.width, viewport: proxy.size.height),
-                                    alignment: .top,
-                                )
                                 .mask(LinearGradient(stops: [
                                     .init(color: .white, location: 0),
                                     .init(color: .white, location: 0.53),
@@ -59,6 +54,11 @@ struct CatalogDetailArtworkSource: Hashable {
                                     .init(color: .white.opacity(0.4), location: 0.86),
                                     .init(color: .clear, location: 1),
                                 ], startPoint: .top, endPoint: .bottom))
+                                .frame(
+                                    width: proxy.size.width,
+                                    height: source.imageHeight(width: proxy.size.width, viewport: proxy.size.height),
+                                    alignment: .top,
+                                )
                             // Status/back controls and lower text have their own gentle readability scrims.
                             LinearGradient(stops: [
                                 .init(color: .black.opacity(0.48), location: 0),
