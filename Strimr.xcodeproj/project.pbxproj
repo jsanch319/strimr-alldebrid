@@ -859,7 +859,7 @@
 				INFOPLIST_KEY_DiscordActivityURL = "$(DISCORD_ACTIVITY_URL)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr needs local network access to connect to your media server.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr uses your local network to play video on AirPlay devices and connect to your media server.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -912,7 +912,7 @@
 				INFOPLIST_KEY_DiscordActivityURL = "$(DISCORD_ACTIVITY_URL)";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr needs local network access to connect to your media server.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Strimr uses your local network to play video on AirPlay devices and connect to your media server.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

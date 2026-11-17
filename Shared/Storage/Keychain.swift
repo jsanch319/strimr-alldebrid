@@ -1,9 +1,27 @@
 import Foundation
 import Security
 
-enum KeychainError: Error {
+enum KeychainError: LocalizedError {
     case unexpectedStatus(OSStatus)
     case invalidItem
+
+    var errorDescription: String? {
+        switch self {
+        case let .unexpectedStatus(status):
+            let reason = SecCopyErrorMessageString(status, nil) as String? ?? "Unknown Security framework error"
+            let guidance = switch status {
+            case errSecMissingEntitlement:
+                " Verify this build's signing and Keychain entitlements; unsigned simulator builds may not support this operation."
+            case errSecInteractionNotAllowed:
+                " Unlock the device and retry."
+            default:
+                " Retry on a properly signed build if this occurred in an unsigned simulator."
+            }
+            return "Secure credential access failed (Security status \(status)): \(reason).\(guidance)"
+        case .invalidItem:
+            return "The saved secure credential could not be read. Reconnect the affected account in Settings."
+        }
+    }
 }
 
 struct Keychain {

@@ -86,6 +86,7 @@ struct PlayerView: View {
     @State private var doubleTapSeek = DoubleTapSeek()
     @State private var tapAreaWidth = 0.0
     @State private var showsPlaybackStatistics = false
+    @State private var isAirPlayPickerPresented = false
     @State private var discordWatchTogetherMessage: String?
     @State private var isShowingDiscordWatchTogetherAlert = false
 
@@ -671,6 +672,10 @@ struct PlayerView: View {
             tracksMenu: tracksMenuModel,
             tracksMenuActions: tracksMenuActions,
             onWatchTogether: watchTogetherAction,
+            onAirPlayPresentationChanged: { presented in
+                isAirPlayPickerPresented = presented
+                showControls(temporarily: !presented)
+            },
             onShowSettings: showSettings,
             chapters: viewModel.chapters,
             showsChaptersOnTimeline: settingsManager.playback.showChaptersOnTimeline,
@@ -1949,7 +1954,7 @@ struct PlayerView: View {
 
     private func scheduleControlsHide() {
         hideControlsWorkItem?.cancel()
-        guard activeOffsetBar == nil, !isTracksMenuPresented else { return }
+        guard activeOffsetBar == nil, !isTracksMenuPresented, !isAirPlayPickerPresented else { return }
 
         let workItem = DispatchWorkItem {
             // Paused, the tiles stand in for the pause screen, which the tabletop layout does not show.

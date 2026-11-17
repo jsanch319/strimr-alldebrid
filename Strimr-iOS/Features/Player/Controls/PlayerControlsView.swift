@@ -17,6 +17,7 @@ struct PlayerControlsView: View {
     var tracksMenu: PlayerTracksMenuModel
     var tracksMenuActions: PlayerTracksMenuActions
     var onWatchTogether: (() -> Void)?
+    var onAirPlayPresentationChanged: (Bool) -> Void = { _ in }
     var onShowSettings: () -> Void
     var chapters: [MediaChapter]
     var showsChaptersOnTimeline: Bool
@@ -85,6 +86,7 @@ struct PlayerControlsView: View {
                     tracksMenu: tracksMenu,
                     tracksMenuActions: tracksMenuActions,
                     onWatchTogether: onWatchTogether,
+                    onAirPlayPresentationChanged: onAirPlayPresentationChanged,
                     onShowSettings: onShowSettings,
                     sleepTimer: sleepTimer,
                     isSharePlay: isSharePlay,
@@ -239,6 +241,7 @@ private struct PlayerControlsHeader: View {
     var tracksMenu: PlayerTracksMenuModel
     var tracksMenuActions: PlayerTracksMenuActions
     var onWatchTogether: (() -> Void)?
+    var onAirPlayPresentationChanged: (Bool) -> Void = { _ in }
     var onShowSettings: () -> Void
     var sleepTimer: SleepTimer?
     var isSharePlay: Bool
@@ -283,6 +286,10 @@ private struct PlayerControlsHeader: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            PlayerAirPlayButton(onPresentationChanged: onAirPlayPresentationChanged)
+                .frame(width: PlayerIconButton.Size.small.diameter, height: PlayerIconButton.Size.small.diameter)
+                .background(.ultraThinMaterial, in: Circle())
 
             if showsPictureInPicture {
                 PlayerPictureInPictureButton(action: onStartPictureInPicture)

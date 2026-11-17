@@ -1147,7 +1147,11 @@ final class PlayerController {
             // Without this the system pauses a player showing video as soon as the app leaves the foreground.
             engine.$currentAVPlayer
                 .receive(on: DispatchQueue.main)
-                .sink { $0?.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible }
+                .sink { player in
+                    if let player {
+                        PlayerAirPlayConfiguration.apply(to: player)
+                    }
+                }
                 .store(in: &cancellables)
         #endif
 
