@@ -104,6 +104,10 @@ struct PlayerControlsView: View {
                             media: isLive ? nil : media,
                             compact: geometry.size.height < 450,
                             stacksTitle: geometry.size.width < 500 && geometry.size.height >= 450,
+                            // Leave the centered 240-point transport cluster and a 12-point gap clear,
+                            // even in a short landscape viewport where the two rows share vertical space.
+                            logoWidth: geometry.size.height < 450
+                                ? max(40, min(210, geometry.size.width / 2 - 176)) : 280,
                             isLocked: isLocked,
                             onToggleLock: onToggleLock,
                             skipMarkerTitle: skipMarkerTitle,
@@ -201,6 +205,7 @@ private struct PlayerAuxiliaryControlsRow: View {
     var media: MediaItem?
     var compact: Bool
     var stacksTitle: Bool
+    var logoWidth: CGFloat
     var isLocked: Bool
     var onToggleLock: () -> Void
     var skipMarkerTitle: String?
@@ -216,7 +221,7 @@ private struct PlayerAuxiliaryControlsRow: View {
             HStack(alignment: .bottom, spacing: 16) {
                 if let media, !stacksTitle {
                     PlayerTitleLogoView(media: media, compact: compact)
-                        .frame(maxWidth: compact ? 210 : 280, alignment: .leading)
+                        .frame(maxWidth: logoWidth, alignment: .leading)
                         .hiddenWhenLocked(isLocked)
                 } else {
                     ControlsLockButton(isLocked: isLocked, action: onToggleLock)
