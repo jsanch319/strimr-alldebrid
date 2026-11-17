@@ -84,9 +84,12 @@ extension View {
         private func arrow(_ symbol: String, label: String, enabled: Bool, forward: Bool) -> some View {
             Button { move(forward: forward) } label: {
                 Image(systemName: symbol).font(.subheadline.weight(.semibold)).frame(width: 44, height: 44)
+                    .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .videoOverlayGlass(in: Circle())
+            .contentShape(Circle())
+            .accessibilityIdentifier(forward ? "poster.rail.next" : "poster.rail.previous")
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.3)
             .accessibilityLabel(label)

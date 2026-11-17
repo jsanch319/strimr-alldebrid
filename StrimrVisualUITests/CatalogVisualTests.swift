@@ -127,10 +127,12 @@ final class CatalogVisualTests: XCTestCase {
         tab("Movies")
         let row = app.otherElements["catalog.row.Trending Movies"]
         XCTAssertTrue(row.waitForExistence(timeout: 25), app.debugDescription)
-        let next = row.buttons["Next posters"]
-        let previous = row.buttons["Previous posters"]
+        let next = row.buttons["poster.rail.next"]
+        let previous = row.buttons["poster.rail.previous"]
         XCTAssertTrue(next.waitForExistence(timeout: 15))
         XCTAssertFalse(previous.isEnabled)
+        XCTAssertTrue(next.isHittable, row.debugDescription)
+        capture("17A-Horizontal-Pagination-Start")
         next.tap()
         let appended = row.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336").firstMatch
         XCTAssertTrue(appended.waitForExistence(timeout: 25), app.debugDescription)
