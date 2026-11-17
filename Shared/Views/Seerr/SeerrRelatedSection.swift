@@ -75,6 +75,7 @@ struct SeerrRelatedSection: View {
         } else {
             SeerrMediaCarousel(
                 items: items,
+                pagination: viewModel.relatedPagination(similar: section == .similar),
                 showsLabels: true,
                 onSelectMedia: onSelectMedia,
             )

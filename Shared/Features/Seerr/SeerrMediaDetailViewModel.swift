@@ -241,6 +241,56 @@ final class SeerrMediaDetailViewModel {
         media.mediaInfo?.isDownloading ?? false
     }
 
+    private var relatedPages: [String: Int] = [:]
+    private var relatedTotals: [String: Int] = [:]
+    private var relatedLoading: Set<String> = []
+    private var relatedErrors: [String: String] = [:]
+
+    func relatedPagination(similar isSimilar: Bool) -> PosterRailPagination {
+        let key = isSimilar ? "similar" : "recommendations"
+        return PosterRailPagination(
+            hasMore: (relatedPages[key] ?? 0) < (relatedTotals[key] ?? 0),
+            loading: relatedLoading.contains(key),
+            error: relatedErrors[key],
+            loadMore: { await self.loadRelatedPage(similar: isSimilar) },
+        )
+    }
+
+    private func loadRelatedPage(similar isSimilar: Bool) async {
+        let key = isSimilar ? "similar" : "recommendations"
+        guard !relatedLoading.contains(key), let page = relatedPages[key],
+              page < (relatedTotals[key] ?? 0), let baseURL else { return }
+        let id = media.id, kind = media.mediaType
+        relatedLoading.insert(key); relatedErrors[key] = nil
+        defer { relatedLoading.remove(key) }
+        do {
+            let repository = SeerrMediaRepository(baseURL: baseURL)
+            let response: SeerrPaginatedResponse<SeerrMedia> = if kind == .movie {
+                try await isSimilar ? repository.getMovieSimilar(id: id, page: page + 1)
+                    : repository.getMovieRecommendations(id: id, page: page + 1)
+            } else {
+                try await isSimilar ? repository.getTVSimilar(id: id, page: page + 1)
+                    : repository.getTVRecommendations(id: id, page: page + 1)
+            }
+            try Task.checkCancellation()
+            guard media.id == id, media.mediaType == kind, baseURL == self.baseURL else { return }
+            var items = isSimilar ? similar : recommendations
+            var seen = Set(items.map(\.posterPagingID))
+            items += response.results.filter { seen.insert($0.posterPagingID).inserted }
+            if isSimilar {
+                similar = items
+            } else {
+                recommendations = items
+            }
+            relatedPages[key] = response.page
+            relatedTotals[key] = response.results.isEmpty ? response.page : min(500, response.totalPages)
+        } catch {
+            if !Task.isCancelled {
+                relatedErrors[key] = error.localizedDescription
+            }
+        }
+    }
+
     func loadRelatedContent() async {
         guard let baseURL else {
             let message = String(localized: "integrations.seerr.error.invalidURL")
@@ -263,9 +313,19 @@ final class SeerrMediaDetailViewModel {
         do {
             switch media.mediaType {
             case .movie:
-                recommendations = try await repository.getMovieRecommendations(id: media.id, page: 1).results
+                if (relatedPages["recommendations"] ?? 0) <= 1 {
+                    let response = try await repository.getMovieRecommendations(id: media.id, page: 1)
+                    recommendations = response.results
+                    relatedPages["recommendations"] = 1
+                    relatedTotals["recommendations"] = min(500, response.totalPages)
+                }
             case .tv:
-                recommendations = try await repository.getTVRecommendations(id: media.id, page: 1).results
+                if (relatedPages["recommendations"] ?? 0) <= 1 {
+                    let response = try await repository.getTVRecommendations(id: media.id, page: 1)
+                    recommendations = response.results
+                    relatedPages["recommendations"] = 1
+                    relatedTotals["recommendations"] = min(500, response.totalPages)
+                }
             case .person, .none:
                 recommendations = []
             }
@@ -280,9 +340,19 @@ final class SeerrMediaDetailViewModel {
         do {
             switch media.mediaType {
             case .movie:
-                similar = try await repository.getMovieSimilar(id: media.id, page: 1).results
+                if (relatedPages["similar"] ?? 0) <= 1 {
+                    let response = try await repository.getMovieSimilar(id: media.id, page: 1)
+                    similar = response.results
+                    relatedPages["similar"] = 1
+                    relatedTotals["similar"] = min(500, response.totalPages)
+                }
             case .tv:
-                similar = try await repository.getTVSimilar(id: media.id, page: 1).results
+                if (relatedPages["similar"] ?? 0) <= 1 {
+                    let response = try await repository.getTVSimilar(id: media.id, page: 1)
+                    similar = response.results
+                    relatedPages["similar"] = 1
+                    relatedTotals["similar"] = min(500, response.totalPages)
+                }
             case .person, .none:
                 similar = []
             }
