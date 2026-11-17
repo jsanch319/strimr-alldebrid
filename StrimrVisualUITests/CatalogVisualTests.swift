@@ -188,6 +188,26 @@ final class CatalogVisualTests: XCTestCase {
         let episode = app.staticTexts["1. Episode 1 · visual test fixture"].firstMatch
         scrollTo(episode)
         capture("10-TV-Episodes")
+        // Scroll the existing UI; do not resize cards or change production layout to fit the capture.
+        let section = app.staticTexts["Seasons and Episodes"].firstMatch
+        let targetTop = max(180, app.navigationBars.firstMatch.frame.maxY + 60)
+        let distance = max(0, section.frame.minY - targetTop)
+        if distance > 1 {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.78))
+            let end = start.withOffset(CGVector(dx: 0, dy: -min(distance, app.frame.height * 0.5)))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.4)
+        }
+        for number in 1 ... 3 {
+            XCTAssertTrue(
+                app.staticTexts["\(number). Episode \(number) · visual test fixture"].firstMatch.isHittable,
+                app.debugDescription,
+            )
+        }
+        XCTAssertTrue(
+            app.buttons.matching(identifier: "Play Episode").element(boundBy: 1).isHittable,
+            app.debugDescription,
+        )
+        capture("20-TV-Three-Episodes")
     }
 
     func testSearchAndDetails() {
