@@ -21,7 +21,7 @@ struct DetailActionsRow: View {
 
     var body: some View {
         playButton
-        if [.movie, .episode].contains(viewModel.media.mediaItem.kind) {
+        if DiscordWatchTogetherConfiguration.isConfigured, [.movie, .episode].contains(viewModel.media.mediaItem.kind) {
             watchTogetherButton
         }
         if isServerUnreachable, downloadedPlayback == nil {
@@ -109,7 +109,9 @@ struct DetailActionsRow: View {
                     }
                     .disabled(isStartingSharePlay)
 
-                    if [.movie, .episode, .series, .season].contains(viewModel.media.mediaItem.kind) {
+                    if DiscordWatchTogetherConfiguration.isConfigured,
+                       [.movie, .episode, .series, .season].contains(viewModel.media.mediaItem.kind)
+                    {
                         Button(action: startDiscordWatchTogether) {
                             Label("Watch Together on Discord", systemImage: "person.2.wave.2")
                         }
@@ -167,9 +169,6 @@ struct DetailActionsRow: View {
             position: media.viewOffset ?? 0,
             duration: media.duration,
         ) else {
-            discordWatchTogetherMessage =
-                "Discord Watch Together is not configured. Set " +
-                "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig."
             return
         }
         DiscordWatchTogetherConfiguration.openActivityURL(url) { result in

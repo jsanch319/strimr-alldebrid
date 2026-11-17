@@ -17,6 +17,17 @@ struct SettingsPlaybackView: View {
 
     var body: some View {
         List {
+            Section {
+                Toggle("Auto Play AllDebrid", isOn: Binding(
+                    get: { settingsManager.playback.allDebridAutoPlay },
+                    set: { enabled in settingsManager.updatePlayback { $0.allDebridAutoPlay = enabled } },
+                ))
+            } footer: {
+                Text(
+                    "Automatically play the best matching file in your AllDebrid library. Prefer 4K, then 1080p, then 720p, and try another source if playback fails. You can still select a source manually from title details.",
+                )
+            }
+
             externalPlayerSection
 
             #if os(iOS)

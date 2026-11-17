@@ -128,7 +128,10 @@ struct CatalogDetailAndBackdropTests {
                 URLComponents(url: $0.url!, resolvingAgainstBaseURL: false)?.queryItems?
                     .first { $0.name == "append_to_response" }?.value
             }
-        #expect(queries == ["external_ids,content_ratings", "external_ids,release_dates"])
+        #expect(queries == [
+            "external_ids,content_ratings,alternative_titles",
+            "external_ids,release_dates,alternative_titles",
+        ])
     }
 
     @Test func `manual watched writes reuse Simkl identity payload and reject unconfirmed titles`() async throws {

@@ -425,14 +425,18 @@ struct AllDebridLibraryView: View {
     }
 
     static func cleanTitle(_ filename: String) -> String {
-        let basename = (filename as NSString).deletingPathExtension
-        let groupTrimmed = basename.replacingOccurrences(
-            of: #"(?i)-[a-z0-9]{2,}$"#,
+        let basename = (filename as NSString).deletingPathExtension.replacingOccurrences(of: "_", with: " ")
+        let hasReleaseMetadata = basename.range(
+            of: #"(?i)(?:\b(?:2160p|1080p|720p|4k|web.?dl|bluray|x26[45])\b|(?:19|20)\d{2}-)"#,
+            options: .regularExpression,
+        ) != nil
+        let groupTrimmed = hasReleaseMetadata ? basename.replacingOccurrences(
+            of: #"(?i)-[a-z][a-z0-9]{1,}$"#,
             with: "",
             options: .regularExpression,
-        )
+        ) : basename
         let pattern =
-            #"(?i)[ ._-]+\b(2160p|4k|1080p|720p|web[- ]?dl|web[- ]?rip|bluray|blu[- ]?ray|remux|x26[45]|h26[45]|hevc|av1|hdr10?|dovi|dv|aac|dts|proper|repack)\b.*$"#
+            #"(?i)[ ._-]+\b(2160p|4k|uhd|1080[pi]|720p|480p|web[- ]?dl|web[- ]?rip|bluray|blu[- ]?ray|remux|x26[45]|h26[45]|hevc|av1|hdr10?\+?|dolby[ ._-]?vision|dovi|dv|aac|dts|proper|repack)\b.*$"#
         let withoutClutter = groupTrimmed.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
         let separators = withoutClutter.replacingOccurrences(of: ".", with: " ").replacingOccurrences(
             of: "_",

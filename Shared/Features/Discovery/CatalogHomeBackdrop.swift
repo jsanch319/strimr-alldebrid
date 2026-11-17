@@ -80,26 +80,34 @@
                             MediaBackdropGradient(colors: layer.colors)
                             layer.image.resizable().scaledToFill()
                                 .frame(width: proxy.size.width, height: proxy.size.height)
-                                .clipped().blur(radius: 40).opacity(details ? 0.55 : 0.25)
+                                .clipped().blur(radius: 40).opacity(details ? 0.18 : 0.25)
                             layer.image.resizable().scaledToFill()
                                 .frame(
                                     width: proxy.size.width,
-                                    height: proxy.size.height * (details ? 1 : 0.82),
+                                    height: proxy.size.height * (details ? 0.72 : 0.82),
                                     alignment: .topTrailing,
                                 )
                                 .clipped()
-                                .mask(LinearGradient(stops: [
-                                    .init(color: .white.opacity(details ? 1 : 0.85), location: 0),
+                                .mask(LinearGradient(stops: details ? [
+                                    .init(color: .white, location: 0),
+                                    .init(color: .white, location: 0.4),
+                                    .init(color: .white.opacity(0.85), location: 0.65),
+                                    .init(color: .clear, location: 1),
+                                ] : [
+                                    .init(color: .white.opacity(0.85), location: 0),
                                     .init(color: .white.opacity(0.65), location: 0.4),
                                     .init(color: .clear, location: 1),
                                 ], startPoint: .top, endPoint: .bottom))
                             LinearGradient(
-                                colors: [.background.opacity(details ? 0.25 : 0.65), .background.opacity(0.2)],
+                                colors: [
+                                    .background.opacity(details ? 0.08 : 0.65),
+                                    .background.opacity(details ? 0.02 : 0.2),
+                                ],
                                 startPoint: .leading,
                                 endPoint: .trailing,
                             )
                             LinearGradient(
-                                colors: [.clear, .background.opacity(details ? 0.4 : 0.9)],
+                                colors: [.clear, .background.opacity(details ? 0.82 : 0.9)],
                                 startPoint: .top,
                                 endPoint: .bottom,
                             )

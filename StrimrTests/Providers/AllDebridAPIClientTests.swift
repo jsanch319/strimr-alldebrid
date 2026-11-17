@@ -50,7 +50,7 @@ struct AllDebridAPIClientTests {
         }
         let client = try AllDebridAPIClient(apiKey: "invalid", session: stub.session)
 
-        await #expect(throws: AllDebridAPIClient.APIError.serviceError("Invalid API key")) {
+        await #expect(throws: AllDebridAPIClient.APIError.invalidAPIKey) {
             try await client.verifyConnection()
         }
     }

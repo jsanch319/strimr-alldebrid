@@ -391,6 +391,8 @@ enum PlaybackReadAhead: String, Codable, CaseIterable, Hashable, Identifiable {
 }
 
 struct PlaybackSettings: Codable, Equatable {
+    /// Applies only to TMDb/AllDebrid playback; media-server playback keeps its existing behavior.
+    var allDebridAutoPlay = true
     var qualityPreset = TranscodeQualityPreset.original
     var nextEpisodeAutoplay = NextEpisodeAutoplay.after15Seconds
     /// Armed when the player opens. Nil leaves the sleep timer off.
@@ -444,6 +446,7 @@ struct PlaybackSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        allDebridAutoPlay = try container.decodeIfPresent(Bool.self, forKey: .allDebridAutoPlay) ?? true
         qualityPreset = try container.decodeIfPresent(
             TranscodeQualityPreset.self,
             forKey: .qualityPreset,

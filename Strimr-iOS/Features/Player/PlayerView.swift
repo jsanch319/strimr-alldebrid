@@ -11,6 +11,7 @@ struct PlayerView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var viewModel: PlayerViewModel
+    private let onPlaybackFailure: ((String) -> Void)?
     @State private var playerController = PlayerController()
     @State private var controlsVisible = true
     @State private var hideControlsWorkItem: DispatchWorkItem?
@@ -101,8 +102,9 @@ struct PlayerView: View {
         Double(settingsManager.playback.seekForwardSeconds)
     }
 
-    init(viewModel: PlayerViewModel) {
+    init(viewModel: PlayerViewModel, onPlaybackFailure: ((String) -> Void)? = nil) {
         _viewModel = State(initialValue: viewModel)
+        self.onPlaybackFailure = onPlaybackFailure
     }
 
     var body: some View {
@@ -714,7 +716,7 @@ struct PlayerView: View {
 
     private var canStartDiscordWatchTogether: Bool {
         guard let media = viewModel.media else { return false }
-        return [.movie, .episode].contains(media.kind)
+        return DiscordWatchTogetherConfiguration.isConfigured && [.movie, .episode].contains(media.kind)
     }
 
     private func startDiscordWatchTogether() {
@@ -728,10 +730,7 @@ struct PlayerView: View {
                 selectedSourceIdentifier: viewModel.currentVersionID,
             )
         else {
-            showDiscordWatchTogetherMessage(
-                "Discord Watch Together is not configured. Set " +
-                    "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig.",
-            )
+            // Optional integration: a stale action must never interrupt ordinary playback with setup instructions.
             return
         }
         DiscordWatchTogetherConfiguration.openActivityURL(url) { result in
@@ -2168,6 +2167,13 @@ struct PlayerView: View {
     }
 
     private func handlePlaybackError(_ message: String) async {
+        if let onPlaybackFailure {
+            viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+            viewModel.saveProgress()
+            playerController.pause()
+            onPlaybackFailure(message)
+            return
+        }
         viewModel.saveProgress()
         // The engine can fail on a read from the lost server before the buffer runs out, while it is not stalled yet.
         if isStreamingServerMarkedUnreachable, handleStreamingServerLost() {

@@ -58,6 +58,7 @@ struct TMDBDetailView: View {
         let id = UUID()
         let episode: TMDBEpisode?
         var restart = false
+        var manual = false
     }
 
     init(title: TMDBTitle, initialSeason: Int? = nil, initialEpisode: TMDBEpisode? = nil) {
@@ -120,6 +121,9 @@ struct TMDBDetailView: View {
                 artworkSpace
                 heading
                 playbackActions
+                Button("Select Source", systemImage: "list.bullet") {
+                    selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)
+                }.disabled(!canPlay)
                 trackingActions
                 metadata
                 synopsis
@@ -154,7 +158,12 @@ struct TMDBDetailView: View {
         .navigationTitle(item.displayTitle)
         #endif
         .sheet(item: $selectedPlayback, onDismiss: { Task { await discovery.sync(force: true) } }) { selection in
-            CatalogSourcesView(title: item, episode: selection.episode, startsFromBeginning: selection.restart)
+            CatalogSourcesView(
+                title: item,
+                episode: selection.episode,
+                startsFromBeginning: selection.restart,
+                forceManual: selection.manual,
+            )
         }
         .confirmationDialog(
             "Remove this title from Simkl? This also clears its Simkl watch history and rating.",
@@ -445,11 +454,13 @@ struct TMDBDetailView: View {
         }
         do {
             let loaded = try await TMDBClient.shared.episodes(tvID: title.id, season: season)
+                .filter { $0.season_number == season }
+                .sorted { $0.episode_number < $1.episode_number }
             try Task.checkCancellation()
             guard self.season == season else { return }
             episodes = loaded
             if let selected = selectedEpisode {
-                selectedEpisode = loaded.first { $0.episode_number == selected.episode_number } ?? selected
+                selectedEpisode = loaded.first { $0.episode_number == selected.episode_number }
             } else {
                 let next = discovery.entry(for: item)?.nextEpisode
                 selectedEpisode = loaded.first { next?.season == season && $0.episode_number == next?.episode }

@@ -17,6 +17,15 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     let seasons: [Season]?
     let external_ids: RemoteIDs?
     let runtime: Int?
+    struct AlternativeTitles: Codable, Hashable, Sendable {
+        struct Entry: Codable, Hashable, Sendable { let title: String }
+        let titles: [Entry]?
+        let results: [Entry]?
+    }
+
+    var alternative_titles: AlternativeTitles? = nil
+    var original_title: String? = nil
+    var original_name: String? = nil
     var tagline: String? = nil
     var episode_run_time: [Int]? = nil
     var number_of_seasons: Int? = nil
@@ -221,7 +230,9 @@ actor TMDBClient {
             "\(title.kind.rawValue)/\(title.id)",
             query: [URLQueryItem(
                 name: "append_to_response",
-                value: title.kind == .movie ? "external_ids,release_dates" : "external_ids,content_ratings",
+                value: title
+                    .kind == .movie ? "external_ids,release_dates,alternative_titles" :
+                    "external_ids,content_ratings,alternative_titles",
             )],
         )
         result.media_type = title.kind.rawValue
