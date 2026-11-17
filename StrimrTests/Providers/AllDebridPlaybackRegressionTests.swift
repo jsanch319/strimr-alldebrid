@@ -49,7 +49,11 @@ struct AllDebridPlaybackRegressionTests {
         #expect(files.first?.fullPath == "Movie (2024)/video.mkv")
     }
 
-    @Test func `HEAD rejection falls back to a bounded header-only GET`() async throws {
+    @Test(arguments: [
+        403,
+        405,
+        501,
+    ]) func `HEAD rejection falls back to a bounded header-only GET`(_: Int) async throws {
         let stub = HTTPStub { request in
             if request.url?.path == "/v4/link/unlock" {
                 return .json(#"{"status":"success","data":{"link":"https://files.test/video.mkv"}}"#)

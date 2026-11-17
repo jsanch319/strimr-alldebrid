@@ -287,7 +287,7 @@ actor AllDebridAPIClient {
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         var (_, rawResponse) = try await session.data(for: request)
-        if let head = rawResponse as? HTTPURLResponse, [405, 501].contains(head.statusCode) {
+        if let head = rawResponse as? HTTPURLResponse, [401, 403, 405, 501].contains(head.statusCode) {
             request.httpMethod = "GET"
             request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
             // Receive only headers, then cancel; hosts that ignore Range must not download an entire movie.
@@ -328,7 +328,7 @@ actor AllDebridAPIClient {
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
-        return normalizedType.hasPrefix("text/")
+        return normalizedType.hasPrefix("image/") || normalizedType.hasPrefix("text/")
             || normalizedType.contains("json")
             || normalizedType.contains("html")
             || normalizedType.contains("xml")

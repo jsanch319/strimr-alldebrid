@@ -40,8 +40,7 @@ enum AllDebridTitleMatcher {
         }.map(Source.magnet)
         let saved = links.filter { $0.isVideo && matches(title: title, episode: episode, filename: $0.filename) }
             .map(Source.saved)
-        var seen = Set<String>()
-        return ranked((magnets + saved).filter { seen.insert($0.link).inserted }, magnetNames: magnetNames)
+        return ranked(magnets + saved, magnetNames: magnetNames)
     }
 
     /// Deterministic quality preference, without discarding lower-resolution fallback candidates.

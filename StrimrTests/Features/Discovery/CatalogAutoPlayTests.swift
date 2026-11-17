@@ -91,17 +91,25 @@ struct CatalogAutoPlayTests {
         #expect(!AllDebridTitleMatcher.matches(title: show, episode: nil, filename: "Example.Show.S02E03.mkv"))
     }
 
-    @Test func `resolution order retains fallback candidates and deduplicates the same link`() {
+    @Test func `resolution order preserves every manual variant including shared links`() {
         let files = [file("Dune.2021.720p.mkv"), file("Dune.2021.2160p.mkv"), file("Dune.2021.1080p.mkv")]
         let duplicate = AllDebridSavedLink(id: "duplicate", filename: files[1].filename, link: files[1].link)
         let sources = AllDebridTitleMatcher.sources(title: movie, episode: nil, files: files, links: [duplicate])
-        #expect(sources.map { AllDebridTitleMatcher.resolution($0.filename) } == [2160, 1080, 720])
+        #expect(sources.map { AllDebridTitleMatcher.resolution($0.filename) } == [2160, 2160, 1080, 720])
     }
 
     @Test func `failed 4K resolution falls back then engine failure advances to 720 without retrying failed files`(
     ) async throws {
         let files = [file("Dune.2021.720p.mkv"), file("Dune.2021.2160p.mkv"), file("Dune.2021.1080p.mkv")]
-        let client = AutoPlayClient(files: files, failing: [files[1].link])
+        let duplicate = AllDebridMagnetFile(
+            id: "duplicate",
+            magnetID: "m",
+            filename: files[1].filename,
+            fullPath: files[1].fullPath,
+            size: 100,
+            link: files[1].link,
+        )
+        let client = AutoPlayClient(files: files + [duplicate], failing: [files[1].link])
         let resolver = CatalogSourceResolver(client: client)
         try await resolver.refresh(title: movie, episode: nil)
         let first = try await resolver.resolveNext()
@@ -113,6 +121,20 @@ struct CatalogAutoPlayTests {
         #expect(await client.requested().count == 3)
         try await resolver.refresh(title: movie, episode: nil)
         #expect(try await resolver.resolveNext().source.filename.contains("1080p"))
+    }
+
+    @Test(arguments: [AllDebridAPIClient.APIError.invalidAPIKey, .httpStatus(429)])
+    func `authorization and rate limits during resolution do not try every file`(_ failure: AllDebridAPIClient
+        .APIError) async throws
+    {
+        let client = AutoPlayClient(
+            files: [file("Dune.2021.2160p.mkv"), file("Dune.2021.1080p.mkv")],
+            resolutionError: failure,
+        )
+        let resolver = CatalogSourceResolver(client: client)
+        try await resolver.refresh(title: movie, episode: nil)
+        await #expect(throws: failure) { try await resolver.resolveNext() }
+        #expect(await client.requested().count == 1)
     }
 
     @Test func `authentication failure stops fallback and a refresh replaces stale sources`() async throws {
@@ -141,8 +163,15 @@ private actor AutoPlayClient: CatalogPlaybackClient {
     let failing: Set<String>
     var unauthorized: Bool
     var requests: [String] = []
-    init(files: [AllDebridMagnetFile], failing: Set<String> = [], unauthorized: Bool = false) {
+    let resolutionError: AllDebridAPIClient.APIError?
+    init(
+        files: [AllDebridMagnetFile],
+        failing: Set<String> = [],
+        unauthorized: Bool = false,
+        resolutionError: AllDebridAPIClient.APIError? = nil,
+    ) {
         self.files = files; self.failing = failing; self.unauthorized = unauthorized
+        self.resolutionError = resolutionError
     }
 
     func verifyConnection() async throws -> String? {
@@ -158,6 +187,9 @@ private actor AutoPlayClient: CatalogPlaybackClient {
 
     func resolvePlaybackURL(_ link: String, filename _: String) async throws -> AllDebridPlaybackResolution {
         requests.append(link)
+        if let resolutionError {
+            throw resolutionError
+        }
         if failing.contains(link) {
             throw AllDebridAPIClient.APIError.playbackHTTPStatus(503)
         }
