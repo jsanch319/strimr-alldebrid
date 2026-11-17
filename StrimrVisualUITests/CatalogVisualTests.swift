@@ -73,13 +73,14 @@ final class CatalogVisualTests: XCTestCase {
         let trending = app.otherElements["home.row.catalog:trendingMovies"]
         XCTAssertTrue(watching.waitForExistence(timeout: 20), app.debugDescription)
         XCTAssertTrue(trending.waitForExistence(timeout: 20), app.debugDescription)
-        let movie = watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+        let resumeMovie = watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134")
+            .firstMatch
         let episode = watching.descendants(matching: .any).matching(identifier: "catalog.card.tv:95396:s1:e2")
             .firstMatch
         let poster = trending.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
-        XCTAssertTrue(movie.exists && episode.exists && poster.exists, app.debugDescription)
-        XCTAssertLessThan(movie.frame.width, app.frame.width * 0.7)
-        XCTAssertGreaterThan(movie.frame.width, app.frame.width * 0.45)
+        XCTAssertTrue(resumeMovie.exists && episode.exists && poster.exists, app.debugDescription)
+        XCTAssertLessThan(resumeMovie.frame.width, app.frame.width * 0.7)
+        XCTAssertGreaterThan(resumeMovie.frame.width, app.frame.width * 0.45)
         XCTAssertLessThan(episode.frame.minX, app.frame.width * 0.85)
         XCTAssertGreaterThanOrEqual(trending.frame.minY, watching.frame.maxY)
         // Half the actual portrait artwork (2:3), rather than its caption, must clear the native tab bar.
