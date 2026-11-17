@@ -286,6 +286,7 @@ private struct StreamingProviderView: View {
     @State private var selection: TMDBTitle?
     @State private var page = 0
     @State private var totalPages = 0
+    @State private var generation = UUID()
     @State private var loading = false
     @State private var errorMessage: String?
 
@@ -346,13 +347,15 @@ private struct StreamingProviderView: View {
     private func load(reset: Bool) async {
         guard reset || !loading else { return }
         if reset {
+            generation = UUID()
             titles = []; page = 0; totalPages = 0
         }
         loading = true
         errorMessage = nil
+        let requestGeneration = generation
         let requestedKind = kind
         defer {
-            if requestedKind == kind {
+            if requestedKind == kind, requestGeneration == generation {
                 loading = false
             }
         }
@@ -364,13 +367,13 @@ private struct StreamingProviderView: View {
                 page: page + 1,
             )
             try Task.checkCancellation()
-            guard requestedKind == kind else { return }
+            guard requestedKind == kind, requestGeneration == generation else { return }
             var seen = Set(titles.map(\.catalogID))
             titles += result.results.filter { seen.insert($0.catalogID).inserted }
             page += 1
             totalPages = min(result.total_pages, 500)
         } catch {
-            if !Task.isCancelled, requestedKind == kind {
+            if !Task.isCancelled, requestedKind == kind, requestGeneration == generation {
                 errorMessage = error.localizedDescription
             }
         }
