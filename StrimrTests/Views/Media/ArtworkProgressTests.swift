@@ -33,9 +33,9 @@ struct ArtworkProgressTests {
     }
 
     @Test func `gray backgrounds cannot crowd out distinct saturated artwork accents`() {
-        let gray = Array(repeating: [UInt8(140), 150, 155, 255], count: 1000).flatMap(\.self)
-        let red = Array(repeating: [UInt8(110), 10, 5, 255], count: 50).flatMap(\.self)
-        let blue = Array(repeating: [UInt8(5), 20, 110, 255], count: 50).flatMap(\.self)
+        let gray = Array(repeating: [UInt8](arrayLiteral: 140, 150, 155, 255), count: 1000).flatMap(\.self)
+        let red = Array(repeating: [UInt8](arrayLiteral: 110, 10, 5, 255), count: 50).flatMap(\.self)
+        let blue = Array(repeating: [UInt8](arrayLiteral: 5, 20, 110, 255), count: 50).flatMap(\.self)
         let palette = ArtworkProgressSampler.colors(pixels: gray + red + blue)
         #expect(palette.contains { $0.red > $0.blue + 0.2 })
         #expect(palette.contains { $0.blue > $0.red + 0.2 })
