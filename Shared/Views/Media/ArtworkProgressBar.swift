@@ -46,15 +46,15 @@ nonisolated struct ProgressArtworkColor: Hashable, Sendable {
         abs(red - other.red) + abs(green - other.green) + abs(blue - other.blue)
     }
 
-    /// At least 4.5:1 against the lightest possible composited track, even over white artwork.
+    /// Keep the source hue/value; only lift very dark swatches slightly so their fill stays distinguishable.
+    /// Unlike value normalization, this bounded white mix never boosts saturation or turns shadows neon.
     var legible: Self {
-        // Raise value before adding white, preserving saturated source hues instead of turning dark reds/blues gray.
-        var result = saturation >= 0.3 && maximum > 0
-            ? Self(red: red / maximum, green: green / maximum, blue: blue / maximum) : self
-        for _ in 0 ..< 24 where result.luminance < 0.36 {
-            result = Self(red: result.red * 0.9 + 0.1, green: result.green * 0.9 + 0.1, blue: result.blue * 0.9 + 0.1)
-        }
-        return result
+        let lift = min(0.24, max(0, (0.08 - luminance) * 3))
+        return Self(
+            red: red + (1 - red) * lift,
+            green: green + (1 - green) * lift,
+            blue: blue + (1 - blue) * lift,
+        )
     }
 }
 
@@ -234,17 +234,21 @@ struct ArtworkMatchedProgressBar: View {
     }
 
     var body: some View {
-        Capsule().fill(.black.opacity(contrast == .increased ? 0.95 : 0.82))
+        Capsule().fill(.black.opacity(contrast == .increased ? 0.40 : 0.35))
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
-                    Capsule().fill(LinearGradient(colors: palette, startPoint: .leading, endPoint: .trailing))
+                    Capsule()
+                        .fill(LinearGradient(colors: palette, startPoint: .leading, endPoint: .trailing))
+                        .opacity(contrast == .increased ? 1 : 0.9)
+                        .overlay {
+                            Capsule().strokeBorder(.white.opacity(contrast == .increased ? 0.4 : 0.16), lineWidth: 0.5)
+                        }
                         .frame(width: proxy.size.width * ArtworkProgressSampler.fraction(progress))
-                        .shadow(color: palette[0].opacity(0.22), radius: 2)
                 }
             }
-            .overlay { Capsule().strokeBorder(.white.opacity(contrast == .increased ? 0.7 : 0.4), lineWidth: 0.5) }
-            .frame(height: contrast == .increased ? 6 : 5.5)
-            .shadow(color: .black.opacity(0.65), radius: 2, y: 1)
+            .overlay { Capsule().strokeBorder(.white.opacity(contrast == .increased ? 0.25 : 0.10), lineWidth: 0.5) }
+            .frame(height: contrast == .increased ? 5.5 : 5)
+            .shadow(color: .black.opacity(0.18), radius: 0.75, y: 0.35)
             .transaction {
                 if reduceMotion {
                     $0.disablesAnimations = true

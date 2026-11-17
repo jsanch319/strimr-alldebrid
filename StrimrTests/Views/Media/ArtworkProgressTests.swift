@@ -7,29 +7,40 @@ struct ArtworkProgressTests {
         colors.flatMap { color in Array(repeating: color + [255], count: 100).flatMap(\.self) }
     }
 
-    @Test func `light dark colorful and monochrome palettes remain visible without invented hues`() {
-        for source in [[[UInt8(250), 240, 220]], [[5, 10, 20]], [[230, 20, 30], [20, 80, 230], [230, 170, 20]]] {
+    @Test func `light dark colorful and monochrome palettes keep source hues without excessive brightening`() {
+        let sources: [[[UInt8]]] = [[[250, 240, 220]], [[5, 10, 20]], [[230, 20, 30], [20, 80, 230], [230, 170, 20]]]
+        for source in sources {
             let colors = ArtworkProgressSampler.colors(pixels: pixels(source))
             #expect((2 ... 3).contains(colors.count))
-            #expect(colors.allSatisfy { $0.luminance >= 0.36 })
-            // Validate all interpolated gradient stops against the track composited over white (worst case).
-            for pair in zip(colors, colors.dropFirst()) {
-                for step in 0 ... 10 {
-                    let fraction = Double(step) / 10
-                    let mixed = ProgressArtworkColor(
-                        red: pair.0.red * (1 - fraction) + pair.1.red * fraction,
-                        green: pair.0.green * (1 - fraction) + pair.1.green * fraction,
-                        blue: pair.0.blue * (1 - fraction) + pair.1.blue * fraction,
-                    )
-                    let track = ProgressArtworkColor(red: 0.18, green: 0.18, blue: 0.18)
-                    #expect((mixed.luminance + 0.05) / (track.luminance + 0.05) >= 3)
-                }
+            let originals = source.map {
+                ProgressArtworkColor(red: Double($0[0]) / 255, green: Double($0[1]) / 255, blue: Double($0[2]) / 255)
+            }
+            for color in colors {
+                #expect(originals.contains { original in
+                    let differences = [
+                        color.red - original.red,
+                        color.green - original.green,
+                        color.blue - original.blue,
+                    ]
+                    return differences.allSatisfy { $0 >= -0.000001 && $0 <= 0.24 }
+                        && color.saturation <= original.saturation + 0.000001
+                })
             }
         }
         let red = ArtworkProgressSampler.colors(pixels: pixels([[200, 15, 10]]))
         #expect(red.allSatisfy { $0.red > $0.green && $0.red > $0.blue })
         #expect(ArtworkProgressSampler.colors(pixels: [0, 0, 0, 0]).isEmpty)
         #expect(ArtworkProgressSampler.colors(pixels: []).isEmpty)
+    }
+
+    @Test func `normal thumbnail colors remain exact and dark colors receive only a bounded lift`() {
+        let warm = ProgressArtworkColor(red: 0.8, green: 0.45, blue: 0.2)
+        #expect(warm.legible == warm)
+        let dark = ProgressArtworkColor(red: 0.02, green: 0.04, blue: 0.08)
+        #expect(dark.legible.luminance > dark.luminance)
+        #expect(dark.legible.maximum < 0.4)
+        #expect(dark.legible.saturation <= dark.saturation)
+        #expect(dark.legible.red < dark.legible.green && dark.legible.green < dark.legible.blue)
     }
 
     @Test func `gray backgrounds cannot crowd out distinct saturated artwork accents`() {
@@ -39,7 +50,7 @@ struct ArtworkProgressTests {
         let palette = ArtworkProgressSampler.colors(pixels: gray + red + blue)
         #expect(palette.contains { $0.red > $0.blue + 0.2 })
         #expect(palette.contains { $0.blue > $0.red + 0.2 })
-        #expect(palette.allSatisfy { $0.luminance >= 0.36 })
+        #expect(palette.allSatisfy { $0.maximum < 0.7 })
     }
 
     @Test func `progress width keeps exact local or remote fraction and bounds invalid values`() {
