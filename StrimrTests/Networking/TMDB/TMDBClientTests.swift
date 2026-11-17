@@ -23,6 +23,30 @@ struct TMDBClientTests {
         #expect(stub.requests.count == 1)
     }
 
+    @Test func `genre discovery preserves media type filters paging and unrestricted catalog access`() async throws {
+        for kind in [TMDBTitle.Kind.movie, .tv] {
+            let stub = HTTPStub { _ in
+                .json(#"{"results":[{"id":12,"title":"Film","name":"Series"}],"total_pages":4}"#)
+            }
+            let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })
+            for sort in TMDBClient.GenreSort.allCases {
+                let result = try await client.genreTitles(genreID: 18, kind: kind, sort: sort, page: 2)
+                #expect(result.results.first?.catalogID == "\(kind.rawValue):12")
+                #expect(result.total_pages == 4)
+                let url = try #require(stub.requests.last?.url)
+                #expect(url.path == "/3/discover/\(kind.rawValue)")
+                let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                #expect(query.first { $0.name == "with_genres" }?.value == "18")
+                #expect(query.first { $0.name == "page" }?.value == "2")
+                #expect(query.first { $0.name == "sort_by" }?
+                    .value == (sort == .popular ? "popularity.desc" : "vote_average.desc"))
+                #expect(query.first { $0.name == "vote_count.gte" }?.value == (sort == .topRated ? "100" : nil))
+                #expect(!query.contains { $0.name == "with_watch_providers" || $0.name == "watch_region" })
+            }
+            #expect(stub.requests.count == 2)
+        }
+    }
+
     @Test func `direct catalog requests use bearer authentication and cache results`() async throws {
         let stub = HTTPStub { _ in .json(#"{"results":[{"id":12,"name":"Example TV"}]}"#) }
         let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })

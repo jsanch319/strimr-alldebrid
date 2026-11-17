@@ -72,6 +72,9 @@
             } else {
                 throw TMDBError.response(404)
             }
+            if let genreID = values["with_genres"].flatMap(Int.init) {
+                results = results.filter { $0.genres?.contains(where: { $0.id == genreID }) == true }
+            }
             if components.last == "recommendations", components.count > 1, let id = Int(components[1]) {
                 results.removeAll { $0.id == id }
             }

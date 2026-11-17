@@ -210,6 +210,38 @@ final class CatalogVisualTests: XCTestCase {
         capture("20-TV-Three-Episodes")
     }
 
+    func testGenreDiscoveryAndBackNavigation() {
+        for (tabName, titleID, expectedTitle, kindName, kind) in [
+            ("Movies", "movie:693134", "Dune: Part Two", "Movies", "movie"),
+            ("TV Shows", "tv:95396", "Severance", "TV Shows", "tv"),
+        ] {
+            tab(tabName)
+            let title = card(titleID)
+            XCTAssertTrue(title.waitForExistence(timeout: 25), app.debugDescription)
+            title.tap()
+            XCTAssertTrue(app.staticTexts["catalog.detail.title"].waitForExistence(timeout: 20))
+            let genre = app.buttons["catalog.genre.\(kind).1"]
+            scrollTo(genre)
+            genre.tap()
+            XCTAssertTrue(app.staticTexts["catalog.genre.kind"].waitForExistence(timeout: 20))
+            XCTAssertEqual(app.staticTexts["catalog.genre.kind"].label, kindName)
+            let row = app.descendants(matching: .any).matching(identifier: "catalog.row.Popular").firstMatch
+            XCTAssertTrue(row.waitForExistence(timeout: 25), app.debugDescription)
+            XCTAssertTrue(card(titleID).waitForExistence(timeout: 20))
+            XCTAssertFalse(card(kind == "movie" ? "tv:95396" : "movie:693134").exists)
+            assertLoadedBackdrop()
+            capture("21-Genre-\(kind)")
+            card(titleID).tap()
+            XCTAssertTrue(app.staticTexts["catalog.detail.title"].waitForExistence(timeout: 20))
+            XCTAssertTrue(app.buttons["catalog.detail.play"].exists)
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.staticTexts["catalog.genre.kind"].waitForExistence(timeout: 15))
+            app.navigationBars.buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.staticTexts["catalog.detail.title"].waitForExistence(timeout: 15))
+            XCTAssertEqual(app.staticTexts["catalog.detail.title"].label, expectedTitle)
+        }
+    }
+
     func testSearchAndDetails() {
         tab("Search")
         let search = app.searchFields.firstMatch

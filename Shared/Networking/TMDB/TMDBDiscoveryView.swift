@@ -36,6 +36,71 @@ struct TMDBPosterRow: View {
     }
 }
 
+/// Uses the same native poster rails, artwork selection, pagination and detail/playback route as Home.
+@MainActor
+struct TMDBGenreView: View {
+    let genre: TMDBTitle.Genre
+    let kind: TMDBTitle.Kind
+    @State private var popular: CatalogTitlePager
+    @State private var topRated: CatalogTitlePager
+
+    init(genre: TMDBTitle.Genre, kind: TMDBTitle.Kind) {
+        self.genre = genre
+        self.kind = kind
+        _popular = State(initialValue: CatalogTitlePager { page in
+            try await TMDBClient.shared.genreTitles(genreID: genre.id, kind: kind, sort: .popular, page: page)
+        })
+        _topRated = State(initialValue: CatalogTitlePager { page in
+            try await TMDBClient.shared.genreTitles(genreID: genre.id, kind: kind, sort: .topRated, page: page)
+        })
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text(kind == .movie ? "Movies" : "TV Shows").font(.title2.bold())
+                    .accessibilityIdentifier("catalog.genre.kind")
+                row("Popular", pager: popular)
+                row("Top Rated", pager: topRated)
+            }
+            .padding(.horizontal, LayoutMetrics.pageMargin)
+            .padding(.vertical)
+        }
+        .navigationTitle(genre.name)
+        #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+        #endif
+            .catalogBackdrop(media: (popular.items.first ?? topRated.items.first).map {
+                CatalogMediaAdapter.make(title: $0, episode: nil, resume: nil)
+            })
+            .task {
+                if popular.page == 0 {
+                    await popular.loadNext()
+                }
+            }
+            .task {
+                if topRated.page == 0 {
+                    await topRated.loadNext()
+                }
+            }
+    }
+
+    @ViewBuilder private func row(_ heading: String, pager: CatalogTitlePager) -> some View {
+        if !pager.items.isEmpty {
+            TMDBPosterRow(heading: heading, titles: pager.items, pagination: pager.pagination)
+        } else if pager.loading {
+            ProgressView("Loading \(heading.lowercased()) titles…")
+        } else if let error = pager.error {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(error).foregroundStyle(.secondary)
+                Button("Retry \(heading)") { Task { await pager.loadNext() } }
+            }
+        } else {
+            Text("No \(heading.lowercased()) titles available for this genre.").foregroundStyle(.secondary)
+        }
+    }
+}
+
 @MainActor
 struct TMDBDetailView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -352,7 +417,20 @@ struct TMDBDetailView: View {
                     alignment: .leading,
                     spacing: 8,
                 ) {
-                    ForEach(genres, id: \.id) { genre in fact(genre.name) }
+                    ForEach(genres, id: \.id) { genre in
+                        NavigationLink {
+                            TMDBGenreView(genre: genre, kind: item.kind)
+                        } label: {
+                            Label(genre.name, systemImage: "square.grid.2x2")
+                                .font(.subheadline)
+                                .frame(minHeight: 32)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .tint(.accentColor)
+                        .accessibilityHint("Browse \(genre.name) \(item.kind == .movie ? "movies" : "TV shows")")
+                        .accessibilityIdentifier("catalog.genre.\(item.kind.rawValue).\(genre.id)")
+                    }
                 }
             }
             if let companies = item.production_companies, !companies.isEmpty {

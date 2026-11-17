@@ -226,6 +226,31 @@ actor TMDBClient {
         try await titlePage(path: "\(title.kind.rawValue)/\(title.id)/recommendations", kind: title.kind, page: page)
     }
 
+    nonisolated enum GenreSort: String, CaseIterable, Identifiable {
+        case popular, topRated
+        var id: Self {
+            self
+        }
+
+        var title: String {
+            self == .popular ? "Popular" : "Top Rated"
+        }
+    }
+
+    func genreTitles(genreID: Int, kind: TMDBTitle.Kind, sort: GenreSort, page: Int) async throws -> TitlePage {
+        var query = [
+            URLQueryItem(name: "with_genres", value: String(genreID)),
+            URLQueryItem(name: "sort_by", value: sort == .popular ? "popularity.desc" : "vote_average.desc"),
+            URLQueryItem(name: "page", value: String(page)),
+        ]
+        if sort == .topRated {
+            query.append(URLQueryItem(name: "vote_count.gte", value: "100"))
+        }
+        var response: TitlePage = try await get("discover/\(kind.rawValue)", query: query)
+        response.results = response.results.map { var title = $0; title.media_type = kind.rawValue; return title }
+        return response
+    }
+
     private func titlePage(path: String, kind: TMDBTitle.Kind, page: Int) async throws -> TitlePage {
         var response: TitlePage = try await get(path, query: [URLQueryItem(name: "page", value: String(page))])
         response.results = response.results.map { var title = $0; title.media_type = kind.rawValue; return title }
