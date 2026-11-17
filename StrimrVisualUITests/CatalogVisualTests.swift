@@ -65,6 +65,18 @@ final class CatalogVisualTests: XCTestCase {
         waitForExpectations(timeout: 40)
     }
 
+    private func assertCinematicDetails() {
+        let source = app.staticTexts["catalog.detail.artwork-source"]
+        XCTAssertTrue(source.waitForExistence(timeout: 25), app.debugDescription)
+        let loaded = NSPredicate(format: "value CONTAINS %@", "image.tmdb.org/t/p/")
+        expectation(for: loaded, evaluatedWith: source)
+        waitForExpectations(timeout: 45)
+        let play = app.buttons["catalog.detail.play"]
+        XCTAssertTrue(play.isHittable, app.debugDescription)
+        XCTAssertLessThan(app.staticTexts["catalog.detail.title"].frame.maxY, play.frame.minY)
+        XCTAssertLessThan(play.frame.maxY, app.tabBars.firstMatch.frame.minY)
+    }
+
     func testHomeContinueWatchingAndScrolling() {
         XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 30))
         assertLoadedBackdrop()
@@ -213,6 +225,7 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertEqual(app.staticTexts["catalog.detail.title"].label, "Dune: Part Two")
         XCTAssertTrue(app.buttons["catalog.detail.play"].exists)
         assertLoadedBackdrop()
+        assertCinematicDetails()
         capture("06-Movie-Details")
         app.swipeUp()
         capture("07-Movie-Details-Scrolled")
@@ -231,6 +244,7 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["catalog.detail.title"].waitForExistence(timeout: 15))
         XCTAssertEqual(app.staticTexts["catalog.detail.title"].label, "Severance")
         assertLoadedBackdrop()
+        assertCinematicDetails()
         capture("09-TV-Details")
         let episode = app.staticTexts["1. Episode 1 · visual test fixture"].firstMatch
         scrollTo(episode)

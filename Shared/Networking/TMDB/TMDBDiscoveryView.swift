@@ -125,6 +125,7 @@ struct TMDBDetailView: View {
     @State private var loadingEpisodes = false
     @State private var initialized = false
     @State private var expandedSynopsis = false
+    @State private var detailViewportWidth: CGFloat = 390
     private let discovery = DiscoveryStore.shared
     private let progress = CatalogProgressStore.shared
     private struct PlaybackSelection: Identifiable {
@@ -205,6 +206,7 @@ struct TMDBDetailView: View {
                 synopsis
                 genresAndStudio
                 episodeSection
+                castSection
                 if !recommendations.isEmpty {
                     TMDBPosterRow(
                         heading: "Recommendations",
@@ -224,12 +226,14 @@ struct TMDBDetailView: View {
             .padding(.horizontal, LayoutMetrics.pageMargin)
             .padding(.bottom, 28)
         }
-        .catalogBackdrop(
-            media: CatalogMediaAdapter.make(title: item, episode: nil, resume: nil),
-            locked: true,
-            details: true,
-        )
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            if width > 0, abs(detailViewportWidth - width) > 1 {
+                detailViewportWidth = width
+            }
+        }
         #if os(iOS)
+        .environment(\.catalogBackdropSelection, nil)
+        .background { CatalogDetailArtwork(source: CatalogDetailArtworkSource(title: item)) }
         .ignoresSafeArea(edges: .top)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
@@ -258,7 +262,14 @@ struct TMDBDetailView: View {
 
     private var artworkSpace: some View {
         #if os(iOS)
-            Color.clear.containerRelativeFrame(.vertical) { height, _ in min(max(height * 0.38, 240), 400) }
+            Color.clear
+                .containerRelativeFrame(.vertical) { height, _ in
+                    // The horizontal page margin is excluded from the scroll content, not from its artwork.
+                    CatalogDetailArtworkSource(title: item).contentInset(
+                        width: detailViewportWidth,
+                        viewport: height,
+                    )
+                }
                 .accessibilityHidden(true)
         #else
             TMDBArtwork(path: item.backdrop_path, backdrop: true).frame(height: 230).clipped()
@@ -440,6 +451,33 @@ struct TMDBDetailView: View {
                 Text("NETWORK").font(.caption).foregroundStyle(.secondary)
                 Text(networks.map(\.name).joined(separator: " · "))
             }
+        }
+    }
+
+    @ViewBuilder private var castSection: some View {
+        if let cast = item.credits?.displayCast, !cast.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Cast").font(.title2.bold())
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(alignment: .top, spacing: 14) {
+                        ForEach(cast) { member in
+                            VStack(alignment: .leading, spacing: 6) {
+                                ArtworkResourceView(resource: TMDBImageService.imageURL(
+                                    path: member.profile_path,
+                                    size: .w185,
+                                ).map(ArtworkResource.url))
+                                    .frame(width: 88, height: 132)
+                                    .mediaArtworkStyle(.compact)
+                                Text(member.name).font(.caption.weight(.semibold)).lineLimit(2)
+                                if let character = member.character, !character.isEmpty {
+                                    Text(character).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                            }.frame(width: 88, alignment: .leading)
+                        }
+                    }
+                }
+            }
+            .accessibilityIdentifier("catalog.detail.cast")
         }
     }
 

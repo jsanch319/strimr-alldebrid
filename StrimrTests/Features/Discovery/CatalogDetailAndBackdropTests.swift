@@ -9,6 +9,35 @@ struct CatalogDetailAndBackdropTests {
         CatalogMediaAdapter.make(title: .reference(id: id, kind: .movie), episode: nil, resume: nil)
     }
 
+    @Test func `detail artwork prefers high resolution portrait composition and has safe fallbacks`() throws {
+        let poster = try JSONDecoder().decode(TMDBTitle.self, from: Data(
+            #"{"id":1,"media_type":"movie","poster_path":"/poster.jpg","backdrop_path":"/backdrop.jpg"}"#.utf8,
+        ))
+        let source = CatalogDetailArtworkSource(title: poster)
+        #expect(source.candidates.first?.path == "/t/p/original/poster.jpg")
+        #expect(source.candidates.last?.path == "/t/p/w1280/backdrop.jpg")
+        #expect(source.usesPoster)
+        for size in [CGSize(width: 320, height: 568), CGSize(width: 402, height: 874), CGSize(
+            width: 852,
+            height: 393,
+        )] {
+            let image = source.imageHeight(width: size.width, viewport: size.height)
+            let inset = source.contentInset(width: size.width, viewport: size.height)
+            #expect(image > 0 && image <= size.height)
+            #expect(inset > 0 && inset < image)
+        }
+        let backdrop = try JSONDecoder().decode(TMDBTitle.self, from: Data(
+            #"{"id":1,"media_type":"tv","backdrop_path":"/series.jpg"}"#.utf8,
+        ))
+        let fallback = CatalogDetailArtworkSource(title: backdrop)
+        #expect(!fallback.usesPoster)
+        #expect(fallback.candidates.count == 1)
+        #expect(fallback.imageHeight(width: 400, viewport: 800) == 225)
+        let missing = CatalogDetailArtworkSource(title: .reference(id: 1, kind: .movie))
+        #expect(missing.candidates.isEmpty)
+        #expect(missing.imageHeight(width: 400, viewport: 800) == 0)
+    }
+
     @Test func `visible touch highlights ignore offscreen rows and explicit taps take priority`() {
         let selection = CatalogBackdropSelection()
         selection.setViewport(CGRect(x: 0, y: 0, width: 390, height: 800))
@@ -107,7 +136,7 @@ struct CatalogDetailAndBackdropTests {
         let stub = HTTPStub { request in
             if request.url?.path == "/3/tv/12" {
                 return .json(
-                    #"{"id":12,"name":"Show","episode_run_time":[60],"number_of_seasons":1,"production_companies":[{"id":3,"name":"Actual Studio"}],"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"},{"iso_3166_1":"GB","rating":"15"}]}}"#,
+                    #"{"id":12,"name":"Show","episode_run_time":[60],"number_of_seasons":1,"credits":{"cast":[{"id":99,"name":"Actor","character":"Role","profile_path":"/actor.jpg"}]},"production_companies":[{"id":3,"name":"Actual Studio"}],"content_ratings":{"results":[{"iso_3166_1":"US","rating":"TV-MA"},{"iso_3166_1":"GB","rating":"15"}]}}"#,
                 )
             }
             return .json(
@@ -120,6 +149,8 @@ struct CatalogDetailAndBackdropTests {
         #expect(show.certification(in: "CA") == nil)
         #expect(show.production_companies?.first?.name == "Actual Studio")
         #expect(show.runtimeMinutes == 60)
+        #expect(show.credits?.cast.first?.name == "Actor")
+        #expect(show.credits?.cast.first?.character == "Role")
         let movie = try await client.details(.reference(id: 12, kind: .movie))
         #expect(movie.certification(in: "US") == "PG-13")
         #expect(movie.certification(in: "GB") == nil)
@@ -129,8 +160,8 @@ struct CatalogDetailAndBackdropTests {
                     .first { $0.name == "append_to_response" }?.value
             }
         #expect(queries == [
-            "external_ids,content_ratings,alternative_titles",
-            "external_ids,release_dates,alternative_titles",
+            "external_ids,content_ratings,alternative_titles,credits",
+            "external_ids,release_dates,alternative_titles,credits",
         ])
     }
 

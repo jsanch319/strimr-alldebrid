@@ -34,6 +34,22 @@ nonisolated struct TMDBTitle: Codable, Identifiable, Hashable, Sendable {
     var content_ratings: ContentRatings? = nil
     var release_dates: ReleaseDates? = nil
 
+    var credits: Credits? = nil
+    struct Credits: Codable, Hashable, Sendable {
+        struct Member: Codable, Hashable, Sendable, Identifiable {
+            let id: Int
+            let name: String
+            let character: String?
+            let profile_path: String?
+        }
+
+        let cast: [Member]
+        var displayCast: [Member] {
+            var seen = Set<Int>()
+            return cast.filter { seen.insert($0.id).inserted }
+        }
+    }
+
     struct Company: Codable, Hashable, Sendable { let id: Int; let name: String }
     struct ContentRatings: Codable, Hashable, Sendable {
         struct Rating: Codable, Hashable, Sendable { let iso_3166_1: String; let rating: String }
@@ -279,8 +295,8 @@ actor TMDBClient {
             query: [URLQueryItem(
                 name: "append_to_response",
                 value: title
-                    .kind == .movie ? "external_ids,release_dates,alternative_titles" :
-                    "external_ids,content_ratings,alternative_titles",
+                    .kind == .movie ? "external_ids,release_dates,alternative_titles,credits" :
+                    "external_ids,content_ratings,alternative_titles,credits",
             )],
         )
         result.media_type = title.kind.rawValue
