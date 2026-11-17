@@ -345,7 +345,7 @@ private struct StreamingProviderView: View {
     }
 
     private func load(reset: Bool) async {
-        guard reset || !loading else { return }
+        guard reset || (!loading && (page == 0 || page < totalPages)) else { return }
         if reset {
             generation = UUID()
             titles = []; page = 0; totalPages = 0

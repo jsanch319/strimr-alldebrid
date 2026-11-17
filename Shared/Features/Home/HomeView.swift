@@ -316,6 +316,7 @@ private struct CatalogHubView: View {
             onSelect: onSelect,
         )
         .catalogBackdrop(media: hub.items.first?.playableItem, enabled: usesBackdrop)
+        .navigationTitle(hub.title)
         .toolbar {
             if showsCloseButton {
                 ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } }
@@ -325,6 +326,7 @@ private struct CatalogHubView: View {
 }
 
 struct CatalogSearchView: View {
+    @Environment(\.dismiss) private var dismiss
     let data: CatalogHomeData
     var showsCloseButton = true
     let onSelect: (MediaDisplayItem) -> Void
@@ -341,12 +343,6 @@ struct CatalogSearchView: View {
                 ),
                 onSelect: onSelect,
             )
-            if data.isSearching {
-                ProgressView()
-            }
-            if data.hasMoreSearchResults, !data.isSearching {
-                Button("Load More") { Task { await data.searchMore() } }.padding()
-            }
             if let error = data.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.secondary)
             }
@@ -357,6 +353,11 @@ struct CatalogSearchView: View {
             resume: nil,
         ) })
         .navigationTitle("tabs.search")
+        .toolbar {
+            if showsCloseButton {
+                ToolbarItem(placement: .cancellationAction) { Button("hub.close") { dismiss() } }
+            }
+        }
         .searchable(text: $query, prompt: "Search movies and TV shows")
         .task(id: query) { await data.search(query) }
     }
