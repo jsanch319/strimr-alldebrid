@@ -18,6 +18,7 @@ struct MediaCard: View {
     let artworkKind: MediaImageViewModel.ArtworkKind
     let showsLabels: Bool
     let onTap: () -> Void
+    var compactResume = false
 
     private var progress: Double? {
         media.viewProgressPercentage.map { $0 / 100 }
@@ -31,7 +32,17 @@ struct MediaCard: View {
             #endif
 
             if showsLabels {
-                labels
+                if compactResume {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(media.primaryLabel).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        if media.playableItem?.type == .episode {
+                            Text(media.cardSecondaryLabel(remainingTime: nil) ?? "")
+                                .font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                        }
+                    }
+                } else {
+                    labels
+                }
             }
         }
         .frame(width: size.width, alignment: .leading)
@@ -67,6 +78,20 @@ struct MediaCard: View {
             media: media,
         )
         .frame(width: size.width, height: size.height)
+        .overlay(alignment: .bottomLeading) {
+            if compactResume {
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
+                    Label(compactRemainingTime ?? String(localized: "common.actions.resume"), systemImage: "play.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 20)
+                }
+            }
+        }
         .mediaArtworkStyle()
         .overlay(alignment: .topTrailing) {
             WatchStatusBadge(media: media)
@@ -75,10 +100,18 @@ struct MediaCard: View {
         .overlay(alignment: .bottomLeading) {
             if let progress {
                 CardProgressBar(progress: progress)
+                    .accessibilityHidden(compactResume)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
             }
         }
+    }
+
+    private var compactRemainingTime: String? {
+        RemainingTimeFormatter.compactText(
+            duration: media.playableItem?.duration,
+            viewOffset: media.playableItem?.viewOffset,
+        )
     }
 
     private var labels: some View {

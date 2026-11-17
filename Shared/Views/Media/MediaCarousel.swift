@@ -41,6 +41,8 @@ struct MediaCarousel: View {
     let items: [MediaDisplayItem]
     let showsLabels: Bool
     var pagination: PosterRailPagination?
+    let compactContinueWatching: Bool
+    @State private var viewportWidth: CGFloat = 390
     let onViewAll: (() -> Void)?
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -51,8 +53,10 @@ struct MediaCarousel: View {
         onViewAll: (() -> Void)? = nil,
         pagination: PosterRailPagination? = nil,
         hub: Hub? = nil,
+        compactContinueWatching: Bool = false,
         onSelectMedia: @escaping (MediaDisplayItem) -> Void,
     ) {
+        self.compactContinueWatching = compactContinueWatching
         self.hub = hub
         self.pagination = pagination
         self.layout = layout
@@ -84,6 +88,11 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            if compactContinueWatching, width > 0, abs(viewportWidth - width) > 1 {
+                viewportWidth = width
+            }
+        }
         .posterRailPagination(rowPagination, ids: displayedItems.map(\.id))
         #if os(iOS)
             .task(id: PagingContext(hub: hub, generation: registry?.generation ?? 0)) {
@@ -139,8 +148,18 @@ struct MediaCarousel: View {
                 onSelectMedia(media)
             }
         case .landscape:
-            LandscapeMediaCard(media: media, showsLabels: showsLabels) {
-                onSelectMedia(media)
+            if compactContinueWatching {
+                let width = min(320, max(180, viewportWidth * 0.58))
+                MediaCard(
+                    size: CGSize(width: width, height: width * 9 / 16),
+                    media: media,
+                    artworkKind: .cardArt,
+                    showsLabels: showsLabels,
+                    onTap: { onSelectMedia(media) },
+                    compactResume: true,
+                )
+            } else {
+                LandscapeMediaCard(media: media, showsLabels: showsLabels) { onSelectMedia(media) }
             }
         }
     }

@@ -69,6 +69,25 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 30))
         assertLoadedBackdrop()
         capture("01-Home")
+        let watching = app.otherElements["home.row.catalog:continue"]
+        let trending = app.otherElements["home.row.catalog:trendingMovies"]
+        XCTAssertTrue(watching.waitForExistence(timeout: 20), app.debugDescription)
+        XCTAssertTrue(trending.waitForExistence(timeout: 20), app.debugDescription)
+        let movie = watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+        let episode = watching.descendants(matching: .any).matching(identifier: "catalog.card.tv:95396:s1:e2")
+            .firstMatch
+        let poster = trending.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+        XCTAssertTrue(movie.exists && episode.exists && poster.exists, app.debugDescription)
+        XCTAssertLessThan(movie.frame.width, app.frame.width * 0.7)
+        XCTAssertGreaterThan(movie.frame.width, app.frame.width * 0.45)
+        XCTAssertLessThan(episode.frame.minX, app.frame.width * 0.85)
+        XCTAssertGreaterThanOrEqual(trending.frame.minY, watching.frame.maxY)
+        // Half the actual portrait artwork (2:3), rather than its caption, must clear the native tab bar.
+        XCTAssertLessThan(poster.frame.minY + poster.frame.width * 0.75, app.tabBars.firstMatch.frame.minY)
+        XCTAssertTrue(watching.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "left")).firstMatch
+            .exists)
+        XCTAssertFalse(watching.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "%")).firstMatch.exists)
+        capture("22-Compact-Continue-Watching-And-Trending")
         scrollTo(card("movie:693134"))
         XCTAssertTrue(card("tv:95396:s1:e2").exists, app.debugDescription)
         capture("02-Continue-Watching")

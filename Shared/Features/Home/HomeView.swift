@@ -45,6 +45,14 @@ struct HomeView: View {
         self.onSelectMedia = onSelectMedia
     }
 
+    private var compactCatalogHome: Bool {
+        #if os(iOS)
+            viewModel.isServerFree && UIDevice.current.userInterfaceIdiom == .phone
+        #else
+            false
+        #endif
+    }
+
     var body: some View {
         ScrollView {
             if !viewModel.heroSlides.isEmpty {
@@ -58,10 +66,11 @@ struct HomeView: View {
                         backdropSelection.clearTapPriority()
                     },
                     onVisibilityChange: { heroBackdropVisible = $0 },
+                    compact: compactCatalogHome,
                 )
             }
 
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: compactCatalogHome ? 16 : 24) {
                 if !viewModel.isServerFree {
                     AllDebridHomeSection(
                         onSelect: { selectedSheet = .allDebrid($0) },
@@ -74,6 +83,7 @@ struct HomeView: View {
                         row: row,
                         showsLabels: settingsManager.interface.showsCardLabels,
                         canOpenWithoutServer: viewModel.isServerFree,
+                        compactContinueWatching: compactCatalogHome && row.kind == .continueWatching,
                         pagination: viewModel.catalog?.pagination(for: row.id),
                         onViewAll: { hub in
                             if viewModel
@@ -107,7 +117,7 @@ struct HomeView: View {
                 }
             }
             .padding(.horizontal, LayoutMetrics.pageMargin)
-            .padding(.vertical, 20)
+            .padding(.vertical, compactCatalogHome ? 12 : 20)
         }
         .catalogBackdrop(
             media: backdropMedia,

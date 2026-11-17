@@ -154,7 +154,10 @@ final class HomeViewModel {
         if let catalog {
             let visible = preferences.visibleRows(from: catalog.rows).map(preferences.styled)
             // A prior saved movie/TV row order must not strand the new combined row below discovery.
-            return visible.filter { $0.kind == .continueWatching } + visible.filter { $0.kind != .continueWatching }
+            let trendingID = "catalog:\(TMDBClient.Feed.trendingMovies.id)"
+            return visible.filter { $0.kind == .continueWatching }
+                + visible.filter { $0.id == trendingID }
+                + visible.filter { $0.kind != .continueWatching && $0.id != trendingID }
         }
         return pinningOfflineDownloads(preferences.visibleRows(from: availableRows), preferences: preferences)
             .map(preferences.styled)

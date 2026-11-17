@@ -6,6 +6,7 @@
         @Environment(\.scenePhase) private var scenePhase
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         let slides: [HomeHeroSlide]
         /// Bumped by the home while the user scrolls it, which holds the pages still.
@@ -14,6 +15,7 @@
         let onDetails: (MediaItem) -> Void
         var onFeaturedChange: ((MediaItem?) -> Void)?
         var onVisibilityChange: ((Bool) -> Void)?
+        var compact = false
 
         @State private var selection: MediaIdentity?
         @State private var restart = 0
@@ -28,7 +30,7 @@
                 // sliding in and the scroll coming to rest off the page.
                 HStack(spacing: 0) {
                     ForEach(slides) { slide in
-                        HomeHeroPage(slide: slide, onPlay: onPlay, onDetails: onDetails)
+                        HomeHeroPage(slide: slide, onPlay: onPlay, onDetails: onDetails, compact: compact)
                             .containerRelativeFrame(.horizontal)
                     }
                 }
@@ -45,7 +47,12 @@
             .scrollClipDisabled()
             .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0; onVisibilityChange?($0) }
             .containerRelativeFrame(.vertical) { height, _ in
-                Self.height(for: height)
+                compact
+                    ? min(
+                        max(height * 0.38, dynamicTypeSize.isAccessibilitySize ? 420 : 280),
+                        dynamicTypeSize.isAccessibilitySize ? 520 : 340,
+                    )
+                    : Self.height(for: height)
             }
             .overlay(alignment: .bottom) {
                 if slides.count > 1 {
@@ -195,6 +202,7 @@
         let slide: HomeHeroSlide
         let onPlay: (MediaItem) -> Void
         let onDetails: (MediaItem) -> Void
+        var compact = false
 
         var body: some View {
             ZStack(alignment: .bottomLeading) {
@@ -213,7 +221,7 @@
 
                 details
                     .padding(.horizontal, LayoutMetrics.pageMargin)
-                    .padding(.bottom, 36)
+                    .padding(.bottom, compact ? 30 : 36)
             }
             .clipped()
             .contentShape(Rectangle())
@@ -222,7 +230,7 @@
         }
 
         private var details: some View {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: compact ? 6 : 10) {
                 if let eyebrow = slide.eyebrow {
                     Text(eyebrow)
                         .eyebrowStyle()
@@ -281,7 +289,10 @@
         )
 
         private var logoSize: CGSize {
-            horizontalSizeClass == .compact ? CGSize(width: 260, height: 90) : CGSize(width: 360, height: 120)
+            horizontalSizeClass == .compact ? CGSize(width: 260, height: compact ? 64 : 90) : CGSize(
+                width: 360,
+                height: 120,
+            )
         }
     }
 
