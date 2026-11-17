@@ -41,19 +41,13 @@ extension View {
                     prefetch()
                 }
                 .onScrollPhaseChange { _, phase in
-                    if phase == .interacting {
+                    if phase == .interacting || phase == .animating {
                         interacted = true
                     }
                     if phase == .idle {
                         prefetch()
                     }
                 }
-                .simultaneousGesture(DragGesture(minimumDistance: 10).onChanged { value in
-                    // Horizontal intent also covers short first pages that fit inside the viewport.
-                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                    interacted = true
-                    prefetch()
-                })
                 .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.8) { values in
                     visibleIDs = Set(values)
                     prefetch()
@@ -66,9 +60,11 @@ extension View {
                             .padding(4)
                     }
                 }
-                .accessibilityAction(named: "Load more titles") {
-                    guard let pagination, pagination.hasMore, !pagination.loading else { return }
-                    Task { await pagination.loadMore() }
+                .accessibilityActions {
+                    if let pagination, pagination.hasMore {
+                        Button("Load more titles") { Task { await pagination.loadMore() } }
+                            .disabled(pagination.loading)
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if let error = pagination?.error {

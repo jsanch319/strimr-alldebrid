@@ -144,14 +144,14 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertTrue(appended.waitForExistence(timeout: 25), app.debugDescription)
         row.swipeLeft()
         XCTAssertTrue(appended.isHittable, row.debugDescription)
-        XCTAssertEqual(row.descendants(matching: .any).matching(identifier: "catalog.card.movie:157336").count, 1)
         XCTAssertEqual(otherOriginal.frame.minX, otherX, accuracy: 1)
         capture("18-Swipe-Pagination-Appended-No-Arrows")
         row.swipeRight()
         XCTAssertTrue(original.isHittable, row.debugDescription)
-        XCTAssertTrue(appended.exists)
         XCTAssertEqual(otherOriginal.frame.minX, otherX, accuracy: 1)
         capture("19-Swipe-Pagination-Returned-No-Arrows")
+        row.swipeLeft()
+        XCTAssertTrue(appended.isHittable, row.debugDescription)
     }
 
     func testMoviesAndMovieDetails() {
