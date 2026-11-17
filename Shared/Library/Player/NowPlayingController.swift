@@ -207,7 +207,7 @@ final class NowPlayingController {
         let generation = identityGeneration
         let perform: @MainActor (Command) -> Void = { [weak self] command in
             guard let self, identityGeneration == generation else { return }
-            perform(command)
+            self.perform(command)
         }
         // MediaPlayer may deliver commands off the main thread.
         let target = command.addTarget { @Sendable event in
