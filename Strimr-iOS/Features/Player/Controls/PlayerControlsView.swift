@@ -102,7 +102,7 @@ struct PlayerControlsView: View {
                     VStack(spacing: 18) {
                         PlayerAuxiliaryControlsRow(
                             media: isLive ? nil : media,
-                            compact: geometry.size.height < 450,
+                            compact: geometry.size.height < 650,
                             stacksTitle: geometry.size.width < 500 && geometry.size.height >= 450,
                             // Leave the centered 240-point transport cluster and a 12-point gap clear,
                             // even in a short landscape viewport where the two rows share vertical space.
