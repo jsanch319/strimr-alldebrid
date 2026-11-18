@@ -156,7 +156,6 @@ final class PlayerController {
     @ObservationIgnored private var pendingSeekTarget: Double?
     @ObservationIgnored private var continuity = PlaybackContinuity()
     @ObservationIgnored private var loadGeneration = UUID()
-    @ObservationIgnored private var landedSeekTarget: Double?
     @ObservationIgnored private var scrubThumbnailTask: Task<Void, Never>?
     @ObservationIgnored private var scrubAetherTask: Task<Void, Never>?
     @ObservationIgnored private var scrubExtractorDwellTask: Task<Void, Never>?
@@ -239,7 +238,7 @@ final class PlayerController {
         isLoadingSource = true
         loadGeneration = UUID()
         let generation = loadGeneration
-        if isCoordinatedPlayback {
+        if isCatalogSharePlayItem {
             continuity.beginTransition()
         } else {
             continuity.reset(to: startPosition ?? 0)
@@ -1598,7 +1597,6 @@ final class PlayerController {
                 }
                 switch event.outcome {
                 case let .landed(renderedTime):
-                    landedSeekTarget = event.target
                     landedSeekPosition = renderedTime
                     pendingSeekTarget = nil
                     _ = checkResumePosition()

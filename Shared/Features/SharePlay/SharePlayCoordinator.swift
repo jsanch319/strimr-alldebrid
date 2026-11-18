@@ -65,13 +65,16 @@ final class SharePlayCoordinator {
         }
         // Legacy server fields remain on the wire for compatibility. Catalog routing never
         // looks up a Plex/Jellyfin server and never includes a source URL or account token.
+        let sharedTitle = episode
+            .map { "\(title.displayTitle) · S\($0.season_number) E\($0.episode_number) — \($0.name)" }
+            ?? title.displayTitle
         return StrimrWatchActivity(
             activityID: UUID(),
             provider: .plex,
             serverIdentifier: "tmdb-catalog",
             ratingKey: item.ratingKey,
             mediaKind: item.mediaKind,
-            title: title.displayTitle,
+            title: sharedTitle,
             initialPosition: initialPosition,
             catalog: item,
         )
