@@ -27,6 +27,8 @@ struct PlayerView: View {
 
     @State private var audioMediaSettled = false
     private let onPlaybackFailure: ((String) -> Void)?
+    private let onRestartFromBeginning: (() -> Void)?
+    @State private var verifyingInitialResume = false
     @State private var playerController = PlayerController()
     @State private var controlsVisible = true
     @State private var hideControlsWorkItem: DispatchWorkItem?
@@ -122,9 +124,11 @@ struct PlayerView: View {
         viewModel: PlayerViewModel,
         onPlaybackFailure: ((String) -> Void)? = nil,
         englishAudioFallback: EnglishAudioFallback? = nil,
+        onRestartFromBeginning: (() -> Void)? = nil,
     ) {
         _viewModel = State(initialValue: viewModel)
         self.onPlaybackFailure = onPlaybackFailure
+        self.onRestartFromBeginning = onRestartFromBeginning
         self.englishAudioFallback = englishAudioFallback
         _englishSession =
             State(initialValue: EnglishAudioSession(manualTrack: englishAudioFallback?.context?.manualTrack))
@@ -297,6 +301,12 @@ struct PlayerView: View {
                 .onChange(of: playerController.videoFormatBadge) { _, newValue in
                     videoFormatBadge = newValue
                 }
+                .onChange(of: playerController.resumeVerifiedPosition) { _, value in
+                    guard value != nil, verifyingInitialResume else { return }
+                    verifyingInitialResume = false
+                    viewModel.completeInitialCatalogResume()
+                    finishMediaLoad()
+                }
                 .onChange(of: playerController.errorMessage) { _, newValue in
                     guard let newValue else { return }
                     Task { await handlePlaybackError(newValue) }
@@ -396,6 +406,31 @@ struct PlayerView: View {
                     }
                     .equatable()
                 }
+                .confirmationDialog(
+                    "Restore saved position",
+                    isPresented: Binding(
+                        get: { playerController.resumeRecoveryMessage != nil },
+                        set: {
+                            if !$0 {
+                                playerController.resumeRecoveryMessage = nil
+                            }
+                        },
+                    ),
+                    titleVisibility: .visible,
+                ) {
+                    Button("Retry Resume") { retryInitialResume() }
+                    Button("Choose Another Source") {
+                        viewModel.saveProgress()
+                        playerController.stop()
+                        if let choose = englishAudioFallback?.chooseSource {
+                            choose()
+                        } else {
+                            dismissPlayer(force: true)
+                        }
+                    }
+                    Button("Start From Beginning", role: .destructive) { restartFromBeginning() }
+                    Button("Keep Waiting", role: .cancel) {}
+                } message: { Text(playerController.resumeRecoveryMessage ?? "Your saved position is preserved.") }
                 .confirmationDialog(
                     "English audio is available in another source",
                     isPresented: $showEnglishOffer,
@@ -1827,13 +1862,44 @@ struct PlayerView: View {
         #endif
     }
 
+    private func retryInitialResume() {
+        let target = playerController.resumeTarget ?? pendingStartPosition ?? viewModel
+            .resumePosition ?? playerController.position
+        playerController.resumeRecoveryMessage = nil
+        verifyingInitialResume = true
+        Task {
+            if await playerController.seekAfterReady(to: target), verifyingInitialResume {
+                verifyingInitialResume = false
+                viewModel.completeInitialCatalogResume(); finishMediaLoad()
+            }
+        }
+    }
+
+    private func restartFromBeginning() {
+        guard let url = activePlaybackURL else { return }
+        let shouldPause = shouldPauseAfterMediaLoad || (!shouldResumeAfterMediaLoad && playerController.isPaused)
+        verifyingInitialResume = false
+        playerController.stop()
+        onRestartFromBeginning?()
+        viewModel.restartResumeFromBeginning()
+        startPlayback(
+            url: url,
+            startPosition: 0,
+            resetTrackSelection: false,
+            shouldResumeAfterLoad: !shouldPause,
+            shouldPauseAfterLoad: shouldPause,
+        )
+    }
+
     private func applyRemoteResumeWhenReady() {
         guard !sharePlayCoordinator.isInSession, viewModel.shouldResumeFromOffset,
               let resume = viewModel.resumePosition, resume > 0 else { return }
         appliedResumeOffset = true
         let loadedURL = activePlaybackURL
+        verifyingInitialResume = true
         Task {
             guard await playerController.seekAfterReady(to: resume), activePlaybackURL == loadedURL else { return }
+            verifyingInitialResume = false
             viewModel.completeInitialCatalogResume()
             finishMediaLoad()
         }
@@ -1859,9 +1925,11 @@ struct PlayerView: View {
         if let resumePosition, resumePosition > 0 {
             appliedResumeOffset = true
             let loadedURL = activePlaybackURL
+            verifyingInitialResume = true
             Task {
                 guard await playerController.seekAfterReady(to: resumePosition),
                       activePlaybackURL == loadedURL else { return }
+                verifyingInitialResume = false
                 viewModel.completeInitialCatalogResume()
                 finishMediaLoad()
             }

@@ -241,6 +241,14 @@ final class PlayerViewModel {
     @ObservationIgnored private var isCatalogPlayback = false
     private(set) var awaitsCatalogResume = false
 
+    func restartResumeFromBeginning() {
+        awaitsCatalogResume = false
+        catalogResumePercentage = nil
+        shouldResumeFromOffsetFlag = false
+        trackerSession?.updateInitialResumeOffset(0)
+        position = 0
+    }
+
     /// Called by the original platform player after its ready-to-seek operation completes.
     func completeInitialCatalogResume() {
         awaitsCatalogResume = false

@@ -476,6 +476,9 @@ private struct CatalogPlayerView: View {
                 NativePlaybackView(
                     viewModel: viewModel,
                     englishAudioFallback: englishAudioFallback,
+                    onRestartFromBeginning: {
+                        CatalogProgressStore.shared.restart(title: title, episode: episode, scope: scope)
+                    },
                     onFailure: onFailure.map { callback in
                         { message in
                             guard !failureReported else { return }
@@ -511,6 +514,7 @@ struct NativePlaybackView: View {
     @Environment(\.dismiss) private var dismiss
     @State var viewModel: PlayerViewModel
     var englishAudioFallback: EnglishAudioFallback?
+    var onRestartFromBeginning: (() -> Void)?
     var onFailure: ((String) -> Void)?
     @State private var presentationID = UUID()
     var body: some View {
@@ -523,6 +527,7 @@ struct NativePlaybackView: View {
                 viewModel: viewModel,
                 onPlaybackFailure: onFailure,
                 englishAudioFallback: englishAudioFallback,
+                onRestartFromBeginning: onRestartFromBeginning,
             )
         #endif
     }

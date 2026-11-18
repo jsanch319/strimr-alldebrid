@@ -40,6 +40,20 @@ final class PlayerController {
     var subtitleMaxCueDuration = 60.0
     var assRenderer: AssSubtitlesRenderer?
     var activeSubtitleCodec: String?
+    @ObservationIgnored private var handoffResumeTask: Task<Void, Never>?
+    @ObservationIgnored private var handoffToken = UUID()
+    @ObservationIgnored private weak var continuityItem: AVPlayerItem?
+    var resumeTarget: Double? {
+        resumeVerification?.target
+    }
+
+    var resumeRecoveryMessage: String?
+    private(set) var resumeVerifiedPosition: Double?
+    @ObservationIgnored private var resumeVerification: ResumeVerification?
+    @ObservationIgnored private var resumeVerificationToken = UUID()
+    @ObservationIgnored private var resumeSeekTask: Task<Void, Never>?
+    @ObservationIgnored private var landedSeekPosition: Double?
+    @ObservationIgnored private var isLoadingSource = false
     var errorMessage: String?
     #if os(iOS) || os(macOS)
         var showsPictureInPictureControl = false
@@ -220,6 +234,8 @@ final class PlayerController {
             remoteInterruptionToken = nil
             airPlayDiagnostics.setSource(url)
         #endif
+        cancelResumeVerification()
+        isLoadingSource = true
         loadGeneration = UUID()
         let generation = loadGeneration
         continuity.reset(to: startPosition ?? 0)
@@ -298,6 +314,7 @@ final class PlayerController {
                     audioSourceStreamIndex: preferredAudioTrackID.map(Int32.init),
                 )
                 guard loadGeneration == generation, !Task.isCancelled else { return }
+                isLoadingSource = false
                 if autoplay, live?.autoplay == false {
                     engine.play()
                 }
@@ -334,6 +351,7 @@ final class PlayerController {
                 onMediaLoaded?()
             } catch {
                 guard loadGeneration == generation, !Task.isCancelled, !error.isCancellation else { return }
+                isLoadingSource = false
                 deactivateASSRendering()
                 nowPlayingController?.stop()
                 TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
@@ -511,35 +529,176 @@ final class PlayerController {
         performSeek(to: time)
     }
 
+    private func cancelHandoffVerification() {
+        handoffToken = UUID(); handoffResumeTask?.cancel(); handoffResumeTask = nil
+    }
+
+    func cancelResumeVerification() {
+        cancelHandoffVerification()
+        resumeVerificationToken = UUID()
+        resumeSeekTask?.cancel(); resumeSeekTask = nil
+        resumeVerification = nil; resumeRecoveryMessage = nil
+        resumeVerifiedPosition = nil
+    }
+
+    private func verifyHandoff(_ item: AVPlayerItem) {
+        guard !isLive, !isLoadingSource, !isStopping, hasStartedPlayback, position > 2,
+              resumeVerification == nil else { return }
+        cancelHandoffVerification()
+        let token = handoffToken
+        let generation = loadGeneration
+        let checkpoint = position
+        continuity.beginTransition()
+        resumeVerification = ResumeVerification(target: checkpoint)
+        landedSeekPosition = nil
+        handoffResumeTask = Task { @MainActor [weak self, weak item] in
+            let started = ContinuousClock.now
+            var stableSince: ContinuousClock.Instant?
+            while let self, let item, token == handoffToken, generation == loadGeneration,
+                  engine.currentAVPlayerItem === item, !isStopping, hasStartedPlayback, engine.state != .ended,
+                  errorMessage == nil, !Task.isCancelled
+            {
+                if resumeVerification == nil || checkResumePosition() {
+                    return
+                }
+                let native = engine.currentAVPlayer?.currentTime().seconds
+                let mapped = native.map { $0 + (videoRoute == .loopback ? engine.playlistShiftSeconds : 0) }
+                let settled = item.status == .readyToPlay && !engine.isBuffering && !engine.isSeeking && engine
+                    .state != .loading
+                if settled {
+                    if stableSince == nil {
+                        stableSince = .now
+                    }
+                } else {
+                    stableSince = nil
+                }
+                let stable = stableSince.map { Double($0.duration(to: .now).components.seconds) } ?? 0
+                if ResumeVerification.shouldCorrectHandoff(
+                    target: checkpoint,
+                    native: mapped,
+                    rendered: engine.clock.sourceTime,
+                    settled: settled,
+                    stableSeconds: stable,
+                ) {
+                    #if os(iOS)
+                        airPlayDiagnostics.record("resume-handoff-position-mismatch")
+                    #endif
+                    // The engine's route restore has settled at a corroborated wrong position.
+                    // Correct this item once; never reload or re-resolve its source.
+                    handoffResumeTask = nil
+                    _ = await seekAfterReady(to: checkpoint)
+                    return
+                }
+                if started.duration(to: .now) >= .seconds(180) {
+                    resumeRecoveryMessage = "The playback route is still restoring your saved position. Choose how to continue."
+                    return
+                }
+                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            }
+        }
+    }
+
+    private func checkResumePosition() -> Bool {
+        guard var verification = resumeVerification else { return false }
+        let item = engine.currentAVPlayerItem
+        let ready = item.map { $0.status == .readyToPlay } ?? (!engine.isBuffering && engine.state != .loading)
+        // Native time is folded by the same public playlist shift used by the engine.
+        // Require agreement with the rendered source clock, not a synthetic currentTime alone.
+        let native = engine.currentAVPlayer?.currentTime().seconds
+        let mapped = native.map { $0 + (videoRoute == .loopback ? engine.playlistShiftSeconds : 0) }
+        let rendered = engine.clock.sourceTime
+        let actual: Double? = if let mapped, verification.near(mapped), verification.near(rendered) {
+            rendered
+        } else if !engine.isSeeking, engine.clock.sourceTimeFollowsPicture {
+            rendered
+        } else {
+            nil
+        }
+        let confirmed = verification.observe(
+            actual: actual,
+            display: engine.clock.currentTime,
+            ready: ready && !engine.isBuffering,
+            paused: isPaused,
+            landed: landedSeekPosition,
+        )
+        resumeVerification = verification
+        if confirmed {
+            let accepted = landedSeekPosition.flatMap { verification.near($0) ? $0 : nil } ?? actual ?? verification
+                .target
+            continuity.seek(to: accepted); _ = continuity.observe(accepted); position = accepted
+            resumeVerifiedPosition = accepted
+            resumeVerification = nil; resumeRecoveryMessage = nil
+            #if os(iOS)
+                airPlayDiagnostics.record("resume-verified")
+            #endif
+        }
+        return confirmed
+    }
+
     @discardableResult
     func seekAfterReady(to time: Double) async -> Bool {
         guard time.isFinite, time >= 0 else { return false }
-        continuity.seek(to: time)
+        cancelResumeVerification()
+        let token = resumeVerificationToken
         let generation = loadGeneration
+        continuity.seek(to: time)
         if isCoordinatedPlayback {
-            engine.playbackCoordinator.coordinateSeek(
-                to: CMTime(seconds: time, preferredTimescale: 600), options: [],
-            )
+            engine.playbackCoordinator.coordinateSeek(to: CMTime(seconds: time, preferredTimescale: 600), options: [])
             return true
         }
-        // The engine owns seekability, deferred seeks and route-reload readiness. Its clock
-        // can optimistically publish the target before any frame has actually landed.
-        landedSeekTarget = nil
-        pendingSeekTarget = time
-        await engine.seek(to: time)
-        for _ in 0 ..< 300 {
-            guard generation == loadGeneration, !Task.isCancelled, !isStopping else { return false }
-            if let landedSeekTarget, abs(landedSeekTarget - time) < 0.01 {
+        resumeVerification = ResumeVerification(target: time)
+        landedSeekPosition = nil
+        let started = ContinuousClock.now
+        var budget = 60.0
+        while generation == loadGeneration, token == resumeVerificationToken, !Task.isCancelled, !isStopping {
+            if resumeVerifiedPosition != nil || checkResumePosition() {
                 return true
             }
             if errorMessage != nil {
                 return false
+            } // A genuine engine failure retains normal source fallback.
+            let elapsed = Double(started.duration(to: .now).components.seconds)
+            #if os(iOS)
+                let remote = isAirPlayPlaybackActive
+            #else
+                let remote = engine.currentAVPlayer?.isExternalPlaybackActive == true
+            #endif
+            budget = max(budget, ResumeVerification.budget(remote: remote, buffering: engine.isBuffering))
+            if engine.isSourceSeekable == false || elapsed >= budget {
+                resumeRecoveryMessage = engine.isSourceSeekable == false
+                    ? "This stream cannot seek to your saved position. Your saved progress is preserved."
+                    : "Resume is taking longer than expected. Your saved position is preserved; playback has not been stopped."
+                #if os(iOS)
+                    airPlayDiagnostics
+                        .record(engine.isSourceSeekable == false ? "resume-not-seekable" : "resume-delayed")
+                #endif
+                return false // Nonfatal. Observers may still confirm a late landing.
             }
-            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+            let ready = engine.currentAVPlayerItem.map { $0.status == .readyToPlay } ?? (engine.state != .loading)
+            if resumeSeekTask == nil,
+               resumeVerification?.requestSeek(
+                   ready: ready,
+                   buffering: engine.isBuffering,
+                   seeking: engine.isSeeking,
+                   elapsed: elapsed,
+                   supported: engine.isSourceSeekable,
+               ) == true
+            {
+                pendingSeekTarget = time
+                resumeSeekTask = Task { @MainActor [weak self] in
+                    guard let self, generation == loadGeneration, token == resumeVerificationToken,
+                          !Task.isCancelled, !isStopping else { return }
+                    await engine.seek(to: time, exact: true)
+                    if token == resumeVerificationToken {
+                        resumeSeekTask = nil
+                    }
+                }
+                #if os(iOS)
+                    airPlayDiagnostics.record("resume-seek-requested")
+                #endif
+            }
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return false }
         }
-        guard generation == loadGeneration else { return false }
-        engine.pause()
-        errorMessage = "Playback could not restore the saved position. Retry or choose another compatible source."
         return false
     }
 
@@ -557,6 +716,11 @@ final class PlayerController {
     }
 
     private func performSeek(to time: Double) {
+        cancelHandoffVerification()
+        if resumeVerification != nil {
+            resumeVerificationToken = UUID(); resumeSeekTask?.cancel(); resumeSeekTask = nil
+            resumeVerification = ResumeVerification(target: time); landedSeekPosition = nil
+        }
         continuity.seek(to: time)
         if isCoordinatedPlayback {
             engine.playbackCoordinator.coordinateSeek(
@@ -910,6 +1074,7 @@ final class PlayerController {
     }
 
     func stop() {
+        cancelResumeVerification()
         #if os(iOS)
             remoteInterruptionToken = nil
             airPlayDiagnostics.record("session-stop")
@@ -1303,9 +1468,13 @@ final class PlayerController {
 
         engine.$currentAVPlayerItem
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] item in
                 guard let self, !isLive, !isStopping else { return }
                 continuity.beginTransition()
+                if let item, continuityItem !== item {
+                    continuityItem = item
+                    verifyHandoff(item)
+                }
             }
             .store(in: &cancellables)
 
@@ -1386,7 +1555,13 @@ final class PlayerController {
         engine.clock.$currentTime
             .receive(on: DispatchQueue.main)
             .sink { [weak self] time in
-                guard let self, !isStopping, isLive || continuity.observe(time) else { return }
+                guard let self, !isStopping, !isLoadingSource else { return }
+                if !isLive, !continuity.observe(time) {
+                    if time < 1, position > 2, resumeVerification == nil, let item = engine.currentAVPlayerItem {
+                        verifyHandoff(item)
+                    }
+                    return
+                }
                 position = time
                 if let restore = skipBackSubtitles.observe(position: time) {
                     applySubtitleTrack(id: restore.trackID)
@@ -1397,18 +1572,21 @@ final class PlayerController {
         engine.seekEvents
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
+                guard let self, !isStopping, !isLoadingSource else { return }
                 if event.origin == .nativeScrub {
-                    self?.continuity.seek(to: event.target)
+                    continuity.seek(to: event.target)
                 }
                 switch event.outcome {
                 case let .landed(renderedTime):
-                    self?.landedSeekTarget = event.target
-                    self?.pendingSeekTarget = nil
-                    if let self, continuity.observe(renderedTime) {
+                    landedSeekTarget = event.target
+                    landedSeekPosition = renderedTime
+                    pendingSeekTarget = nil
+                    _ = checkResumePosition()
+                    if continuity.observe(renderedTime) {
                         position = renderedTime
                     }
                 case .stalled, .rejected:
-                    self?.pendingSeekTarget = nil
+                    pendingSeekTarget = nil
                 case .began, .superseded:
                     break
                 }
@@ -1419,6 +1597,9 @@ final class PlayerController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] time in
                 self?.sourcePosition = time
+                if self?.resumeVerification != nil {
+                    _ = self?.checkResumePosition()
+                }
             }
             .store(in: &cancellables)
 
