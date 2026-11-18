@@ -8,7 +8,7 @@ struct AuthorizedSourceSetupView: View {
 
     var body: some View {
         Form {
-            Section("Authorized Source Providers") {
+            Section {
                 Text(
                     "AllDebrid unlocks links and processes magnets; it does not search the movie catalog. Add HTTPS JSON search endpoints supplied by a provider you are authorized to use.",
                 )
@@ -35,6 +35,8 @@ struct AuthorizedSourceSetupView: View {
                 if let message {
                     Text(message).font(.footnote)
                 }
+            } header: {
+                Text("Authorized Source Providers")
             } footer: {
                 Text(
                     "Saving enables automatic submission of matching links to your connected AllDebrid account. Use only providers and files you have permission to access. No providers are bundled.",
