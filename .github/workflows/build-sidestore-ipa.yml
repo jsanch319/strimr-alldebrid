@@ -24,12 +24,7 @@ jobs:
         run: |
           cp Config/Config-example.xcconfig Config/Config.xcconfig
           printf '\nPRODUCT_BUNDLE_IDENTIFIER = app.strimr.alldebrid.ci\n' >> Config/Config.xcconfig
-          if [[ -n "$DISCORD_APPLICATION_CLIENT_ID" ]]; then
-            printf 'DISCORD_APPLICATION_CLIENT_ID = %s\n' "$DISCORD_APPLICATION_CLIENT_ID" >> Config/Config.xcconfig
-          fi
-          if [[ -n "$DISCORD_ACTIVITY_URL" ]]; then
-            printf 'DISCORD_ACTIVITY_URL = %s\n' "$DISCORD_ACTIVITY_URL" >> Config/Config.xcconfig
-          fi
+          python3 Scripts/configure_discord.py Config/Config.xcconfig
           touch Config/Config-TopShelf.xcconfig
 
       - name: Build iOS device app (unsigned)
@@ -55,6 +50,12 @@ jobs:
             exit 1
           fi
 
+      - name: Audit actual Discord configuration
+        run: |
+          python3 Scripts/report_discord_configuration.py \
+            build/DerivedData/Build/Products/Release-iphoneos/Strimr-iOS.app/Info.plist \
+            build/discord-configuration.json
+
       - name: Package unsigned IPA
         run: |
           mkdir -p build/ipa/Payload
@@ -65,6 +66,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Strimr-SideStore-IPA
-          path: Strimr-unsigned.ipa
+          path: |
+            Strimr-unsigned.ipa
+            build/discord-configuration.json
           if-no-files-found: error
           retention-days: 7

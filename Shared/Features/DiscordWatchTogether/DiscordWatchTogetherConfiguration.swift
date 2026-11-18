@@ -13,7 +13,7 @@ enum DiscordWatchTogetherConfiguration {
 
     static func isConfigured(applicationID: String?, activityURL: String?) -> Bool {
         let id = applicationID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !id.isEmpty, id.allSatisfy { $0.isASCII && $0.isNumber },
+        guard (17 ... 20).contains(id.count), id.allSatisfy { $0.isASCII && $0.isNumber },
               let raw = activityURL?.trimmingCharacters(in: .whitespacesAndNewlines),
               let url = URL(string: raw), url.scheme == "https", let host = url.host,
               url.user == nil, url.password == nil,
@@ -21,6 +21,10 @@ enum DiscordWatchTogetherConfiguration {
         else { return false }
         return true
     }
+
+    static let setupExplanation = """
+    Discord Watch Together is not configured in this build. Set DISCORD_APPLICATION_CLIENT_ID to your real Discord application's public client ID and DISCORD_ACTIVITY_URL to your deployed HTTPS Activity URL, then rebuild. The Activity must be deployed and configured in the Discord Developer Portal; configuration values alone do not make Watch Together operational. AllDebrid playback does not require Discord.
+    """
 
     static func activityLaunchURL(
         for media: MediaItem,

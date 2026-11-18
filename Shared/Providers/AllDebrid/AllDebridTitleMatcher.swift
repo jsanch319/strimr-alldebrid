@@ -43,6 +43,31 @@ enum AllDebridTitleMatcher {
         return ranked(magnets + saved, magnetNames: magnetNames)
     }
 
+    /// A pack can justify waiting, never playing. Ready files still require the exact episode matcher above.
+    static func matchesProcessingMagnet(title: TMDBTitle, episode: TMDBEpisode?, magnet: AllDebridMagnet) -> Bool {
+        guard magnet.isProcessing else { return false }
+        let name = magnet.filename.replacingOccurrences(of: "_", with: " ")
+        let isVideoName = ["mkv", "mp4", "m4v", "mov", "avi", "webm", "ts", "m2ts"]
+            .contains((name as NSString).pathExtension.lowercased())
+        let filename = isVideoName ? name : name + ".mkv"
+        if title.kind == .movie {
+            return matches(title: title, episode: nil, filename: filename)
+        }
+        guard let episode else { return false }
+        if name.range(of: #"(?i)s\d+e\d+|\d+x\d+"#, options: .regularExpression) != nil {
+            return matches(title: title, episode: episode, filename: filename)
+        }
+        let seasons = captures(#"(?i)(?:\b|_)(?:season[ ._-]*|s)(\d{1,3})(?!\d)"#, in: name, group: 1)
+            .compactMap(Int.init)
+        guard !seasons.isEmpty, seasons.allSatisfy({ $0 == episode.season_number }) else { return false }
+        return matches(
+            title: title,
+            episode: episode,
+            filename: "S\(episode.season_number)E\(episode.episode_number).mkv",
+            context: name,
+        )
+    }
+
     /// Deterministic quality preference, without discarding lower-resolution fallback candidates.
     static func ranked(_ sources: [Source], magnetNames: [String: String] = [:]) -> [Source] {
         func quality(_ source: Source) -> Int {

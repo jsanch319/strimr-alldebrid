@@ -10,9 +10,6 @@
             @State private var settled = true
             @State private var covered = false
             @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-            @State private var trailer: TrailerSelection?
-            @State private var trailerID: MediaIdentity?
-            @State private var presentedTrailer: TrailerSelection?
             private let network = TrailerNetworkState.shared
             private let trailerCoordinator = TrailerPlaybackCoordinator.shared
         #endif
@@ -46,8 +43,6 @@
                         #if os(iOS)
                             .environment(\.heroTrailerPresentation, currentID == slide.id ? HeroTrailerPresentation(
                                 preview: preview.active ? preview : nil,
-                                selection: trailerID == slide.id ? trailer : nil,
-                                watch: { watchTrailer() },
                             ) : nil)
                         #endif
                             .containerRelativeFrame(.horizontal)
@@ -72,12 +67,15 @@
             .scrollClipDisabled()
             .onScrollVisibilityChange(threshold: 0.5) { isVisible = $0; onVisibilityChange?($0) }
             .containerRelativeFrame(.vertical) { height, _ in
-                compact
-                    ? min(
-                        max(height * 0.38, dynamicTypeSize.isAccessibilitySize ? 420 : 280),
-                        dynamicTypeSize.isAccessibilitySize ? 520 : 340,
-                    )
-                    : Self.height(for: height)
+                #if os(iOS)
+                    if UIDevice.current.userInterfaceIdiom == .phone {
+                        CGFloat(HomeHeroSizing.iPhoneHeight(availableHeight: Double(height)))
+                    } else {
+                        Self.height(for: height)
+                    }
+                #else
+                    legacyHeight(for: height)
+                #endif
             }
             .overlay(alignment: .bottom) {
                 if slides.count > 1 {
@@ -115,7 +113,6 @@
                 await autoAdvance()
             }
             #if os(iOS)
-            .task(id: currentID) { await loadTrailer() }
             .task(id: previewKey) { await preparePreview() }
             .onAppear { isVisible = true; covered = false }
             .onDisappear { isVisible = false; preview.stop() }
@@ -129,9 +126,6 @@
                 if lowPower {
                     preview.stop()
                 }
-            }
-            .fullScreenCover(item: $presentedTrailer, onDismiss: { covered = false }) { selection in
-                TrailerFullscreenView(selection: selection)
             }
             #endif
         }
@@ -203,30 +197,16 @@
                 preview.start(stream)
             }
 
-            private func loadTrailer() async {
-                trailer = nil; trailerID = nil
-                guard let slide = currentSlide else { return }
-                if let stream = directStream {
-                    trailer = TrailerSelection(
-                        title: slide.media.primaryLabel,
-                        source: .direct(stream),
-                    ); trailerID = slide.id
-                    return
-                }
-                let identity = PlayerTitleLogoIdentity(media: slide.media)
-                guard let id = identity.tmdbID, let kind = identity.kind else { return }
-                do {
-                    let videos = try await TMDBClient.shared.trailers(id: id, kind: kind)
-                    guard !Task.isCancelled, currentID == slide.id, let source = videos.first?.source else { return }
-                    trailer = TrailerSelection(title: slide.media.primaryLabel, source: source); trailerID = slide.id
-                } catch { /* Static artwork and normal Play/Details remain usable. */ }
-            }
-
-            private func watchTrailer() {
-                guard trailerID == currentID, let trailer else { return }
-                covered = true; preview.stop(); presentedTrailer = trailer
-            }
         #endif
+
+        private func legacyHeight(for height: CGFloat) -> CGFloat {
+            compact
+                ? min(
+                    max(height * 0.38, dynamicTypeSize.isAccessibilitySize ? 420 : 280),
+                    dynamicTypeSize.isAccessibilitySize ? 520 : 340,
+                )
+                : Self.height(for: height)
+        }
 
         /// A large share of an iPhone in portrait, capped where the screen is tall or wide.
         private static func height(for available: CGFloat) -> CGFloat {
@@ -339,6 +319,7 @@
     }
 
     private struct HomeHeroPage: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         #if os(iOS)
             @Environment(\.heroTrailerPresentation) private var trailerPresentation
         #endif
@@ -367,7 +348,9 @@
                 #if os(iOS)
                     if let preview = trailerPresentation?.preview {
                         TrailerPreviewSurface(preview: preview).id(preview.generation)
-                            .opacity(preview.ready ? 1 : 0).mask(Self.fadeMask)
+                            .opacity(preview.ready ? 1 : 0)
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: preview.ready)
+                            .mask(Self.fadeMask)
                             .allowsHitTesting(false)
                     }
                 #endif
@@ -377,12 +360,12 @@
                     .padding(.bottom, compact ? 30 : 36)
             }
             #if os(iOS)
-            .overlay(alignment: .topTrailing) {
+            .overlay(alignment: .bottomTrailing) {
                 if let preview = trailerPresentation?.preview, preview.ready {
                     Button { preview.toggleMute() } label: {
                         Image(systemName: preview.muted ? "speaker.slash.fill" : "speaker.wave.2.fill")
                             .padding(10).background(.ultraThinMaterial, in: Circle())
-                    }.buttonStyle(.plain).padding(16)
+                    }.buttonStyle(.plain).padding(.trailing, 16).padding(.bottom, 34)
                         .accessibilityLabel(preview.muted ? "Unmute trailer preview" : "Mute trailer preview")
                 }
             }
@@ -431,13 +414,6 @@
                 }
                 .padding(.top, 4)
                 .controlSize(horizontalSizeClass == .compact ? .small : .regular)
-                #if os(iOS)
-                    if let presentation = trailerPresentation, presentation.selection != nil {
-                        Button(action: presentation.watch) { Label("Watch Trailer", systemImage: "film") }
-                            .actionButtonStyle(.secondary).controlSize(.small)
-                            .accessibilityIdentifier("home.hero.watch-trailer")
-                    }
-                #endif
             }
             .frame(maxWidth: 520, alignment: .leading)
             .accessibilityElement(children: .contain)

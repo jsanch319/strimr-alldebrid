@@ -21,8 +21,8 @@ struct DetailActionsRow: View {
 
     var body: some View {
         playButton
-        if DiscordWatchTogetherConfiguration.isConfigured, [.movie, .episode].contains(viewModel.media.mediaItem.kind) {
-            watchTogetherButton
+        if [.movie, .episode].contains(viewModel.media.mediaItem.kind) {
+            DiscordWatchTogetherAction(media: viewModel.media.mediaItem)
         }
         if isServerUnreachable, downloadedPlayback == nil {
             if viewModel.reachableCopyReplacingUnavailableServer != nil {
@@ -231,15 +231,6 @@ struct DetailActionsRow: View {
         } message: {
             Text(discordWatchTogetherMessage ?? "")
         }
-    }
-
-    private var watchTogetherButton: some View {
-        Button(action: startDiscordWatchTogether) {
-            Label("Watch Together on Discord", systemImage: "person.2.wave.2")
-                .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.bordered)
-        .accessibilityLabel(Text("Watch Together on Discord"))
     }
 
     private var watchToggleButton: some View {

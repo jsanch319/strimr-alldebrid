@@ -3,8 +3,6 @@
 
     struct HeroTrailerPresentation {
         let preview: DirectTrailerPreview?
-        let selection: TrailerSelection?
-        let watch: () -> Void
     }
 
     extension EnvironmentValues {

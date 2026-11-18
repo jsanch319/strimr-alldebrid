@@ -22,15 +22,19 @@ final class CatalogSourceResolver {
     }
 
     enum Failure: LocalizedError {
-        case chooseEpisode, noMatch(String), exhausted(String)
+        case chooseEpisode, processing(String), noMatch(String), exhausted(String)
         var errorDescription: String? {
             switch self {
             case .chooseEpisode: "Choose a TV episode before starting playback."
-            case let .noMatch(message), let .exhausted(message): message
+            case let .processing(message), let .noMatch(message), let .exhausted(message): message
             }
         }
     }
 
+    enum Availability: Equatable { case checking, ready, processing, missing, incomplete }
+    private(set) var availability = Availability.checking
+    private(set) var processingMagnets: [AllDebridMagnet] = []
+    private var verifiedConnection = false
     private let client: any CatalogPlaybackClient
     private(set) var sources: [AllDebridTitleMatcher.Source] = []
     private(set) var files: [AllDebridMagnetFile] = []
@@ -42,10 +46,20 @@ final class CatalogSourceResolver {
     }
 
     func refresh(title: TMDBTitle, episode: TMDBEpisode?) async throws {
-        sources = []; files = []; warnings = []; attempted = []
+        sources = []; files = []; warnings = []; attempted = []; processingMagnets = []; availability = .checking
         guard title.kind != .tv || episode != nil else { throw Failure.chooseEpisode }
-        _ = try await client.verifyConnection()
-        let snapshot = try await client.librarySnapshot()
+        if !verifiedConnection {
+            _ = try await client.verifyConnection()
+            verifiedConnection = true
+        }
+        let snapshot: AllDebridLibrarySnapshot
+        do { snapshot = try await client.librarySnapshot() }
+        catch {
+            if AllDebridAPIClient.isAuthenticationOrRateLimit(error) {
+                verifiedConnection = false
+            }
+            throw error
+        }
         try Task.checkCancellation()
         files = snapshot.magnetFiles
         warnings = snapshot.warnings
@@ -57,26 +71,26 @@ final class CatalogSourceResolver {
             links: snapshot.savedLinks,
             magnetNames: names,
         )
-        guard !sources.isEmpty else {
-            let pending = snapshot.magnets.count - snapshot.readyMagnetCount
-            let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
-            var message = "No matching playable file for \(label) was found in your connected AllDebrid library."
-            if pending > 0 {
-                message += " \(pending) magnet(s) are still processing. Refresh after they are ready."
-            } else {
-                message +=
-                    " Checked \(files.filter(\.isVideo).count) ready video file(s) and \(snapshot.savedLinks.filter(\.isVideo).count) saved video link(s)."
-            }
-            if !warnings
-                .isEmpty
-            {
-                message += " The library refresh was incomplete. " + warnings.joined(separator: " ")
-            } else {
-                message +=
-                    " Make sure the file or its folder identifies the correct title/year and, for TV, season and episode."
-            }
-            throw Failure.noMatch(message)
+        guard sources.isEmpty else { availability = .ready; return }
+        processingMagnets = snapshot.magnets.filter {
+            AllDebridTitleMatcher.matchesProcessingMagnet(title: title, episode: episode, magnet: $0)
         }
+        let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
+        if !processingMagnets.isEmpty {
+            availability = .processing
+            throw Failure
+                .processing(
+                    "\(label) is still processing in AllDebrid. Availability refreshes automatically while this screen is open.",
+                )
+        }
+        availability = warnings.isEmpty ? .missing : .incomplete
+        if !warnings.isEmpty {
+            throw Failure.noMatch("The library check for \(label) was incomplete. " + warnings.joined(separator: " "))
+        }
+        throw Failure
+            .noMatch(
+                "\(label) is not available as a matching playable file in your connected AllDebrid library. No content was acquired. Check that its filename/folder identifies the correct title, year and episode, or retry after adding your own available file.",
+            )
     }
 
     func resolveNext() async throws -> Resolved {
@@ -99,6 +113,10 @@ final class CatalogSourceResolver {
 
     func resolveSelected(_ source: AllDebridTitleMatcher.Source) async throws -> Resolved {
         try Task.checkCancellation()
+        guard sources.contains(source)
+        else {
+            throw Failure.noMatch("This file is no longer in the current matching source list. Refresh availability.")
+        }
         return try await resolve(source)
     }
 

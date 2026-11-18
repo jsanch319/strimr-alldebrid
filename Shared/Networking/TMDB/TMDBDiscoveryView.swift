@@ -204,6 +204,16 @@ struct TMDBDetailView: View {
                 artworkSpace
                 heading
                 playbackActions
+                #if os(iOS)
+                    DiscordWatchTogetherAction(
+                        media: CatalogMediaAdapter.make(
+                            title: item,
+                            episode: selectedEpisode,
+                            resume: saved?.resumeOffset,
+                        ),
+                        canLaunch: canPlay,
+                    )
+                #endif
                 HStack(spacing: 16) {
                     Button("Select Source", systemImage: "list.bullet") {
                         selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)

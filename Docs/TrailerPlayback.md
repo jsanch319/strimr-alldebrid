@@ -22,8 +22,8 @@ share in-flight work and the existing five-minute bounded response cache.
 
 **There is currently no direct-trailer feed configured. TMDb's YouTube/Vimeo keys
 are not MP4/HLS URLs.** Normal TMDb titles therefore keep the cinematic artwork
-and offer Watch Trailer instead of automatically playing video behind the hero
-buttons. `HomeHeroSlide.authorizedTrailer` is the typed adapter input for a future
+instead of automatically playing video behind the hero buttons. Home has no
+Watch Trailer button; movie/TV details retain manual trailer playback. `HomeHeroSlide.authorizedTrailer` is the typed adapter input for a future
 provider-supplied direct stream bound to that title's catalog ID. No fake stream,
 undocumented scraper, paid provider or backend was added. This direct adapter input
 is capability, not a claim that any live direct trailer has been discovered or verified.
@@ -67,3 +67,9 @@ real trailer playback and audio, native direct-video readiness and looping, muti
 rapid carousel swipes, offscreen/background behavior and cellular/Low Power/Reduce
 Motion transitions. No real provider/channel/stream is called verified playable by
 this implementation alone. No new paid API key is required; TMDb uses the existing token.
+
+The iPhone hero now uses exactly half of its available vertical container height,
+without compact-height caps. Native direct previews crossfade over the retained
+artwork; their subtle speaker control sits at the bottom-right and changes only
+mute state. Each new featured item starts muted. Unsupported providers retain the
+backdrop with no Home trailer button.

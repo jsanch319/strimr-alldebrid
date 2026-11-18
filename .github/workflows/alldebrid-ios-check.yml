@@ -9,6 +9,7 @@ on:
       - 'StrimrVisualUITests/**'
       - 'Strimr.xcodeproj/**'
       - 'Config/**'
+      - 'Scripts/**'
       - '.github/workflows/alldebrid-ios-check.yml'
 
 permissions:
@@ -30,13 +31,11 @@ jobs:
         run: |
           cp Config/Config-example.xcconfig Config/Config.xcconfig
           printf '\nPRODUCT_BUNDLE_IDENTIFIER = app.strimr.alldebrid.ci\n' >> Config/Config.xcconfig
-          if [[ -n "$DISCORD_APPLICATION_CLIENT_ID" ]]; then
-            printf 'DISCORD_APPLICATION_CLIENT_ID = %s\n' "$DISCORD_APPLICATION_CLIENT_ID" >> Config/Config.xcconfig
-          fi
-          if [[ -n "$DISCORD_ACTIVITY_URL" ]]; then
-            printf 'DISCORD_ACTIVITY_URL = %s\n' "$DISCORD_ACTIVITY_URL" >> Config/Config.xcconfig
-          fi
+          python3 Scripts/configure_discord.py Config/Config.xcconfig
           touch Config/Config-TopShelf.xcconfig
+      - name: Test optional Discord build configuration
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Scripts -p 'test_discord_configuration.py' -v
+
       - name: Compile iOS simulator (no signing)
         shell: bash
         run: |
