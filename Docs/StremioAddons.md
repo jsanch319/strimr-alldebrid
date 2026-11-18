@@ -12,7 +12,7 @@ Configuration URLs, including private path/query values, are saved **only in iOS
 4. Supported authorized magnet/download links use the existing documented AllDebrid acquisition, compact status, cancellable foreground polling and exact ready-file matcher. Raw `infoHash` results require a matching `behaviorHints.filename`; Strimr never chooses the largest file or blindly trusts `fileIdx`. Ready-file selection must still match the actual movie/year/episode. Hoster pages can be attempted through AllDebrid if native header validation fails.
 5. Auto Play uses the existing fallback queue both for URL resolution and reported player-engine failures. Manual Select Source stays available. Exact-second local resume, Simkl percentage fallback/tracking, player controls, Home and trailers are unchanged.
 
-Metadata is cached in memory for 60 seconds, with up to 100 stream entries per response. Requests are cancellable and stop with the playback sheet/app lifecycle. Add-on changes invalidate the resolver. Rate limits stop automatic retry; manual Retry remains available. No title availability is guaranteed.
+Metadata is cached in memory for 60 seconds, with up to 100 stream entries per response. Requests are cancellable and stop with the playback sheet/app lifecycle. Add-on changes invalidate the resolver. Rate limits stop automatic retry and enforce a 60–300 second client cooldown (honoring numeric Retry-After); manual Retry remains available. No title availability is guaranteed.
 
 ## Compatibility limits
 

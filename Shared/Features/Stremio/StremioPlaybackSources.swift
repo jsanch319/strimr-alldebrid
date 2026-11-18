@@ -63,7 +63,7 @@ final class StremioPlaybackSources {
                 guard stream.behaviorHints?.proxyHeaders?.isEmpty != false else { continue }
                 let filename = stream.behaviorHints?.filename
                 if let filename,
-                   !AllDebridTitleMatcher.matches(title: title, episode: episode, filename: filename)
+                   !AuthorizedSourceCandidate.matchesFile(filename, title: title, episode: episode)
                 {
                     continue
                 }

@@ -70,6 +70,10 @@ struct StremioTransportTests {
             _ = try await client.manifest(.init(url: "https://addon.test/manifest.json", authorized: true)); Issue
                 .record("Expected rate limit")
         } catch StremioError.rateLimited {}
+        await #expect(throws: StremioError.self) {
+            try await client.manifest(.init(url: "https://addon.test/manifest.json", authorized: true))
+        }
+        #expect(stub.requests.count == 1)
     }
 
     @Test func `HTTPS playback validates headers without re-unlocking an AllDebrid URL`() async throws {

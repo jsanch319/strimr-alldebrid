@@ -76,6 +76,7 @@ nonisolated protocol StremioClientProtocol: Sendable {
 
 /// Ephemeral transport: no disk URL cache or cookies. Metadata redirects must retain the configured origin.
 actor StremioClient: StremioClientProtocol {
+    private var retryAfter: ContinuousClock.Instant?
     private let configuration: URLSessionConfiguration
     init(session: URLSession? = nil) {
         configuration = session?.configuration ?? .ephemeral
@@ -106,6 +107,9 @@ actor StremioClient: StremioClientProtocol {
     }
 
     private func fetch(_ url: URL) async throws -> Data {
+        if let retryAfter, ContinuousClock.now < retryAfter {
+            throw StremioError.rateLimited
+        }
         do {
             let delegate = StremioSecureRedirect(origin: url)
             let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
@@ -115,6 +119,8 @@ actor StremioClient: StremioClientProtocol {
             try Task.checkCancellation()
             guard let response = raw as? HTTPURLResponse else { throw StremioError.connection }
             if response.statusCode == 429 {
+                let seconds = max(60, min(300, Double(response.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 60))
+                retryAfter = ContinuousClock.now.advanced(by: .seconds(seconds))
                 throw StremioError.rateLimited
             }
             guard (200 ... 299).contains(response.statusCode),
