@@ -114,6 +114,33 @@ struct NativeHomeAdapterTests {
         #expect(progress.progress(title: movie, episode: nil, scope: discovery.scope)?.resumeOffset == 123.456)
     }
 
+    @Test func `dismissal still applies when sync replaces the card while its menu is open`() throws {
+        let (home, progress, discovery) = stores()
+        let show = TMDBTitle.reference(id: 12, kind: .tv)
+        let old = try episode(season: 1, number: 7), next = try episode(season: 2, number: 10)
+        progress.save(
+            title: show,
+            episode: old,
+            position: 123.456,
+            duration: 3600,
+            finished: false,
+            scope: discovery.scope,
+        )
+        let menuCard = try #require(home.rows.first(where: { $0.kind == .continueWatching })?.items.first?.playableItem)
+        progress.replace([], scope: discovery.scope) // Old remote pause disappears during a refresh.
+        home.dismissFromContinueWatching(menuCard)
+        progress.save(
+            title: show,
+            episode: next,
+            position: 555.125,
+            duration: 3600,
+            finished: false,
+            scope: discovery.scope,
+        )
+        #expect(!home.rows.contains { $0.kind == .continueWatching })
+        #expect(progress.progress(title: show, episode: next, scope: discovery.scope)?.resumeOffset == 555.125)
+    }
+
     @Test func `Continue Watching reuses native media captions duration and landscape rows`() throws {
         let (home, progress, discovery) = stores()
         let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie", year: 2020)

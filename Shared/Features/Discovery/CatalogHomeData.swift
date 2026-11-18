@@ -224,8 +224,13 @@ final class CatalogHomeData {
     }
 
     func dismissFromContinueWatching(_ media: MediaItem) {
-        guard let record = progress.records(scope: discovery.scope).first(where: { $0.id == media.id }) else { return }
-        progress.dismissFromContinueWatching(title: record.title, scope: discovery.scope)
+        // A Simkl refresh may replace the episode while its context menu is open. Use the
+        // card's stable title identity, not a lookup of its potentially removed progress record.
+        guard media.guid.hasPrefix("tmdb://") else { return }
+        let identity = media.guid.dropFirst("tmdb://".count).split(separator: ":")
+        guard identity.count == 2, let kind = TMDBTitle.Kind(rawValue: String(identity[0])),
+              let id = Int(identity[1]), id > 0 else { return }
+        progress.dismissFromContinueWatching(title: .reference(id: id, kind: kind), scope: discovery.scope)
     }
 
     func rawSelection(for media: MediaItem) -> AllDebridHomeItem? {
