@@ -34,6 +34,7 @@ struct EnglishAudioInspector: EnglishAudioInspecting {
                     let tag = try await track.load(.extendedLanguageTag)
                     let code = try await track.load(.languageCode)
                     if EnglishAudioPreference.isEnglish(tag ?? code) {
+                        guard try await track.load(.isDecodable) else { continue }
                         return !Task.isCancelled
                     }
                 }
