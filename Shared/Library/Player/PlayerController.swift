@@ -127,6 +127,7 @@ final class PlayerController {
 
     @ObservationIgnored private var cancellables: Set<AnyCancellable> = []
     @ObservationIgnored private var coordinatedPlaybackIdentifier: String?
+    @ObservationIgnored private var isCatalogSharePlayItem = false
     @ObservationIgnored private var hasStartedPlayback = false
     @ObservationIgnored private var isStopping = false
     @ObservationIgnored private var playbackRate: Float = 1.0
@@ -853,12 +854,21 @@ final class PlayerController {
         engine.playbackCoordinator
     }
 
+    func configureCatalogSharePlay(_ enabled: Bool, initialTime: Double) {
+        isCatalogSharePlayItem = enabled
+        if enabled {
+            continuity.seek(to: initialTime)
+        }
+    }
+
     func beginCoordinatedPlayback(
         identifier: String,
         initialTime: Double,
         initialRate: Float = 0,
     ) {
-        continuity.seek(to: initialTime)
+        if isCatalogSharePlayItem {
+            continuity.seek(to: initialTime)
+        }
         isCoordinatedPlayback = true
         coordinatedPlaybackIdentifier = identifier
         engine.transitionToCoordinatedPlaybackItem(
@@ -1079,6 +1089,7 @@ final class PlayerController {
     }
 
     func stop() {
+        isCatalogSharePlayItem = false
         cancelResumeVerification()
         #if os(iOS)
             remoteInterruptionToken = nil
@@ -1581,7 +1592,7 @@ final class PlayerController {
                 if event.origin == .nativeScrub {
                     continuity.seek(to: event.target)
                 }
-                if isCoordinatedPlayback, case .began = event.outcome {
+                if isCoordinatedPlayback, isCatalogSharePlayItem, case .began = event.outcome {
                     // A peer's explicit coordinated seek (including zero) is authoritative intent.
                     continuity.seek(to: event.target)
                 }

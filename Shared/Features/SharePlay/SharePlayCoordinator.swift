@@ -204,6 +204,9 @@ final class SharePlayCoordinator {
 
     func attachPlayer(_ controller: PlayerController, ratingKey: String) {
         playerController = controller
+        if let activity, activity.ratingKey == ratingKey {
+            controller.configureCatalogSharePlay(activity.catalog != nil, initialTime: activity.initialPosition)
+        }
         guard participantCount > 1,
               let session,
               let activity,
@@ -437,6 +440,9 @@ final class SharePlayCoordinator {
         // replacement media to finish loading leaves each participant coordinated against the old
         // item, so a seek can be applied locally while peers reject it for an identifier mismatch.
         // AetherEngine retains commands for this item until the replacement transport is ready.
+        if newActivity.catalog == nil {
+            playerController?.configureCatalogSharePlay(false, initialTime: newActivity.initialPosition)
+        }
         if isReplacingActivity, newActivity.catalog == nil,
            participantCount > 1,
            let playerController,
