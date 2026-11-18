@@ -205,6 +205,9 @@ final class CatalogSourceResolver {
             if case let .stremio(label) = source {
                 return stremio?.isReadyDirect(label) == true
             }
+            if case .saved = source {
+                return false
+            } // Saved hoster links can require new remote processing.
             return true
         }
         for source in ready.prefix(3) {

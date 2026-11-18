@@ -32,6 +32,15 @@ struct EnglishAudioSourceTests {
         #expect(try await resolver.resolveNext().source.filename.contains("720p"))
     }
 
+    @Test func `language inspection never unlocks a saved hoster link`() async throws {
+        let library = AudioLibraryFixture(includesSaved: true)
+        let resolver = CatalogSourceResolver(client: library)
+        try await resolver.refresh(title: movie, episode: nil)
+        _ = try await resolver.resolveNext()
+        _ = try await resolver.englishAudioAlternative(inspector: AudioInspectorFixture(confirmed: false))
+        #expect(await library.hosterUnlocks == 0)
+    }
+
     @Test func `cancelled audio inspection never returns a replacement`() async throws {
         let resolver = resolver()
         try await resolver.refresh(title: movie, episode: nil)
@@ -67,6 +76,12 @@ private final class AudioInspectorFixture: EnglishAudioInspecting {
 }
 
 private actor AudioLibraryFixture: CatalogPlaybackClient {
+    let includesSaved: Bool
+    private(set) var hosterUnlocks = 0
+    init(includesSaved: Bool = false) {
+        self.includesSaved = includesSaved
+    }
+
     func verifyConnection() -> String? {
         "fixture"
     }
@@ -83,10 +98,22 @@ private actor AudioLibraryFixture: CatalogPlaybackClient {
                 link: "https://files.test/\(quality)",
             )
         }
-        return .init(savedLinks: [], magnets: [], readyMagnetCount: 1, magnetFiles: files)
+        return .init(
+            savedLinks: includesSaved ? [.init(
+                id: "saved",
+                filename: "Dune.2021.1080p.mp4",
+                link: "https://hoster.test/link",
+            )] : [],
+            magnets: [],
+            readyMagnetCount: 1,
+            magnetFiles: files,
+        )
     }
 
     func resolvePlaybackURL(_ link: String, filename _: String) -> AllDebridPlaybackResolution {
-        .init(url: URL(string: link)!, statusCode: 200, contentType: "video/x-matroska", followedRedirect: false)
+        if link.contains("hoster.test") {
+            hosterUnlocks += 1
+        }
+        return .init(url: URL(string: link)!, statusCode: 200, contentType: "video/x-matroska", followedRedirect: false)
     }
 }
