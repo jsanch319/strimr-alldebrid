@@ -10,6 +10,7 @@ struct CatalogSourcesView: View {
     @Environment(\.scenePhase) private var scenePhase
     let title: TMDBTitle
     let episode: TMDBEpisode?
+    let sharePlayActivityID: UUID?
     var forceManual = false
     @State private var resolver: CatalogSourceResolver?
     @State private var loading = false
@@ -33,8 +34,15 @@ struct CatalogSourcesView: View {
     @State private var authorizedLink = ""
     @State private var confirmsAuthorization = false
 
-    init(title: TMDBTitle, episode: TMDBEpisode?, startsFromBeginning: Bool = false, forceManual: Bool = false) {
+    init(
+        title: TMDBTitle,
+        episode: TMDBEpisode?,
+        startsFromBeginning: Bool = false,
+        forceManual: Bool = false,
+        sharePlayActivityID: UUID? = nil,
+    ) {
         self.title = title; self.episode = episode; self.forceManual = forceManual
+        self.sharePlayActivityID = sharePlayActivityID
         _resumes = State(initialValue: !startsFromBeginning)
         _automatic = State(initialValue: !forceManual)
     }
@@ -444,6 +452,11 @@ struct CatalogSourcesView: View {
     }
 
     private func playerDismissed() {
+        guard CatalogSharePlayItem.ownsSourceDismissal(
+            expected: sharePlayActivityID,
+            current: sharePlayCoordinator.activity?.activityID,
+            sessionActive: sharePlayCoordinator.isInSession,
+        ) else { return }
         if !automatic {
             Task { await DiscoveryStore.shared.sync(force: true) }
             schedule(.refresh); return

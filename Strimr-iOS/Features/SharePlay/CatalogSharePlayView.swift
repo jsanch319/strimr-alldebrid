@@ -101,7 +101,7 @@ private struct CatalogSharePlayLaunchView: View {
     var body: some View {
         Group {
             if let title {
-                CatalogSourcesView(title: title, episode: episode)
+                CatalogSourcesView(title: title, episode: episode, sharePlayActivityID: activity.activityID)
             } else if let error {
                 VStack(spacing: 16) {
                     Text(error)

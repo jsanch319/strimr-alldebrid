@@ -60,4 +60,12 @@ struct CatalogSharePlayTests {
         #expect(decoded.catalog == nil)
         #expect(decoded.serverIdentifier == "local-server")
     }
+
+    @Test func `an old source dismissal cannot close a newly shared activity`() {
+        let old = UUID(), next = UUID()
+        #expect(!CatalogSharePlayItem.ownsSourceDismissal(expected: old, current: next, sessionActive: true))
+        #expect(CatalogSharePlayItem.ownsSourceDismissal(expected: next, current: next, sessionActive: true))
+        #expect(CatalogSharePlayItem.ownsSourceDismissal(expected: old, current: nil, sessionActive: false))
+        #expect(CatalogSharePlayItem.ownsSourceDismissal(expected: nil, current: next, sessionActive: true))
+    }
 }

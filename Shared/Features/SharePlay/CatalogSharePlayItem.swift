@@ -23,4 +23,8 @@ struct CatalogSharePlayItem: Codable, Hashable, Sendable {
         isValid && activity.ratingKey == ratingKey && activity.mediaKind == mediaKind &&
             activity.initialPosition.isFinite && activity.initialPosition >= 0
     }
+
+    static func ownsSourceDismissal(expected: UUID?, current: UUID?, sessionActive: Bool) -> Bool {
+        expected == nil || !sessionActive || expected == current
+    }
 }
