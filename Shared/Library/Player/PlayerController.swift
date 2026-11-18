@@ -673,7 +673,9 @@ final class PlayerController {
         let confirmed = verification.observe(
             actual: actual,
             display: engine.clock.currentTime,
-            ready: ready && !engine.isBuffering,
+            // Position can be restored while the receiver still buffers video. A stale
+            // buffering flag must not veto corroborated native/rendered position evidence.
+            ready: ready,
             paused: isPaused,
             landed: landedSeekPosition,
         )
