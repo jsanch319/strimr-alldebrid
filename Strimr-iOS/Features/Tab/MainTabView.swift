@@ -29,12 +29,15 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        if homeViewModel.isServerFree {
-            CatalogTabView(homeViewModel: homeViewModel)
-                .environmentObject(coordinator)
-        } else {
-            serverTabView
+        Group {
+            if homeViewModel.isServerFree {
+                CatalogTabView(homeViewModel: homeViewModel)
+                    .environmentObject(coordinator)
+            } else {
+                serverTabView
+            }
         }
+        .modifier(CatalogSharePlayPresentation())
     }
 
     private var serverTabView: some View {

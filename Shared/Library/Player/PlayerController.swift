@@ -238,7 +238,11 @@ final class PlayerController {
         isLoadingSource = true
         loadGeneration = UUID()
         let generation = loadGeneration
-        continuity.reset(to: startPosition ?? 0)
+        if isCoordinatedPlayback {
+            continuity.beginTransition()
+        } else {
+            continuity.reset(to: startPosition ?? 0)
+        }
         position = continuity.position
         deactivateASSRendering()
         resetScrubPreviewSession()
@@ -542,7 +546,7 @@ final class PlayerController {
     }
 
     private func verifyHandoff(_ item: AVPlayerItem) {
-        guard !isLive, !isLoadingSource, !isStopping, hasStartedPlayback, position > 2,
+        guard !isLive, !isLoadingSource, !isStopping, !isCoordinatedPlayback, hasStartedPlayback, position > 2,
               resumeVerification == nil else { return }
         cancelHandoffVerification()
         let token = handoffToken
@@ -854,6 +858,7 @@ final class PlayerController {
         initialTime: Double,
         initialRate: Float = 0,
     ) {
+        continuity.seek(to: initialTime)
         isCoordinatedPlayback = true
         coordinatedPlaybackIdentifier = identifier
         engine.transitionToCoordinatedPlaybackItem(
@@ -1574,6 +1579,10 @@ final class PlayerController {
             .sink { [weak self] event in
                 guard let self, !isStopping, !isLoadingSource else { return }
                 if event.origin == .nativeScrub {
+                    continuity.seek(to: event.target)
+                }
+                if isCoordinatedPlayback, case .began = event.outcome {
+                    // A peer's explicit coordinated seek (including zero) is authoritative intent.
                     continuity.seek(to: event.target)
                 }
                 switch event.outcome {

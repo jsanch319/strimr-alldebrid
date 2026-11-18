@@ -261,7 +261,7 @@ final class PlayerViewModel {
     @ObservationIgnored private var mediaQueue: PlaybackQueue?
     @ObservationIgnored private var playbackPlan: PlaybackPlan?
     @ObservationIgnored private var didReportPlaybackStarted = false
-    @ObservationIgnored private let shouldResumeFromOffsetFlag: Bool
+    @ObservationIgnored private var shouldResumeFromOffsetFlag: Bool
     @ObservationIgnored private let localMedia: MediaItem?
     @ObservationIgnored private let localPlaybackURL: URL?
     @ObservationIgnored private let localExternalSubtitles: [ExternalSubtitleTrack]
@@ -334,6 +334,7 @@ final class PlayerViewModel {
         catalogTrackerItem: TrackerItem? = nil,
         catalogRecorder: PlaybackProgressRecorder? = nil,
         catalogResumePercentage: Double? = nil,
+        coordinatedResumePosition: Double? = nil,
     ) {
         #if !os(tvOS)
             let recorder = catalogRecorder ?? owner.flatMap {
@@ -347,7 +348,8 @@ final class PlayerViewModel {
         #else
             let recorder = catalogRecorder
         #endif
-        let resumePosition = resumes ? (recorder?.resumePosition ?? localMedia.viewOffset) : nil
+        let coordinatedOffset = coordinatedResumePosition.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let resumePosition = coordinatedOffset ?? (resumes ? (recorder?.resumePosition ?? localMedia.viewOffset) : nil)
         #if !os(tvOS)
             let media = resumePosition.map { position in
                 localMedia.applying(OfflineWatchState(
@@ -372,7 +374,7 @@ final class PlayerViewModel {
         playbackURL = localPlaybackURL
         selectedQuality = .original
         progressRecorder = recorder
-        self.catalogResumePercentage = resumes ? catalogResumePercentage : nil
+        self.catalogResumePercentage = coordinatedOffset == nil && resumes ? catalogResumePercentage : nil
         isCatalogPlayback = catalogRecorder != nil
         awaitsCatalogResume = isCatalogPlayback && resumes &&
             ((resumePosition ?? 0) > 0 || (catalogResumePercentage ?? 0) > 0)

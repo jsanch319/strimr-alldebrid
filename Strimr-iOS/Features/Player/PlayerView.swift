@@ -29,6 +29,7 @@ struct PlayerView: View {
     private let onPlaybackFailure: ((String) -> Void)?
     private let onRestartFromBeginning: (() -> Void)?
     @State private var verifyingInitialResume = false
+    @State private var replacingCatalogSharePlay = false
     @State private var playerController = PlayerController()
     @State private var controlsVisible = true
     @State private var hideControlsWorkItem: DispatchWorkItem?
@@ -213,7 +214,9 @@ struct PlayerView: View {
                     playerController.stop()
                     AppDelegate.orientationLock = .all
                     isControlsLocked = false
-                    if sharePlayCoordinator.isInSession {
+                    if sharePlayCoordinator.isInSession, !replacingCatalogSharePlay,
+                       sharePlayCoordinator.activity?.catalog == nil
+                    {
                         sharePlayCoordinator.leave()
                     }
                     sharePlayCoordinator.detachPlayer(playerController)
@@ -359,9 +362,10 @@ struct PlayerView: View {
         let sessionObservers = AnyView(
             playbackLifecycleObservers
                 .onChange(of: sharePlayCoordinator.activityChangeID) { _, _ in
-                    guard let activity = sharePlayCoordinator.activity,
-                          activity.ratingKey != viewModel.currentRatingKey
-                    else { return }
+                    guard let activity = sharePlayCoordinator.activity else { return }
+                    let newCatalogActivity = activity.catalog != nil &&
+                        sharePlayCoordinator.catalogPlaybackActivity?.activityID != activity.activityID
+                    guard activity.ratingKey != viewModel.currentRatingKey || newCatalogActivity else { return }
                     Task { await startPlayback(for: activity) }
                 }
                 .onChange(of: sharePlayCoordinator.isInSession) { _, isInSession in
@@ -1913,6 +1917,13 @@ struct PlayerView: View {
         automaticSubtitleSearchKey = viewModel.currentRatingKey
         if sharePlayCoordinator.isInSession {
             sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
+            if sharePlayCoordinator.activity?.catalog != nil {
+                // The group's current timeline owns late joining. Broadcasting a seek to the
+                // invitation's old initial offset here would rewind every participant.
+                pendingStartPosition = nil; appliedResumeOffset = true
+                viewModel.completeInitialCatalogResume(); finishMediaLoad()
+                return
+            }
         }
         if viewModel.resumesFromRemotePercentage {
             viewModel.handlePlaybackDuration(playerController.duration)
@@ -2365,6 +2376,12 @@ struct PlayerView: View {
     }
 
     private func startPlayback(for activity: StrimrWatchActivity) async {
+        if activity.catalog != nil {
+            replacingCatalogSharePlay = true
+            viewModel.saveProgress(); playerController.stop()
+            sharePlayCoordinator.presentCatalogActivity(activity)
+            return
+        }
         do {
             let nextViewModel = try await sharePlayCoordinator.playerViewModel(for: activity)
             await startPlayback(using: nextViewModel)

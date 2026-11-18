@@ -13,6 +13,9 @@ final class SharePlayCoordinator {
     private(set) var participantCount = 0
     private(set) var isActivating = false
     var errorMessage: String?
+    var catalogErrorMessage: String?
+    var catalogPlaybackActivity: StrimrWatchActivity?
+    var catalogInvitationActivity: StrimrWatchActivity?
 
     var isEligibleForGroupSession: Bool {
         groupStateObserver.isEligibleForGroupSession
@@ -46,6 +49,41 @@ final class SharePlayCoordinator {
 
     func configurePlaybackPresenter(_ presenter: any PlaybackPresenting) {
         playbackPresenter = presenter
+    }
+
+    func makeCatalogActivity(title: TMDBTitle, episode: TMDBEpisode?, initialPosition: Double) -> StrimrWatchActivity? {
+        catalogErrorMessage = nil
+        let item = CatalogSharePlayItem(
+            tmdbID: title.id,
+            isTV: title.kind == .tv,
+            season: episode?.season_number,
+            episode: episode?.episode_number,
+        )
+        guard item.isValid, initialPosition.isFinite, initialPosition >= 0 else {
+            catalogErrorMessage = "Choose a movie or an exact TV episode before starting SharePlay."
+            return nil
+        }
+        // Legacy server fields remain on the wire for compatibility. Catalog routing never
+        // looks up a Plex/Jellyfin server and never includes a source URL or account token.
+        return StrimrWatchActivity(
+            activityID: UUID(),
+            provider: .plex,
+            serverIdentifier: "tmdb-catalog",
+            ratingKey: item.ratingKey,
+            mediaKind: item.mediaKind,
+            title: title.displayTitle,
+            initialPosition: initialPosition,
+            catalog: item,
+        )
+    }
+
+    func presentCatalogActivity(_ activity: StrimrWatchActivity) {
+        guard let item = activity.catalog, item.matches(activity) else {
+            catalogErrorMessage = "This SharePlay title or episode could not be identified safely."
+            return
+        }
+        lastLaunchedActivityID = activity.activityID
+        catalogPlaybackActivity = activity
     }
 
     func makeActivity(
@@ -118,22 +156,30 @@ final class SharePlayCoordinator {
                 let activated = try await activity.activate()
                 if !activated {
                     locallyPreparedActivityIDs.remove(activity.activityID)
-                    errorMessage = String(localized: "sharePlay.error.unavailable")
+                    setActivationError(for: activity)
                 }
             case .activationDisabled:
                 locallyPreparedActivityIDs.remove(activity.activityID)
-                errorMessage = String(localized: "sharePlay.error.unavailable")
+                setActivationError(for: activity)
             case .cancelled:
                 locallyPreparedActivityIDs.remove(activity.activityID)
             @unknown default:
                 locallyPreparedActivityIDs.remove(activity.activityID)
-                errorMessage = String(localized: "sharePlay.error.unavailable")
+                setActivationError(for: activity)
             }
         } catch {
             locallyPreparedActivityIDs.remove(activity.activityID)
             guard !Task.isCancelled, !error.isCancellation else { return }
             ErrorReporter.capture(error)
-            errorMessage = error.localizedDescription
+            setActivationError(for: activity)
+        }
+    }
+
+    private func setActivationError(for activity: StrimrWatchActivity) {
+        if activity.catalog != nil {
+            catalogErrorMessage = "SharePlay is unavailable. Check FaceTime access and that both apps are signed with the Group Activities entitlement."
+        } else {
+            errorMessage = String(localized: "sharePlay.error.unavailable")
         }
     }
 
@@ -251,7 +297,11 @@ final class SharePlayCoordinator {
                 return
             }
             ErrorReporter.capture(error)
-            errorMessage = String(localized: "sharePlay.error.mediaUnavailable")
+            if newSession.activity.catalog != nil {
+                catalogErrorMessage = "This SharePlay movie or episode is unavailable. Check TMDb setup and access to your own playback sources."
+            } else {
+                errorMessage = String(localized: "sharePlay.error.mediaUnavailable")
+            }
             newSession.leave()
             if deferredSessionInvalidation {
                 deferredSessionInvalidation = false
@@ -320,9 +370,11 @@ final class SharePlayCoordinator {
     }
 
     private func launchPlaybackIfNeeded(for activity: StrimrWatchActivity) async {
-        guard lastLaunchedActivityID != activity.activityID,
-              let playbackPresenter
-        else { return }
+        guard lastLaunchedActivityID != activity.activityID else { return }
+        if activity.catalog != nil {
+            presentCatalogActivity(activity); return
+        }
+        guard let playbackPresenter else { return }
         lastLaunchedActivityID = activity.activityID
         do {
             let services = try await resolvedServices(for: activity)
@@ -340,6 +392,12 @@ final class SharePlayCoordinator {
     }
 
     private func ensureAccess(to activity: StrimrWatchActivity) async throws {
+        if let item = activity.catalog {
+            guard item.matches(activity) else { throw SharePlayError.mediaUnavailable }
+            let reference = TMDBTitle.reference(id: item.tmdbID, kind: item.isTV ? .tv : .movie, title: activity.title)
+            _ = try await TMDBClient.shared.details(reference)
+            return
+        }
         let services = try await resolvedServices(for: activity)
         _ = try await services.detail.mediaItem(id: activity.ratingKey)
     }
@@ -379,7 +437,7 @@ final class SharePlayCoordinator {
         // replacement media to finish loading leaves each participant coordinated against the old
         // item, so a seek can be applied locally while peers reject it for an identifier mismatch.
         // AetherEngine retains commands for this item until the replacement transport is ready.
-        if isReplacingActivity,
+        if isReplacingActivity, newActivity.catalog == nil,
            participantCount > 1,
            let playerController,
            playerController.isCoordinatedPlayback
@@ -389,6 +447,11 @@ final class SharePlayCoordinator {
                 initialTime: newActivity.initialPosition,
             )
             lastCoordinatedActivityID = newActivity.activityID
+        }
+        if newActivity.catalog != nil, session != nil, playerController == nil,
+           sharingPresentationActivityID == nil
+        {
+            presentCatalogActivity(newActivity)
         }
     }
 
@@ -434,6 +497,9 @@ final class SharePlayCoordinator {
     }
 
     private func detach(continueLocally: Bool) {
+        if !continueLocally {
+            catalogPlaybackActivity = nil
+        }
         let continuingPlayer = continueLocally ? playerController : nil
         if playerController?.isCoordinatedPlayback == true {
             playerController?.endCoordinatedPlayback(continueLocally: continueLocally)

@@ -11,14 +11,28 @@ zero-based clocks. Explicit seeking/restart, including native remote scrubbing,
 sets a new checkpoint; loading another title resets it. Filtered timestamps never
 reach PlayerViewModel, PlaybackProgressRecorder or Simkl tracking.
 
-Initial resume waits for the engine's seek-landed event, rather than treating the
-optimistic engine clock as proof of success. Waiting is bounded to 30 seconds
-(after the engine seek call returns), canceled by source changes/stop, and reports
-a playback failure instead of releasing the resume gate at zero. The engine owns
-item readiness and deferred seeks. Stale source-load completions/errors cannot
-update a newer session. A native remote HLS item receives a 20-second minimum
-forward-buffer preference and AVPlayer's stall-minimization policy; this does not
-cap quality, transcode codecs, or change local loopback buffering.
+Initial resume accepts an engine rendered-landing event **or** corroborated native /
+rendered clock observations. It does not accept the optimistic scrub target alone.
+The old fixed 30-second fatal error/pause was removed. Readiness-aware verification
+has a monotonic budget: at least 60 seconds locally, 120 after buffering, and 180
+when an AirPlay handoff is observed. The first ready seek can jump past initial
+buffering; a retry requires a settled, nonbuffering engine, no in-flight seek, and
+30 seconds since the prior request. Automatic requests are capped at two. No source
+is re-resolved and no AVPlayer is created by verification.
+
+At the bound, or on known unsupported seeking, the existing player offers Retry
+Resume, Choose Another Source and explicit Start From Beginning, plus Keep Waiting.
+The timeout is nonfatal and does not pause an otherwise playable movie or invoke
+source-failure fallback. A late actual landing can still finish verification.
+Saved exact progress stays protected; only an explicit restart resets it. Restart
+reloads the same authorized URL at the beginning and resets the existing progress
+and tracker resume intent. Real engine failures still use existing source fallback.
+
+Native-item handoffs are observed passively first. A correction is allowed only
+after a ready, nonbuffering, nonseeking engine remains at a corroborated wrong
+native/rendered position for three seconds. Stopped/replaced titles and explicit
+user scrubs cancel that checkpoint. Existing engine route and seek recovery always
+get priority; no parallel reconnection loop or route selection was added.
 
 Existing catalog failure handling saves progress, pauses the failed source, then
 uses the resolver's bounded, already-attempted-source-aware fallback. AllDebrid

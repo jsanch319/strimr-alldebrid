@@ -487,3 +487,21 @@ struct SimklResumeTests {
         await #expect(throws: TrackerAPIError.invalidResponse) { try await client.pausedPlaybacks() }
     }
 }
+
+@MainActor
+struct CoordinatedCatalogResumeTests {
+    @Test func `group position overrides this participants private local and Simkl resume`() throws {
+        let cache = CatalogProgressStore(defaults: TestDefaults.make())
+        let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie")
+        cache.save(title: title, episode: nil, position: 100.125, duration: 2000, finished: false, scope: "a")
+        let model = try PlayerViewModel(
+            localMedia: CatalogMediaAdapter.make(title: title, episode: nil, resume: 100.125),
+            localPlaybackURL: #require(URL(string: "https://example.invalid/own-source.mp4")),
+            catalogRecorder: cache.makeRecorder(title: title, episode: nil, scope: "a"),
+            catalogResumePercentage: 80, coordinatedResumePosition: 600.375,
+        )
+        #expect(model.resumePosition == 600.375)
+        #expect(!model.resumesFromRemotePercentage)
+        #expect(cache.progress(title: title, episode: nil, scope: "a")?.position == 100.125)
+    }
+}

@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 struct CatalogSourcesView: View {
     @Environment(SettingsManager.self) private var settingsManager
+    @Environment(SharePlayCoordinator.self) private var sharePlayCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     let title: TMDBTitle
@@ -52,6 +53,11 @@ struct CatalogSourcesView: View {
         var exactResume: Double?
     }
 
+    private var isSharedPlayback: Bool {
+        sharePlayCoordinator.isInSession && sharePlayCoordinator.activity?.catalog != nil &&
+            sharePlayCoordinator.activity?.ratingKey == CatalogProgress.key(title: title, episode: episode)
+    }
+
     private var progress: CatalogProgress? {
         CatalogProgressStore.shared.progress(title: title, episode: episode, scope: DiscoveryStore.shared.scope)
     }
@@ -61,7 +67,7 @@ struct CatalogSourcesView: View {
             Group {
                 if !automatic, resolver?.sources.isEmpty == false {
                     List {
-                        if let progress, !progress.completed, progress.locallyCleared != true,
+                        if !isSharedPlayback, let progress, !progress.completed, progress.locallyCleared != true,
                            progress.fraction > 0 || progress.position > 0
                         {
                             Toggle("Resume playback", isOn: $resumes)
@@ -78,7 +84,7 @@ struct CatalogSourcesView: View {
                             Text(error).font(.footnote).foregroundStyle(.secondary)
                         }
                         ForEach(resolver?.warnings ?? [], id: \.self) { Text($0).font(.footnote) }
-                        if progress != nil {
+                        if !isSharedPlayback, progress != nil {
                             Button("Clear Saved Resume Position", role: .destructive) {
                                 CatalogProgressStore.shared.clear(
                                     title: title,
@@ -458,6 +464,7 @@ struct CatalogSourcesView: View {
 
 @MainActor
 private struct CatalogPlayerView: View {
+    @Environment(SharePlayCoordinator.self) private var sharePlayCoordinator
     let title: TMDBTitle
     let episode: TMDBEpisode?
     let scope: String
@@ -495,16 +502,23 @@ private struct CatalogPlayerView: View {
             // A SwiftUI value-view reconstruction must not start another tracking session.
             guard viewModel == nil else { return }
             let saved = CatalogProgressStore.shared.progress(title: title, episode: episode, scope: scope)
-            let offset = resumes ? exactResume ?? saved?.resumeOffset ?? 0 : 0
+            let shared = sharePlayCoordinator.isInSession
+                && sharePlayCoordinator.activity?.ratingKey == CatalogProgress.key(title: title, episode: episode)
+                ? sharePlayCoordinator.activity?.initialPosition : nil
+            let offset = shared ?? (resumes ? exactResume ?? saved?.resumeOffset ?? 0 : 0)
             viewModel = PlayerViewModel(
                 localMedia: CatalogMediaAdapter.make(title: title, episode: episode, resume: offset > 0 ? offset : nil),
-                localPlaybackURL: url, localExternalSubtitles: subtitles, resumes: resumes,
+                localPlaybackURL: url, localExternalSubtitles: subtitles, resumes: shared != nil || resumes,
                 catalogTrackerItem: title.trackerItem(episode: episode),
                 catalogRecorder: CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope),
-                catalogResumePercentage: resumes && exactResume == nil ? saved?.resumePercentage : nil,
+                catalogResumePercentage: shared == nil && resumes && exactResume == nil ? saved?.resumePercentage : nil,
+                coordinatedResumePosition: shared,
             )
         }
         .onDisappear { CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope) }
+        #if os(iOS)
+            .interactiveDismissDisabled(sharePlayCoordinator.isInSession)
+        #endif
     }
 }
 

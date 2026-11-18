@@ -56,6 +56,12 @@ jobs:
             build/DerivedData/Build/Products/Release-iphoneos/Strimr-iOS.app/Info.plist \
             build/discord-configuration.json
 
+      - name: Audit Group Activities signing configuration
+        run: |
+          python3 Scripts/report_shareplay_configuration.py \
+            build/DerivedData/Build/Products/Release-iphoneos/Strimr-iOS.app \
+            build/shareplay-configuration.json
+
       - name: Package unsigned IPA
         run: |
           mkdir -p build/ipa/Payload
@@ -69,5 +75,6 @@ jobs:
           path: |
             Strimr-unsigned.ipa
             build/discord-configuration.json
+            build/shareplay-configuration.json
           if-no-files-found: error
           retention-days: 7

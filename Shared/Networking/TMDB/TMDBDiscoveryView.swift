@@ -216,16 +216,7 @@ struct TMDBDetailView: View {
                         canLaunch: canPlay,
                     )
                 #endif
-                HStack(spacing: 16) {
-                    Button("Select Source", systemImage: "list.bullet") {
-                        selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)
-                    }.disabled(!canPlay)
-                    #if os(iOS)
-                        Button("Watch Trailer", systemImage: "film") { presentedTrailer = trailer }
-                            .disabled(trailer == nil || loadingTrailer)
-                            .accessibilityIdentifier("catalog.detail.watch-trailer")
-                    #endif
-                }
+                secondaryPlaybackActions
                 #if os(iOS)
                     if loadingTrailer {
                         ProgressView("Finding official trailer…").font(.caption)
@@ -315,7 +306,43 @@ struct TMDBDetailView: View {
         #endif
     }
 
+    private var sourceAction: some View {
+        Button("Select Source", systemImage: "list.bullet") {
+            selectedPlayback = PlaybackSelection(episode: selectedEpisode, manual: true)
+        }.disabled(!canPlay)
+    }
+
+    private var secondaryPlaybackActions: some View {
+        #if os(iOS)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { sourceAction; trailerAction; sharePlayAction }
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 16) { sourceAction; trailerAction }
+                    sharePlayAction
+                }
+            }
+        #else
+            sourceAction
+        #endif
+    }
+
     #if os(iOS)
+        private var trailerAction: some View {
+            Button("Watch Trailer", systemImage: "film") { presentedTrailer = trailer }
+                .disabled(trailer == nil || loadingTrailer)
+                .accessibilityIdentifier("catalog.detail.watch-trailer")
+        }
+
+        private var sharePlayInitialPosition: Double {
+            guard CatalogDetailPlayback.resumes(saved), let saved else { return 0 }
+            let duration = saved.duration ?? (selectedEpisode?.runtime ?? item.runtimeMinutes).map { Double($0) * 60 }
+            return saved.resumeOffset ?? duration.map { $0 * saved.fraction } ?? 0
+        }
+
+        private var sharePlayAction: some View {
+            CatalogSharePlayButton(title: item, episode: selectedEpisode, initialPosition: sharePlayInitialPosition)
+        }
+
         private func loadTrailer() async {
             trailer = nil; trailerMessage = nil; loadingTrailer = true
             defer {
