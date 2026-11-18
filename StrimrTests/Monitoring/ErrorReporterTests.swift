@@ -35,8 +35,32 @@ struct ErrorReporterBreadcrumbTests {
 
         #expect(sanitized?["http.query"] == nil)
         #expect(sanitized?["http.fragment"] == nil)
-        #expect(sanitized?["url"] as? String == "https://media.example.com/library/metadata/1/thumb")
+        #expect(sanitized?["url"] == nil)
         #expect(sanitized?["method"] as? String == "GET")
+    }
+
+    @Test func `private add-on paths headers and nested URLs do not reach diagnostics`() throws {
+        let data: [String: Any] = [
+            "http.path": "/ad=fixtureOnly/manifest.json",
+            "headers": ["Authorization": "fixtureOnly"],
+            "nested": ["source": "https://addon.test/fixtureOnly/manifest.json"],
+            "method": "GET",
+            "status": 200,
+        ]
+        let safe = try #require(ErrorReporter.removingSensitiveData(from: data))
+        #expect(!String(describing: safe).contains("fixtureOnly"))
+        #expect(safe["status"] as? Int == 200)
+        let error = NSError(
+            domain: "private-fixtureOnly",
+            code: 42,
+            userInfo: [
+                NSLocalizedDescriptionKey: "URL https://addon.test/fixtureOnly/manifest.json",
+                "secret": "fixtureOnly",
+            ],
+        )
+        let result = ErrorReporter.safeDiagnosticError(error)
+        #expect(!String(describing: result).contains("fixtureOnly"))
+        #expect(result.code == 42)
     }
 
     @Test func `breadcrumbs without data stay without data`() {

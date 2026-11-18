@@ -92,7 +92,7 @@ struct CatalogSourcesView: View {
                         }
                     }
                 } else {
-                    availabilityStatus
+                    ScrollView { availabilityStatus }
                 }
             }
             .navigationTitle(automatic ? "Play" : "Select Source")

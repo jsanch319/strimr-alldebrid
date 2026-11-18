@@ -56,7 +56,7 @@ nonisolated struct StremioConfiguration: Codable, Sendable, CustomStringConverti
         let name = String(value
             .filter { !$0.isNewline && $0.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) } }
             .prefix(60))
-        guard !name.contains("://"), !name.contains("="), !name.contains("/"),
+        guard !name.contains("://"), !name.contains("="), !name.contains("/"), !name.contains("%"),
               !tokens.contains(where: { name.localizedCaseInsensitiveContains($0) })
         else { return "Configured Stremio Add-on" }
         return name.isEmpty ? "Stremio Add-on" : name

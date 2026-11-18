@@ -26,9 +26,9 @@ final class StremioPlaybackSources {
 
     init(
         client: any StremioClientProtocol = StremioClient(),
-        store: any StremioConfigurationStorage = StremioConfigurationStore(),
+        store: (any StremioConfigurationStorage)? = nil,
     ) {
-        self.client = client; self.store = store
+        self.client = client; self.store = store ?? StremioConfigurationStore()
     }
 
     static func identity(title: TMDBTitle, episode: TMDBEpisode?) throws -> (type: String, id: String) {
