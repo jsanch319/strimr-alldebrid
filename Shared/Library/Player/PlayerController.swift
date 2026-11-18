@@ -47,6 +47,17 @@ final class PlayerController {
         resumeVerification?.target
     }
 
+    @ObservationIgnored private var completedResumeTransportIntent: Bool?
+    var resumeTransportIntent: Bool? {
+        resumeVerification?.requestedPause ?? completedResumeTransportIntent
+    }
+
+    func consumeResumeTransportIntent() -> Bool? {
+        let intent = resumeTransportIntent
+        completedResumeTransportIntent = nil
+        return intent
+    }
+
     var resumeRecoveryMessage: String?
     private(set) var resumeVerifiedPosition: Double?
     @ObservationIgnored private var resumeVerification: ResumeVerification?
@@ -378,6 +389,16 @@ final class PlayerController {
 
     func togglePlayback() {
         #if os(iOS)
+            if resumeVerification != nil {
+                if isPaused {
+                    resume()
+                } else {
+                    pause()
+                }
+                return
+            }
+        #endif
+        #if os(iOS)
             remoteInterruptionToken = nil
             airPlayDiagnostics.record("toggle-command")
         #endif
@@ -408,6 +429,9 @@ final class PlayerController {
 
     func pause() {
         #if os(iOS)
+            if resumeVerification != nil {
+                resumeVerification?.requestedPause = true
+            }
             remoteInterruptionToken = nil
             airPlayDiagnostics.record("pause-command")
         #endif
@@ -426,6 +450,11 @@ final class PlayerController {
 
     func resume() {
         #if os(iOS)
+            if resumeVerification != nil {
+                resumeVerification?.requestedPause = false
+                resumeRecoveryMessage = "Waiting for your saved position. Retry resume, choose another source, or explicitly start from the beginning."
+                return
+            }
             remoteInterruptionToken = nil
             airPlayDiagnostics.record("play-command")
         #endif
@@ -478,6 +507,9 @@ final class PlayerController {
                     sameSession: generation == loadGeneration && !isStopping,
                     coordinated: isCoordinatedPlayback,
                 ), engine.currentAVPlayer?.timeControlStatus == .paused else { return }
+                if resumeVerification != nil {
+                    resumeVerification?.requestedPause = false; return
+                }
                 airPlayDiagnostics.record("system-authorized-background-resume")
                 // One existing-transport command: no route selection, reload or retries.
                 engine.play()
@@ -543,6 +575,7 @@ final class PlayerController {
         resumeVerificationToken = UUID()
         resumeSeekTask?.cancel(); resumeSeekTask = nil
         resumeVerification = nil; resumeRecoveryMessage = nil
+        completedResumeTransportIntent = nil
         nativeResumeClock.reset()
         resumeVerifiedPosition = nil
     }
@@ -562,6 +595,8 @@ final class PlayerController {
         let checkpoint = position
         continuity.beginTransition()
         resumeVerification = ResumeVerification(target: checkpoint)
+        resumeVerification?.requestedPause = completedResumeTransportIntent
+        completedResumeTransportIntent = nil; resumeVerifiedPosition = nil
         observeNativeResumeClock()
         landedSeekPosition = nil
         handoffResumeTask = Task { @MainActor [weak self, weak item] in
@@ -647,6 +682,7 @@ final class PlayerController {
             let accepted = landedSeekPosition.flatMap { verification.near($0) ? $0 : nil } ?? actual ?? verification
                 .target
             continuity.seek(to: accepted); _ = continuity.observe(accepted); position = accepted
+            completedResumeTransportIntent = verification.requestedPause
             resumeVerifiedPosition = accepted
             resumeVerification = nil; resumeRecoveryMessage = nil
             nativeResumeClock.reset()
@@ -660,6 +696,7 @@ final class PlayerController {
     @discardableResult
     func seekAfterReady(to time: Double) async -> Bool {
         guard time.isFinite, time >= 0 else { return false }
+        let explicitIntent = resumeTransportIntent
         cancelResumeVerification()
         let token = resumeVerificationToken
         let generation = loadGeneration
@@ -669,6 +706,7 @@ final class PlayerController {
             return true
         }
         resumeVerification = ResumeVerification(target: time)
+        resumeVerification?.requestedPause = explicitIntent
         observeNativeResumeClock()
         landedSeekPosition = nil
         let started = ContinuousClock.now

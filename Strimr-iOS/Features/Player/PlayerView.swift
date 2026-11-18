@@ -305,10 +305,14 @@ struct PlayerView: View {
                     videoFormatBadge = newValue
                 }
                 .onChange(of: playerController.resumeVerifiedPosition) { _, value in
-                    guard value != nil, verifyingInitialResume else { return }
-                    verifyingInitialResume = false
-                    viewModel.completeInitialCatalogResume()
-                    finishMediaLoad()
+                    guard value != nil else { return }
+                    if verifyingInitialResume {
+                        verifyingInitialResume = false
+                        viewModel.completeInitialCatalogResume()
+                        finishMediaLoad()
+                    } else if playerController.resumeTransportIntent != nil {
+                        finishMediaLoad()
+                    }
                 }
                 .onChange(of: playerController.errorMessage) { _, newValue in
                     guard let newValue else { return }
@@ -1851,7 +1855,14 @@ struct PlayerView: View {
     private func finishMediaLoad() {
         audioMediaSettled = true
         refreshTracks()
-        if shouldPauseAfterMediaLoad {
+        if let explicitPause = playerController.consumeResumeTransportIntent() {
+            shouldPauseAfterMediaLoad = false; shouldResumeAfterMediaLoad = false
+            if explicitPause {
+                playerController.pause()
+            } else {
+                playerController.resume()
+            }
+        } else if shouldPauseAfterMediaLoad {
             shouldPauseAfterMediaLoad = false
             shouldResumeAfterMediaLoad = false
             playerController.pause()
@@ -1881,7 +1892,8 @@ struct PlayerView: View {
 
     private func restartFromBeginning() {
         guard let url = activePlaybackURL else { return }
-        let shouldPause = shouldPauseAfterMediaLoad || (!shouldResumeAfterMediaLoad && playerController.isPaused)
+        let shouldPause = playerController.resumeTransportIntent ??
+            (shouldPauseAfterMediaLoad || (!shouldResumeAfterMediaLoad && playerController.isPaused))
         verifyingInitialResume = false
         playerController.stop()
         onRestartFromBeginning?()

@@ -3,6 +3,7 @@ import Foundation
 /// Verifies the rendered/native clock, never the engine's optimistic scrub target alone.
 struct ResumeVerification {
     let target: Double
+    var requestedPause: Bool?
     private(set) var confirmations = 0
     private(set) var attempts = 0
     private var previousActual: Double?

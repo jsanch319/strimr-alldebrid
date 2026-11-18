@@ -122,4 +122,12 @@ struct ResumeVerificationTests {
             stableSeconds: 3,
         ))
     }
+
+    @Test func `late confirmation retains an explicit pause request`() {
+        var state = ResumeVerification(target: 900)
+        state.requestedPause = true
+        let confirmed = state.observe(actual: nil, display: 0, ready: false, paused: true, landed: 900)
+        #expect(confirmed)
+        #expect(state.requestedPause == true)
+    }
 }
