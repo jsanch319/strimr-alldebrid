@@ -102,12 +102,14 @@ struct NativeHomeAdapterTests {
             finished: false,
             scope: discovery.scope,
         )
-        let card = try #require(home.rows.first(where: { $0.kind == .continueWatching })?.items.first?.playableItem)
+        let hub = try #require(home.rows.first(where: { $0.kind == .continueWatching })?.hub)
+        let card = try #require(hub.items.first?.playableItem)
         let otherRows = home.rows.filter { $0.kind != .continueWatching }.map(\.id)
         let revision = progress.revision
         home.dismissFromContinueWatching(card)
         #expect(progress.revision > revision)
         #expect(!home.rows.contains { $0.kind == .continueWatching })
+        #expect(home.items(for: hub).isEmpty) // Expanded view cannot resurrect the last dismissed card.
         #expect(home.rows.filter { $0.kind != .continueWatching }.map(\.id) == otherRows)
         #expect(progress.progress(title: movie, episode: nil, scope: discovery.scope)?.resumeOffset == 123.456)
     }

@@ -322,7 +322,7 @@ private struct CatalogHubView: View {
     let onSelect: (MediaDisplayItem) -> Void
     var body: some View {
         CatalogResultsGrid(
-            items: data?.rows.first { $0.hub.id == hub.id }?.items ?? hub.items,
+            items: data?.items(for: hub) ?? hub.items,
             pagination: data?.pagination(for: hub.id),
             onSelect: onSelect,
         )

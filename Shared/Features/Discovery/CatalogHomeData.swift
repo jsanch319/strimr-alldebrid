@@ -215,6 +215,14 @@ final class CatalogHomeData {
         return nil
     }
 
+    /// An emptied Continue Watching row must not fall back to the expanded view's stale snapshot.
+    func items(for hub: Hub) -> [MediaDisplayItem] {
+        if let current = rows.first(where: { $0.hub.id == hub.id }) {
+            return current.items
+        }
+        return hub.id == "catalog:continue" ? [] : hub.items
+    }
+
     func dismissFromContinueWatching(_ media: MediaItem) {
         guard let record = progress.records(scope: discovery.scope).first(where: { $0.id == media.id }) else { return }
         progress.dismissFromContinueWatching(title: record.title, scope: discovery.scope)
