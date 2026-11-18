@@ -156,6 +156,19 @@ nonisolated enum ArtworkProgressSampler {
         return selected.map(\.legible)
     }
 
+    /// Use the thumbnail's strongest sampled accent, with two same-hue brightness stops.
+    /// Blending complementary sampled hues can otherwise create a muddy gray midpoint.
+    static func fillColors(_ sampled: [ProgressArtworkColor]) -> [ProgressArtworkColor] {
+        guard let source = sampled.first else { return [] }
+        let accent = source.progressAccent
+        let scale = 0.98 / accent.maximum
+        return [accent, ProgressArtworkColor(
+            red: accent.red * scale,
+            green: accent.green * scale,
+            blue: accent.blue * scale,
+        )]
+    }
+
     static func fraction(_ progress: Double) -> Double {
         progress.isFinite ? min(max(progress, 0), 1) : 0
     }
@@ -246,7 +259,7 @@ struct ArtworkMatchedProgressBar: View {
     @State private var colors: [ProgressArtworkColor] = []
     private var palette: [Color] {
         loadedResource == resource && !colors.isEmpty
-            ? colors.map(\.progressAccent.color) : [.white, .white]
+            ? ArtworkProgressSampler.fillColors(colors).map(\.color) : [.white, .white]
     }
 
     var body: some View {

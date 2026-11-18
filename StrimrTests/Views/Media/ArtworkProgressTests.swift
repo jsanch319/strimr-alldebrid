@@ -84,6 +84,25 @@ struct ArtworkProgressTests {
         #expect(abs(bright.progressAccent.saturation - bright.saturation) < 0.000001)
     }
 
+    @Test func `complementary artwork hues cannot wash out the fill midpoint`() throws {
+        let red = ProgressArtworkColor(red: 0.7, green: 0.1, blue: 0.08)
+        let cyan = ProgressArtworkColor(red: 0.08, green: 0.7, blue: 0.7)
+        for samples in [[red, cyan], [cyan, red]] {
+            let stops = ArtworkProgressSampler.fillColors(samples)
+            #expect(stops.count == 2)
+            let first = try #require(stops.first), last = try #require(stops.last)
+            let midpoint = ProgressArtworkColor(
+                red: (first.red + last.red) / 2,
+                green: (first.green + last.green) / 2,
+                blue: (first.blue + last.blue) / 2,
+            )
+            #expect(midpoint.saturation >= 0.65)
+            #expect(abs((midpoint.hue ?? -1) - (samples[0].hue ?? -1)) < 0.000001)
+            #expect(midpoint.maximum >= 0.9)
+        }
+        #expect(ArtworkProgressSampler.fillColors([]).isEmpty)
+    }
+
     @Test func `progress width keeps exact local or remote fraction and bounds invalid values`() {
         #expect(ArtworkProgressSampler.fraction(7200.5 / 10020) == 7200.5 / 10020)
         #expect(ArtworkProgressSampler.fraction(0.37) == 0.37)
