@@ -48,6 +48,15 @@ final class CatalogSourceAcquisition {
         SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    private static func submissionKey(_ link: String) -> String {
+        if link.lowercased().hasPrefix("magnet:"),
+           let hash = URLComponents(string: link)?.queryItems?.first(where: { $0.name == "xt" })?.value
+        {
+            return digest(hash.lowercased())
+        }
+        return digest(link)
+    }
+
     private var receipts: [String: Receipt] {
         get {
             (defaults.data(forKey: ledgerKey))
@@ -136,7 +145,7 @@ final class CatalogSourceAcquisition {
             where AuthorizedSourceCandidate.validLink(candidate.link) && !failedDirect.contains(candidate.link)
         {
             try Task.checkCancellation()
-            let key = Self.digest(identity + "|" + candidate.link)
+            let key = Self.submissionKey(candidate.link)
             if let receipt = receipts[key] {
                 if let id = receipt.id, let magnet = snapshot.magnets.first(where: { $0.id == id }) {
                     if magnet.isProcessing {
@@ -185,7 +194,7 @@ final class CatalogSourceAcquisition {
 
     private func submit(_ link: String, identity: String) async throws -> AllDebridSavedLink? {
         try Task.checkCancellation()
-        let key = Self.digest(identity + "|" + link)
+        let key = Self.submissionKey(link)
         if link.lowercased().hasPrefix("magnet:") {
             guard receipts[key] == nil else {
                 throw CatalogSourceResolver.Failure

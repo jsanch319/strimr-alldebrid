@@ -133,7 +133,7 @@ struct CatalogSourcesView: View {
                     await pollAvailability()
                 }
                 .onChange(of: sourceEndpoints) { _, _ in
-                    resolver = nil; canPoll = false; sourceScope = nil; schedule(.refresh)
+                    resolver = nil; canPoll = false; sourceScope = nil; loading = false; schedule(.refresh)
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
                     canPoll = false; sourceScope = nil; resolver = nil; metadata = nil

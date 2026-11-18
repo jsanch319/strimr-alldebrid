@@ -129,6 +129,16 @@ struct AuthorizedSourceTests {
         #expect(!String(describing: stored).contains(magnet))
     }
 
+    @Test func `magnet hash deduplicates display-name and tracker variations`() async throws {
+        let client = AcquisitionFixture()
+        let shared = CatalogSourceAcquisition(client: client, providers: [], account: "a", defaults: defaults())
+        try await shared.submitUserLink(magnet, title: movie, episode: nil)
+        await #expect(throws: CatalogSourceResolver.Failure.self) {
+            try await shared.submitUserLink(magnet + "&tr=https://tracker.test", title: movie, episode: nil)
+        }
+        #expect(await client.uploads == 1)
+    }
+
     @Test func `ambiguous upload failure is never automatically resubmitted`() async throws {
         let client = AcquisitionFixture(failUpload: true), provider = ProviderFixture(candidates: [candidate(magnet)])
         let acquisition = CatalogSourceAcquisition(

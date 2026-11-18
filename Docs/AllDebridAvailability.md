@@ -28,3 +28,7 @@ of file contents; ambiguous or mismatched titles/episodes remain ineligible.
 Tests use library snapshots and provider mocks, not account credentials. Real
 processing completion, account transitions and source playback still require a
 signed-device check against the user's authorized AllDebrid library.
+
+## Optional authorized acquisition
+
+The resolver can now search explicitly configured authorized providers after a complete missing-library check, or accept user-provided authorized links. No providers are bundled. See [AuthorizedSources.md](AuthorizedSources.md) for configuration, documented endpoints, matching and duplicate-submission protections. Existing library matches always take priority.
