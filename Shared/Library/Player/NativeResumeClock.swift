@@ -5,7 +5,7 @@ import Foundation
 /// currentTime XPC polling on every rendered-clock tick. Never creates a player or stores progress.
 @MainActor
 final class NativeResumeClock {
-    private final class Observation {
+    private final nonisolated class Observation {
         let player: AVPlayer
         let token: Any
         init(player: AVPlayer, token: Any) {
