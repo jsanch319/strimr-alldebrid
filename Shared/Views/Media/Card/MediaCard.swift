@@ -38,17 +38,18 @@ struct MediaCard: View {
                         Text(media.primaryLabel).font(.subheadline.weight(.semibold)).lineLimit(1)
                         if media.playableItem?.type == .episode {
                             Text(episodeCaption)
-                                .font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                                .font(.caption).foregroundStyle(.textSecondary).lineLimit(1).truncationMode(.tail)
                         }
                     }
                 } else {
                     labels
-                    if let episodeLabel {
-                        Text(episodeLabel).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                    if episodeLabel != nil {
+                        Text(episodeCaption).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                            .truncationMode(.tail)
                     }
                 }
-            } else if let episodeLabel {
-                Text(episodeLabel).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+            } else if episodeLabel != nil {
+                Text(episodeCaption).font(.caption).foregroundStyle(.textSecondary).lineLimit(1).truncationMode(.tail)
             }
         }
         .frame(width: size.width, alignment: .leading)
@@ -111,8 +112,10 @@ struct MediaCard: View {
     }
 
     private var episodeCaption: String {
-        [episodeLabel, media.cardSecondaryLabel(remainingTime: nil)].compactMap(\.self).filter { !$0.isEmpty }
-            .joined(separator: " · ")
+        if isInContinueWatching, let caption = media.playableItem?.continueWatchingEpisodeCaption {
+            return caption
+        }
+        return media.cardSecondaryLabel(remainingTime: nil) ?? ""
     }
 
     private var compactRemainingTime: String? {

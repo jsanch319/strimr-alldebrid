@@ -31,12 +31,35 @@ struct NativeHomeAdapterTests {
                 resume: 123.25,
             )
             #expect(media.continueWatchingEpisodeLabel == "S\(season) · E\(number)")
+            #expect(media.continueWatchingEpisodeCaption == "S\(season) · E\(number) — Actual episode")
         }
         #expect(CatalogMediaAdapter.make(title: show, episode: nil, resume: nil).continueWatchingEpisodeLabel == nil)
         #expect(CatalogMediaAdapter.make(title: .reference(id: 12, kind: .movie), episode: nil, resume: 123)
             .continueWatchingEpisodeLabel == nil)
         #expect(try CatalogMediaAdapter.make(title: show, episode: episode(season: 1, number: 0), resume: 123)
             .continueWatchingEpisodeLabel == nil)
+    }
+
+    @Test func `TMDb metadata supplies the correct resume episode title without using another episode`() async throws {
+        let stub = HTTPStub { request in
+            #expect(request.url?.path == "/3/tv/12/season/2")
+            return .json(
+                #"{"episodes":[{"id":1,"season_number":2,"episode_number":9,"name":"Wrong episode"},{"id":2,"season_number":2,"episode_number":10,"name":"The Correct Episode Title"}]}"#,
+            )
+        }
+        let client = TMDBClient(session: stub.session, tokenProvider: { "test-token" })
+        let episodes = try await client.episodes(tvID: 12, season: 2)
+        let actual = try #require(episodes.first { $0.episode_number == 10 })
+        let media = CatalogMediaAdapter.make(
+            title: .reference(id: 12, kind: .tv, title: "Show Name"),
+            episode: actual,
+            resume: 123.456,
+        )
+        #expect(media.continueWatchingEpisodeCaption == "S2 · E10 — The Correct Episode Title")
+        #expect(media.grandparentTitle == "Show Name")
+        #expect(media.viewOffset == 123.456)
+        #expect(CatalogMediaAdapter.make(title: .reference(id: 12, kind: .movie), episode: nil, resume: 123)
+            .continueWatchingEpisodeCaption == nil)
     }
 
     @Test func `dismissal persists independently from resume data and account scope`() throws {

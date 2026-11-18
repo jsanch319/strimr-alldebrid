@@ -72,3 +72,11 @@ extension MediaItem {
         return "S\(season) · E\(episode)"
     }
 }
+
+extension MediaItem {
+    var continueWatchingEpisodeCaption: String? {
+        guard let label = continueWatchingEpisodeLabel else { return nil }
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? label : "\(label) — \(name)"
+    }
+}

@@ -105,7 +105,8 @@ final class CatalogVisualTests: XCTestCase {
         let episode = watching.descendants(matching: .any).matching(identifier: "catalog.card.tv:95396:s1:e2")
             .firstMatch
         scrollTo(episode)
-        let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E2")).firstMatch
+        let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E2 — Episode 2"))
+            .firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 15), app.debugDescription)
         episode.press(forDuration: 1.2)
         let remove = app.buttons["Remove from Continue Watching"]
