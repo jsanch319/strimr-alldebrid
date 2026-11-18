@@ -151,6 +151,27 @@ struct StremioTests {
         #expect(addon.readySources(snapshot: snapshot, title: show, episode: episode).map(\.filename) == ["S01E02.mkv"])
     }
 
+    @Test func `reliable IDs and empty header hints are accepted without relaxing episode conflicts`() async throws {
+        #expect(StremioStreamPolicy.accepts("tt1234567.mp4", title: show, episode: episode))
+        #expect(StremioStreamPolicy.accepts("tmdb-2.mp4", title: show, episode: episode))
+        #expect(!StremioStreamPolicy.accepts("tt1234567.S01E03.mp4", title: show, episode: episode))
+        #expect(!StremioStreamPolicy.accepts("tt9999999.S01E02.mp4", title: show, episode: episode))
+        #expect(!StremioStreamPolicy.accepts("tmdb-3.S01E02.mp4", title: show, episode: episode))
+        #expect(!StremioStreamPolicy.accepts("tt1160419.1984.mp4", title: movie, episode: nil))
+        let addon =
+            AddonFixture(
+                streams: streams(
+                    #"[{"url":"https://cdn.test/video.mkv","languages":["und"],"behaviorHints":{"proxyHeaders":{"request":{},"response":{}}}}]"#,
+                ),
+            )
+        let results = try await service(addon).discover(title: show, episode: episode)
+        #expect(results.count == 1)
+        #expect(results.first?.isSupported == true)
+        if case let .stremio(label) = results.first {
+            #expect(label.audioHint == .unknown)
+        }
+    }
+
     @Test func `manifest URLs normalize protocol and preserve private path and query in stream requests`() throws {
         let c = try StremioConfiguration(
             url: "stremio://addon.test/ad%3DfixtureOnly/manifest.json?token=fixtureOnly",

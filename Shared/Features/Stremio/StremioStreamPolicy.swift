@@ -7,6 +7,7 @@ enum StremioStreamPolicy {
     static func accepts(_ filename: String?, title: TMDBTitle, episode: TMDBEpisode?) -> Bool {
         guard let filename, !filename.isEmpty else { return true }
         let text = filename.removingPercentEncoding ?? filename
+        var matchingID = false
         if let regex = try? NSRegularExpression(pattern: #"(?i)\btt\d{5,12}\b"#) {
             let ids = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
                 Range($0.range, in: text).map { String(text[$0]).lowercased() }
@@ -14,11 +15,26 @@ enum StremioStreamPolicy {
             if !ids.isEmpty, ids.contains(where: { $0 != title.matchingIDs.imdb?.lowercased() }) {
                 return false
             }
+            matchingID = !ids.isEmpty
         }
-        if text.range(of: #"(?i)tmdb[\s:=_{\[-]+\d+"#, options: .regularExpression) != nil,
-           !AllDebridTitleMatcher.matches(title: title, episode: episode, filename: text)
+        if let regex = try? NSRegularExpression(pattern: #"(?i)tmdb[\s:=_{\[-]+(\d+)"#) {
+            let ids = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
+                Range($0.range(at: 1), in: text).map { String(text[$0]) }
+            }
+            if ids.contains(where: { $0 != String(title.id) }) {
+                return false
+            }
+            matchingID = matchingID || !ids.isEmpty
+        }
+        if title.kind == .movie, let year = Int(title.date.prefix(4)),
+           let regex = try? NSRegularExpression(pattern: #"\b(?:19|20)\d{2}\b"#)
         {
-            return false
+            let years = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
+                Range($0.range, in: text).map { String(text[$0]) }
+            }
+            if years.contains(where: { $0 != String(year) }) {
+                return false
+            }
         }
         let hasEpisode = text.range(of: #"(?i)s\d+e\d+|\d+x\d+"#, options: .regularExpression) != nil
         if hasEpisode {
@@ -28,6 +44,9 @@ enum StremioStreamPolicy {
                       of: #"(?i)s\d+e\d+(?:[ ._-]*e\d+|[ ._-]*-[ ._-]*(?:e)?\d+)|\d+x\d+[ ._-]*-"#,
                       options: .regularExpression,
                   ) == nil else { return false }
+        }
+        if matchingID {
+            return true
         }
         if AuthorizedSourceCandidate.matchesFile(text, title: title, episode: episode) {
             return true
@@ -47,16 +66,6 @@ enum StremioStreamPolicy {
             .range(of: #"^[a-f0-9]{8,}$"#, options: .regularExpression) != nil
         {
             return true
-        }
-        if title.kind == .movie, let year = Int(title.date.prefix(4)),
-           let regex = try? NSRegularExpression(pattern: #"\b(?:19|20)\d{2}\b"#)
-        {
-            let years = regex.matches(in: clean, range: NSRange(clean.startIndex..., in: clean)).compactMap {
-                Range($0.range, in: clean).map { String(clean[$0]) }
-            }
-            if years.contains(where: { $0 != String(year) }) {
-                return false
-            }
         }
         let aliases = [title.displayTitle, title.original_title, title.original_name].compactMap(\.self)
             + (title.alternative_titles?.titles ?? title.alternative_titles?.results ?? []).map(\.title)
@@ -110,7 +119,9 @@ nonisolated enum StremioAudioHint: Int, Hashable, Sendable {
             if normalized.contains(where: { ["multi", "multilingual", "mul"].contains($0) }) {
                 return .multilingual
             }
-            return .other
+            if !normalized.allSatisfy({ ["und", "unknown", "unk", "zxx", ""].contains($0) }) {
+                return .other
+            }
         }
         let text = [stream.name, stream.title, stream.displayDetails].compactMap(\.self).joined(separator: " ")
         if text.contains("🇬🇧") || text.contains("🇺🇸") || text.range(

@@ -70,7 +70,7 @@ final class StremioPlaybackSources {
             for (ordinal, stream) in streams.enumerated() {
                 let filename = stream.behaviorHints?.filename
                 var reason = stream.unsupportedReason
-                if stream.behaviorHints?.proxyHeaders?.isEmpty == false {
+                if stream.behaviorHints?.proxyHeaders?.values.contains(where: { !$0.isEmpty }) == true {
                     reason = "Custom proxy headers are not supported by this source path."
                 }
                 if !StremioStreamPolicy.accepts(filename, title: title, episode: episode) {
