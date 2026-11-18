@@ -114,7 +114,7 @@ final class CatalogVisualTests: XCTestCase {
         XCTAssertGreaterThan(resumeMovie.frame.width, app.frame.width * 0.45)
         XCTAssertLessThan(episode.frame.minX, app.frame.width * 0.85)
         XCTAssertGreaterThanOrEqual(trending.frame.minY, watching.frame.maxY)
-        // The half-height hero takes priority over the older compact first-screen poster-height target.
+        // The 70-percent hero takes priority over the older compact first-screen poster-height target.
         // Continue Watching and Trending remain ordered and reachable with the original vertical scrolling.
         XCTAssertFalse(app.buttons["home.hero.watch-trailer"].exists)
         XCTAssertTrue(watching.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "left"))
@@ -122,7 +122,7 @@ final class CatalogVisualTests: XCTestCase {
             .exists)
         XCTAssertFalse(watching.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "%"))
             .firstMatch.exists)
-        capture("22-Half-Height-Hero-And-Continue-Watching")
+        capture("22-Seventy-Percent-Hero-And-Continue-Watching")
         scrollTo(card("movie:693134"))
         XCTAssertTrue(card("tv:95396:s1:e2").exists, app.debugDescription)
         capture("02-Continue-Watching")

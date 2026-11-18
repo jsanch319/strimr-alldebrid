@@ -14,6 +14,7 @@ struct TitleLogoView: View {
     let maxSize: CGSize
     let alignment: Alignment
     /// Sizes the view to the logo itself rather than to `maxSize`, so a wide, short logo leaves no empty band.
+    let compactText: Bool
     let hugsLogo: Bool
 
     @State private var loaded: (key: String, image: Image)?
@@ -25,6 +26,7 @@ struct TitleLogoView: View {
         maxSize: CGSize,
         alignment: Alignment = .bottomLeading,
         hugsLogo: Bool = false,
+        compactText: Bool = false,
     ) {
         self.media = media
         self.title = title ?? media.primaryLabel
@@ -32,6 +34,7 @@ struct TitleLogoView: View {
         self.maxSize = maxSize
         self.alignment = alignment
         self.hugsLogo = hugsLogo
+        self.compactText = compactText
     }
 
     var body: some View {

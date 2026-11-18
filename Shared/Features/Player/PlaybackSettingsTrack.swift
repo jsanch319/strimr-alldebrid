@@ -44,7 +44,12 @@ struct PlaybackSettingsTrack: Identifiable, Hashable {
 
     var subtitle: String? {
         guard let metadata else {
-            return combinedSubtitle([track.codec?.uppercased()])
+            let language = track.language.flatMap { value -> String? in
+                guard !value.isEmpty, value.lowercased() != "und" else { return nil }
+                let label = Locale.current.localizedString(forIdentifier: value) ?? value.uppercased()
+                return title.localizedCaseInsensitiveContains(label) ? nil : label
+            }
+            return combinedSubtitle([language, track.codec?.uppercased()])
         }
 
         let codec = metadataCodec.flatMap { title.range(of: $0, options: .caseInsensitive) == nil ? $0 : nil }

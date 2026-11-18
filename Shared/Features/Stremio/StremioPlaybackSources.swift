@@ -103,6 +103,10 @@ final class StremioPlaybackSources {
         return AllDebridTitleMatcher.ranked(entries.filter { !$0.submitted }.map { .stremio($0.label) })
     }
 
+    func isReadyDirect(_ label: StremioSourceLabel) -> Bool {
+        entries.contains { $0.label == label && $0.direct && !$0.submitted }
+    }
+
     func resolve(
         _ label: StremioSourceLabel,
         acquisition: CatalogSourceAcquisition?,

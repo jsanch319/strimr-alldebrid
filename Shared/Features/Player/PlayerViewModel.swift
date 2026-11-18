@@ -17,6 +17,7 @@ final class PlayerViewModel {
     var serverAccessRecoveryError: MediaServerAccessRecoveryError?
     private(set) var scrubThumbnailSource: ScrubThumbnailSource?
     var isPaused = false
+    @ObservationIgnored private var sessionAudioTrack: PlayerTrack?
     var preferredAudioStreamFFIndex: Int?
     var preferredSubtitleStreamID: Int?
     var preferredSubtitleSelectionIsOff = false
@@ -1083,7 +1084,15 @@ final class PlayerViewModel {
         return marker
     }
 
+    func useSessionAudioTrack(_ track: PlayerTrack) {
+        sessionAudioTrack = track
+        preferredAudioStreamFFIndex = track.ffIndex ?? track.providerStreamID
+    }
+
     func persistStreamSelection(for track: PlayerTrack) async {
+        if track.type == .audio {
+            useSessionAudioTrack(track)
+        }
         guard let mediaServices,
               let itemID = media?.id,
               let streamID = track.providerStreamID
@@ -1476,6 +1485,7 @@ final class PlayerViewModel {
     }
 
     func resetRememberedTrackSelections() {
+        sessionAudioTrack = nil
         guard let mediaServices, let media,
               let coordinator = mediaServices.trackSelectionCoordinator
         else { return }
@@ -1487,13 +1497,24 @@ final class PlayerViewModel {
     }
 
     private var rememberedTrackPreference: MediaTrackPreference? {
-        guard let mediaServices, let media,
-              let coordinator = mediaServices.trackSelectionCoordinator
-        else { return nil }
-        return coordinator.preference(
-            for: media,
-            server: mediaServices.identity,
-            accountIdentifier: mediaServices.trackSelectionAccountIdentifier ?? "default",
+        let base: MediaTrackPreference? = {
+            guard let mediaServices, let media,
+                  let coordinator = mediaServices.trackSelectionCoordinator else { return nil }
+            return coordinator.preference(
+                for: media,
+                server: mediaServices.identity,
+                accountIdentifier: mediaServices.trackSelectionAccountIdentifier ?? "default",
+            )
+        }()
+        guard let track = sessionAudioTrack else { return base }
+        return MediaTrackPreference(
+            audioStreamIndex: nil,
+            audioLanguage: track.language,
+            audioTitle: track.title,
+            audioCodec: track.codec,
+            audioIsHearingImpaired: track.isHearingImpaired,
+            audioIsCommentary: track.isCommentary,
+            subtitle: base?.subtitle ?? .serverDefault,
         )
     }
 

@@ -36,12 +36,17 @@ struct PlayerTracksMenuButton: View {
 
     var body: some View {
         PlayerTracksMenu(model: model, actions: actions) {
-            Image(systemName: "text.bubble")
-                .font(PlayerIconButton.Size.small.font)
+            VStack(spacing: 1) {
+                Image(systemName: "captions.bubble").font(.system(size: 15, weight: .semibold))
+                Text("Audio & Subtitles").font(.system(size: 8, weight: .medium)).multilineTextAlignment(.center)
+                    .lineLimit(2)
+            }.frame(width: 40)
         }
         .equatable()
         .buttonStyle(.playerControl(diameter: PlayerIconButton.Size.small.diameter))
         .accessibilityLabel(Text("player.tracks.title"))
+        .accessibilityHint("Choose an audio language or subtitles")
+        .accessibilityIdentifier("player.audio-subtitles")
         .overlay(alignment: .topTrailing) {
             if model.showsIndicator {
                 PlaybackOffsetIndicator()

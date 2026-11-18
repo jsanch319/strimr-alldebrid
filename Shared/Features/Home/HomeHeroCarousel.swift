@@ -331,35 +331,37 @@
         var compact = false
 
         var body: some View {
-            ZStack(alignment: .bottomLeading) {
-                HomeHeroArtwork(media: slide.media)
-                    // Fades the artwork out rather than painting a color over it, so it melts into
-                    // whatever background the home has.
-                    .mask(Self.fadeMask)
-                    // Stretches when the home is pulled down.
-                    .visualEffect { content, proxy in
-                        let pull = max(0, proxy.frame(in: .scrollView(axis: .vertical)).minY)
-                        return content.scaleEffect(
-                            1 + pull / max(proxy.size.height, 1),
-                            anchor: .bottom,
-                        )
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { onDetails(slide.media) }
+            GeometryReader { geometry in
+                ZStack(alignment: .bottomLeading) {
+                    HomeHeroArtwork(media: slide.media)
+                        // Fades the artwork out rather than painting a color over it, so it melts into
+                        // whatever background the home has.
+                        .mask(Self.fadeMask)
+                        // Stretches when the home is pulled down.
+                        .visualEffect { content, proxy in
+                            let pull = max(0, proxy.frame(in: .scrollView(axis: .vertical)).minY)
+                            return content.scaleEffect(
+                                1 + pull / max(proxy.size.height, 1),
+                                anchor: .bottom,
+                            )
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture { onDetails(slide.media) }
 
-                #if os(iOS)
-                    if let preview = trailerPresentation?.preview {
-                        TrailerPreviewSurface(preview: preview).id(preview.generation)
-                            .opacity(preview.ready ? 1 : 0)
-                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: preview.ready)
-                            .mask(Self.fadeMask)
-                            .allowsHitTesting(false)
-                    }
-                #endif
+                    #if os(iOS)
+                        if let preview = trailerPresentation?.preview {
+                            TrailerPreviewSurface(preview: preview).id(preview.generation)
+                                .opacity(preview.ready ? 1 : 0)
+                                .animation(reduceMotion ? nil : .easeInOut(duration: 0.6), value: preview.ready)
+                                .mask(Self.fadeMask)
+                                .allowsHitTesting(false)
+                        }
+                    #endif
 
-                details
-                    .padding(.horizontal, LayoutMetrics.pageMargin)
-                    .padding(.bottom, compact ? 30 : 36)
+                    details(availableHeight: geometry.size.height)
+                        .padding(.horizontal, LayoutMetrics.pageMargin)
+                        .padding(.bottom, compact ? 30 : 36)
+                }
             }
             #if os(iOS)
             .overlay(alignment: .bottomTrailing) {
@@ -376,15 +378,25 @@
             .accessibilityElement(children: .contain)
         }
 
-        private var details: some View {
-            VStack(alignment: .leading, spacing: compact ? 6 : 10) {
-                if let eyebrow = slide.eyebrow {
+        private func details(availableHeight: CGFloat) -> some View {
+            #if os(iOS)
+                let tight = UIDevice.current.userInterfaceIdiom == .phone && availableHeight < 280
+            #else
+                let tight = false
+            #endif
+            return VStack(alignment: .leading, spacing: tight ? 4 : (compact ? 6 : 10)) {
+                if !tight, let eyebrow = slide.eyebrow {
                     Text(eyebrow)
                         .eyebrowStyle()
                         .foregroundStyle(.textSecondary)
                 }
 
-                TitleLogoView(media: slide.media, maxSize: logoSize, hugsLogo: true)
+                TitleLogoView(
+                    media: slide.media,
+                    maxSize: tight ? CGSize(width: logoSize.width, height: 44) : logoSize,
+                    hugsLogo: true,
+                    compactText: tight,
+                )
 
                 MediaFactsLine(
                     facts: MediaFactsFormatter.facts(for: slide.media, namesStandardEdition: false),
@@ -414,6 +426,7 @@
                 }
                 .padding(.top, 4)
                 .controlSize(horizontalSizeClass == .compact ? .small : .regular)
+                .lineLimit(1).minimumScaleFactor(0.85)
             }
             .frame(maxWidth: 520, alignment: .leading)
             .accessibilityElement(children: .contain)

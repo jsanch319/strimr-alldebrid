@@ -53,6 +53,8 @@ final class PlayerController {
     private(set) var audioShaping = AudioShaping()
     private(set) var audioShapingState: AudioShapingState = .off
     private(set) var videoRoute: VideoRoute = .none
+    private(set) var audioTrackRevision = 0
+    @ObservationIgnored private var nativeAudioSelection: NativeAudioSelection?
     private(set) var selectedSubtitleTrackID: Int?
     private(set) var volume: Float = 1.0
     private(set) var isCoordinatedPlayback = false
@@ -187,6 +189,7 @@ final class PlayerController {
         httpHeaders: [String: String] = [:],
         startPosition: Double?,
         preferredAudioTrackID: Int?,
+        preferredAudioLanguages: [String] = [],
         losslessAudio: Bool,
         readAhead: PlaybackReadAhead = .standard,
         spatialAudioLayout: SpatialSpeakerLayout?,
@@ -223,6 +226,7 @@ final class PlayerController {
         isStopping = false
         hasStartedPlayback = false
         pendingSeekTarget = nil
+        nativeAudioSelection = nil
         selectedSubtitleTrackID = nil
         subtitleCues = []
         sourceVideoSize = nil
@@ -264,7 +268,8 @@ final class PlayerController {
                         prepareNativeSubtitles: Self.preparesNativeSubtitles,
                         probesize: live?.probesize,
                         maxAnalyzeDuration: live?.maxAnalyzeDuration,
-                        preferredAudioLanguages: live?.preferredAudioLanguages ?? [],
+                        preferredAudioLanguages: preferredAudioLanguages
+                            .isEmpty ? (live?.preferredAudioLanguages ?? []) : preferredAudioLanguages,
                         externalSubtitles: externalSubtitles.map(\.track),
                         forwardBufferSegments: isLive ? nil : readAhead.forwardBufferSegments,
                         softwarePacketCacheStorage: isLive ? .automatic : readAhead.softwarePacketCacheStorage,
@@ -287,6 +292,7 @@ final class PlayerController {
                         height: Int(sourceProbe.videoHeight),
                     )
                 }
+                await refreshNativeAudioSelection()
                 let externalEngineTracks = engine.subtitleTracks.filter(\.isExternal)
                 if externalEngineTracks.count == externalSubtitles.count {
                     externalSubtitleProviderStreamIDs = Dictionary(
@@ -686,7 +692,11 @@ final class PlayerController {
 
     func selectAudioTrack(id: Int?) {
         guard let id else { return }
-        engine.selectAudioTrack(index: id)
+        if let nativeAudioSelection, nativeAudioSelection.item === engine.currentAVPlayerItem {
+            nativeAudioSelection.select(id: id); audioTrackRevision += 1
+        } else {
+            engine.selectAudioTrack(index: id)
+        }
     }
 
     func selectSubtitleTrack(id: Int?, styledASSSubtitles: Bool? = nil) {
@@ -758,7 +768,7 @@ final class PlayerController {
     }
 
     func trackList() -> [PlayerTrack] {
-        let audio = engine.audioTracks.map { track in
+        let audio = nativeAudioSelection?.tracks() ?? engine.audioTracks.map { track in
             PlayerTrack(
                 id: track.id,
                 ffIndex: track.id,
@@ -800,6 +810,7 @@ final class PlayerController {
     }
 
     func stop() {
+        nativeAudioSelection = nil
         #if os(iOS) || os(macOS)
             pictureInPictureCoordinator.stop()
         #endif
@@ -1147,6 +1158,13 @@ final class PlayerController {
         return assRenderer == nil ? .overlay : .styled
     }
 
+    private func refreshNativeAudioSelection() async {
+        guard engine.videoRoute == .remoteBypass, let item = engine.currentAVPlayerItem else { return }
+        let selection = await NativeAudioSelection.prepare(item: item)
+        guard engine.currentAVPlayerItem === item else { return }
+        nativeAudioSelection = selection; audioTrackRevision += 1
+    }
+
     private func observeEngine() {
         #if os(iOS)
             // Without this the system pauses a player showing video as soon as the app leaves the foreground.
@@ -1179,6 +1197,18 @@ final class PlayerController {
                 guard let size, size.width > 0, size.height > 0 else { return }
                 self?.displayVideoSize = size
             }
+            .store(in: &cancellables)
+
+        engine.$audioTracks
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                audioTrackRevision += 1
+                Task { @MainActor [weak self] in await self?.refreshNativeAudioSelection() }
+            }.store(in: &cancellables)
+        engine.$activeAudioTrackIndex
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.audioTrackRevision += 1 }
             .store(in: &cancellables)
 
         engine.$state

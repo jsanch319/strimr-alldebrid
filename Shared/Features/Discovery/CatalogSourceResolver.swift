@@ -192,6 +192,44 @@ final class CatalogSourceResolver {
                 (lastError?.localizedDescription ?? "The available sources failed during playback."))
     }
 
+    /// Inspect only ready sources; never upload/acquire a file merely to look for a language.
+    func englishAudioAlternative(inspector: (any EnglishAudioInspecting)? = nil) async throws -> Resolved? {
+        try Task.checkCancellation()
+        if !queriedStremio, let stremio, let title = requestedTitle {
+            queriedStremio = true
+            sources += try await stremio.discover(title: title, episode: requestedEpisode)
+        }
+        let probe = inspector ?? EnglishAudioInspector()
+        let ready = sources.filter { source in
+            guard !attempted.contains(source.link) else { return false }
+            if case let .stremio(label) = source {
+                return stremio?.isReadyDirect(label) == true
+            }
+            return true
+        }
+        for source in ready.prefix(3) {
+            try Task.checkCancellation()
+            do {
+                let result = try await resolve(source)
+                if await probe.containsEnglishAudio(at: result.url) {
+                    try Task.checkCancellation()
+                    return result
+                }
+            } catch {
+                if error.isCancellation || AllDebridAPIClient.isAuthenticationOrRateLimit(error) {
+                    throw error
+                }
+            }
+        }
+        return nil
+    }
+
+    func acceptEnglishAudioAlternative(_ result: Resolved) -> Bool {
+        guard sources.contains(result.source), !attempted.contains(result.source.link) else { return false }
+        attempted.insert(result.source.link)
+        return true
+    }
+
     func resolveSelected(_ source: AllDebridTitleMatcher.Source) async throws -> Resolved {
         try Task.checkCancellation()
         guard sources.contains(source)

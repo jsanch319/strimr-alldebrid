@@ -12,6 +12,7 @@ struct PlayerTracksMenuModel: Equatable {
     var canResetTrackSelections: Bool
     var syncItems: [PlaybackOffsetMenuItem]
     var subtitleAppearance: SubtitleAppearanceAvailability
+    var englishAudioNotice: String?
 
     var showsIndicator: Bool {
         syncItems.contains { $0.kind == .subtitles && $0.isActive }
@@ -65,6 +66,9 @@ struct PlayerTracksMenu<MenuLabel: View>: View, Equatable {
 
     private var audioMenu: some View {
         Menu {
+            if let notice = model.englishAudioNotice {
+                Text(notice)
+            }
             if model.audioTracks.isEmpty {
                 Text("player.settings.audio.empty")
             }

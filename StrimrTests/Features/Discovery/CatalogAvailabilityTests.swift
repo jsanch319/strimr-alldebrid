@@ -109,13 +109,13 @@ struct CatalogAvailabilityTests {
         #expect(await client.resolveCount == 0)
     }
 
-    @Test func `polling uses bounded processing and missing-library delays and hero uses half its viewport`() {
+    @Test func `polling uses bounded processing and missing-library delays and hero uses seventy percent of its viewport`() {
         #expect(CatalogAvailabilityPolling.delay(processing: true, attempt: 0) == .seconds(10))
         #expect(CatalogAvailabilityPolling.delay(processing: true, attempt: 100) == .seconds(30))
         #expect(CatalogAvailabilityPolling.delay(processing: false, attempt: 0) == .seconds(30))
         #expect(CatalogAvailabilityPolling.delay(processing: false, attempt: 100) == .seconds(60))
         for available in [320.0, 568, 667, 740, 844, 874, 932] {
-            #expect(HomeHeroSizing.iPhoneHeight(availableHeight: available) == available * 0.5)
+            #expect(HomeHeroSizing.iPhoneHeight(availableHeight: available) == available * 0.7)
         }
     }
 }

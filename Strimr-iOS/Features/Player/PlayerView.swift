@@ -11,6 +11,11 @@ struct PlayerView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var viewModel: PlayerViewModel
+    private let englishAudioFallback: EnglishAudioFallback?
+    @State private var englishSession = EnglishAudioSession()
+    @State private var englishAudioNotice: String?
+    @State private var englishFallbackTask: Task<Void, Never>?
+    @State private var audioMediaSettled = false
     private let onPlaybackFailure: ((String) -> Void)?
     @State private var playerController = PlayerController()
     @State private var controlsVisible = true
@@ -103,9 +108,14 @@ struct PlayerView: View {
         Double(settingsManager.playback.seekForwardSeconds)
     }
 
-    init(viewModel: PlayerViewModel, onPlaybackFailure: ((String) -> Void)? = nil) {
+    init(
+        viewModel: PlayerViewModel,
+        onPlaybackFailure: ((String) -> Void)? = nil,
+        englishAudioFallback: EnglishAudioFallback? = nil,
+    ) {
         _viewModel = State(initialValue: viewModel)
         self.onPlaybackFailure = onPlaybackFailure
+        self.englishAudioFallback = englishAudioFallback
     }
 
     var body: some View {
@@ -175,6 +185,7 @@ struct PlayerView: View {
                     startPlaybackIfNeeded(url: viewModel.playbackURL)
                 }
                 .onDisappear {
+                    englishFallbackTask?.cancel()
                     nextEpisodePresentation.cancel()
                     sleepTimer.cancel()
                     pauseScreen.cancel()
@@ -226,6 +237,14 @@ struct PlayerView: View {
                         chapters: viewModel.chapters,
                     )
                 }
+                .onChange(of: playerController.audioTrackRevision) { _, _ in refreshTracks() }
+                .onChange(of: settingsManager.playback.alwaysPreferEnglishAudio) { _, _ in
+                    englishFallbackTask?.cancel(); englishAudioNotice = nil
+                    englishSession.beginLoad(); refreshTracks()
+                }
+                .onChange(of: viewModel.media?.id) { _, _ in
+                    englishFallbackTask?.cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil
+                }
                 .onChange(of: playerController.duration) { _, newValue in
                     viewModel.handlePlaybackDuration(newValue)
                     if viewModel.resumesFromRemotePercentage, !awaitingMediaLoad, !appliedResumeOffset {
@@ -272,6 +291,9 @@ struct PlayerView: View {
                     presentServerRecoveryError(error)
                 }
                 .onChange(of: scenePhase) { oldValue, newValue in
+                    if newValue != .active {
+                        englishFallbackTask?.cancel()
+                    }
                     handleScenePhaseChange(newValue)
                     prepareAutomaticRotation(from: oldValue, to: newValue)
                     rotateAutomaticallyIfNeeded()
@@ -1071,9 +1093,10 @@ struct PlayerView: View {
             dialogueBoost: settingsManager.playback.dialogueBoost,
             isAudioShapingAvailable: playerController.isAudioShapingAvailable,
             canSearchSubtitles: viewModel.canSearchSubtitles,
-            canResetTrackSelections: viewModel.canResetRememberedTrackSelections,
+            canResetTrackSelections: viewModel.canResetRememberedTrackSelections || englishSession.manualTrack != nil,
             syncItems: playerController.offsetMenuItems(burnsSubtitles: viewModel.burnsSubtitles),
             subtitleAppearance: subtitleAppearanceAvailability,
+            englishAudioNotice: englishAudioNotice,
         )
     }
 
@@ -1085,7 +1108,10 @@ struct PlayerView: View {
             onSetNightMode: setNightMode(_:),
             onSelectDialogueBoost: selectDialogueBoost(_:),
             onSearchSubtitles: showSubtitleSearch,
-            onResetTrackSelections: { viewModel.resetRememberedTrackSelections() },
+            onResetTrackSelections: {
+                englishFallbackTask?.cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil
+                viewModel.resetRememberedTrackSelections(); refreshTracks()
+            },
             onSelectSync: openOffsetBar(_:),
             onShowSubtitleAppearance: showSubtitleAppearance,
         )
@@ -1429,7 +1455,61 @@ struct PlayerView: View {
                         selectedSubtitleTrackID = activeSubtitle
                     }
                 }
+                applyEnglishAudioIfNeeded(audio)
             }
+        }
+    }
+
+    private func applyEnglishAudioIfNeeded(_ tracks: [PlayerTrack]) {
+        guard audioMediaSettled, !viewModel.awaitsCatalogResume else { return }
+        let enabled = settingsManager.playback.alwaysPreferEnglishAudio
+        if let track = englishSession.selection(in: tracks, enabled: enabled) {
+            selectedAudioTrackID = track.id
+            if !track.isSelected {
+                if viewModel.isTranscoding {
+                    if englishSession.manualTrack != nil || !englishSession.triedServerSwitch {
+                        englishSession.triedServerSwitch = true
+                        viewModel.useSessionAudioTrack(track)
+                        selectQuality(viewModel.selectedQuality, force: true)
+                    }
+                } else {
+                    playerController.selectAudioTrack(id: track.id)
+                }
+            }
+        }
+        guard enabled, englishSession.manualTrack == nil else { englishAudioNotice = nil; return }
+        if EnglishAudioPreference.preferred(in: tracks) != nil {
+            englishAudioNotice = nil; englishFallbackTask?.cancel(); return
+        }
+        guard !tracks.isEmpty else { return }
+        let definite = EnglishAudioPreference.definitelyUnavailable(in: tracks)
+        let notice = definite ?
+            "English audio is unavailable in this source. Use Audio & Subtitles to choose a track." :
+            "English audio could not be confirmed from track metadata. Use Audio & Subtitles."
+        if englishAudioNotice != notice {
+            englishAudioNotice = notice
+            showFeedbackMessage(notice, duration: 5, systemImage: "speaker.wave.2")
+        }
+        guard definite, !englishSession.triedSourceFallback, let englishAudioFallback,
+              !sharePlayCoordinator.isInSession, !viewModel.isLivePlayback, scenePhase == .active,
+              !isScrubbing, !isTracksMenuPresented, !playerController.isPaused,
+              !playerController.isPictureInPictureActive, !LiveLoadOptions.routesAudioToAirPlay else { return }
+        englishSession.triedSourceFallback = true
+        let mediaID = viewModel.media?.id, sourceURL = activePlaybackURL
+        englishFallbackTask = Task { @MainActor in
+            guard let replacement = await englishAudioFallback.find(), !Task.isCancelled,
+                  englishSession.manualTrack == nil, settingsManager.playback.alwaysPreferEnglishAudio,
+                  viewModel.media?.id == mediaID, activePlaybackURL == sourceURL,
+                  scenePhase == .active, !viewModel.awaitsCatalogResume, !isScrubbing,
+                  !isTracksMenuPresented, !playerController.isPaused,
+                  !playerController.isPictureInPictureActive, !LiveLoadOptions.routesAudioToAirPlay,
+                  !sharePlayCoordinator.isInSession,
+                  EnglishAudioPreference.preferred(in: audioTracks) == nil else { return }
+            let position = playerController.position
+            guard position.isFinite, position >= 0 else { return }
+            viewModel.handlePlaybackPosition(position, isScrubbing: false)
+            viewModel.saveProgress()
+            englishAudioFallback.activate(replacement, position)
         }
     }
 
@@ -1443,6 +1523,8 @@ struct PlayerView: View {
             return
         }
 
+        englishFallbackTask?.cancel()
+        englishSession.selectManually(track); englishAudioNotice = nil
         Task {
             await viewModel.persistStreamSelection(for: track)
             if viewModel.isTranscoding {
@@ -1647,6 +1729,8 @@ struct PlayerView: View {
     }
 
     private func finishMediaLoad() {
+        audioMediaSettled = true
+        refreshTracks()
         if shouldPauseAfterMediaLoad {
             shouldPauseAfterMediaLoad = false
             shouldResumeAfterMediaLoad = false
@@ -1748,6 +1832,8 @@ struct PlayerView: View {
         shouldResumeAfterLoad: Bool = false,
         shouldPauseAfterLoad: Bool = false,
     ) {
+        englishFallbackTask?.cancel(); audioMediaSettled = false
+        englishSession.beginLoad()
         activePlaybackURL = url
         if resetTrackSelection {
             appliedPreferredAudio = false
@@ -1777,7 +1863,13 @@ struct PlayerView: View {
             url: url,
             httpHeaders: viewModel.playbackHTTPHeaders,
             startPosition: nil,
-            preferredAudioTrackID: preferredAudioTrackID,
+            preferredAudioTrackID: settingsManager.playback.alwaysPreferEnglishAudio && englishSession
+                .manualTrack == nil ? nil : preferredAudioTrackID,
+            preferredAudioLanguages: settingsManager.playback.alwaysPreferEnglishAudio && englishSession
+                .manualTrack == nil ? [
+                    "en",
+                    "eng",
+                ] : [],
             losslessAudio: settingsManager.playback.losslessAudio,
             readAhead: settingsManager.playback.readAhead,
             spatialAudioLayout: settingsManager.playback.spatialAudioLayout,
@@ -1970,6 +2062,7 @@ struct PlayerView: View {
 
     private func applyPreferredTracksIfNeeded(audioTracks: [PlayerTrack], subtitleTracks: [PlayerTrack]) {
         if !appliedPreferredAudio,
+           !settingsManager.playback.alwaysPreferEnglishAudio || englishSession.manualTrack != nil,
            let preferredAudioIndex = viewModel.preferredAudioStreamFFIndex,
            let track = audioTracks.first(where: { $0.ffIndex == preferredAudioIndex })
         {

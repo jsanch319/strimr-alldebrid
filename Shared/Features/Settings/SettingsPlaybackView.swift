@@ -17,6 +17,9 @@ struct SettingsPlaybackView: View {
 
     var body: some View {
         List {
+            #if os(iOS)
+                Section { NavigationLink("Audio") { SettingsAudioView() } }
+            #endif
             Section {
                 Toggle("Auto Play AllDebrid", isOn: Binding(
                     get: { settingsManager.playback.allDebridAutoPlay },

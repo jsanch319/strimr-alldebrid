@@ -14,6 +14,8 @@ struct CatalogSourcesView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var request: Request?
+    @State private var englishReplacement: Request?
+    @State private var triedEnglishReplacement = false
     @State private var resumes = true
     @State private var automatic = true
     @State private var pendingFailure: String?
@@ -36,7 +38,7 @@ struct CatalogSourcesView: View {
     }
 
     private enum Operation: Equatable { case refresh, selected(AllDebridTitleMatcher.Source), fallback,
-                                             importLink(String)
+                                             importLink(String), englishReplacement
     }
 
     private struct OperationKey: Equatable { let id: UUID; let active: Bool; let scope: String }
@@ -46,6 +48,7 @@ struct CatalogSourcesView: View {
         let url: URL
         let subtitles: [ExternalSubtitleTrack]
         let scope: String
+        var exactResume: Double?
     }
 
     private var progress: CatalogProgress? {
@@ -122,6 +125,14 @@ struct CatalogSourcesView: View {
                     case let .selected(source): await play(source)
                     case .fallback: await playNext()
                     case let .importLink(link): await importLink(link)
+                    case .englishReplacement:
+                        if let next = englishReplacement, next.scope == DiscoveryStore.shared.scope,
+                           settingsManager.playback.alwaysPreferEnglishAudio
+                        {
+                            resumes = true; englishReplacement = nil; request = next
+                        } else {
+                            englishReplacement = nil
+                        }
                     }
                 }
                 .task(id: PollKey(
@@ -142,6 +153,7 @@ struct CatalogSourcesView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
                     canPoll = false; sourceScope = nil; resolver = nil; metadata = nil
                     pendingFailure = nil; request = nil; loading = false
+                    englishReplacement = nil; triedEnglishReplacement = false
                     error = "The AllDebrid connection changed. Checking the current account…"
                     schedule(.refresh)
                 }
@@ -178,6 +190,30 @@ struct CatalogSourcesView: View {
                         url: request.url,
                         subtitles: request.subtitles,
                         resumes: resumes,
+                        exactResume: request.exactResume,
+                        englishAudioFallback: automatic ? EnglishAudioFallback(
+                            find: {
+                                guard !triedEnglishReplacement, settingsManager.playback.alwaysPreferEnglishAudio,
+                                      scenePhase == .active, sourceScope == request.scope, progress?.completed != true,
+                                      let resolver else { return nil }
+                                triedEnglishReplacement = true
+                                return try? await resolver.englishAudioAlternative()
+                            },
+                            activate: { result, seconds in
+                                guard scenePhase == .active, self.request?.id == request.id,
+                                      sourceScope == request.scope, request.scope == DiscoveryStore.shared.scope,
+                                      progress?.completed != true,
+                                      settingsManager.playback.alwaysPreferEnglishAudio,
+                                      resolver?.acceptEnglishAudioAlternative(result) == true else { return }
+                                englishReplacement = Request(
+                                    url: result.url,
+                                    subtitles: result.subtitles,
+                                    scope: request.scope,
+                                    exactResume: seconds,
+                                )
+                                self.request = nil
+                            },
+                        ) : nil,
                         onFailure: automatic ?
                             { message in pendingFailure = message; self.request = nil } : nil,
                     )
@@ -390,6 +426,9 @@ struct CatalogSourcesView: View {
     }
 
     private func playerDismissed() {
+        if englishReplacement != nil {
+            pendingFailure = nil; schedule(.englishReplacement); return
+        }
         if pendingFailure != nil, automatic {
             pendingFailure = nil; resumes = true; schedule(.fallback)
         } else {
@@ -409,6 +448,8 @@ private struct CatalogPlayerView: View {
     let url: URL
     let subtitles: [ExternalSubtitleTrack]
     let resumes: Bool
+    var exactResume: Double?
+    var englishAudioFallback: EnglishAudioFallback?
     var onFailure: ((String) -> Void)?
     @State private var failureReported = false
     @State private var viewModel: PlayerViewModel?
@@ -416,13 +457,17 @@ private struct CatalogPlayerView: View {
     var body: some View {
         Group {
             if let viewModel {
-                NativePlaybackView(viewModel: viewModel, onFailure: onFailure.map { callback in
-                    { message in
-                        guard !failureReported else { return }
-                        failureReported = true
-                        callback(message)
-                    }
-                })
+                NativePlaybackView(
+                    viewModel: viewModel,
+                    englishAudioFallback: englishAudioFallback,
+                    onFailure: onFailure.map { callback in
+                        { message in
+                            guard !failureReported else { return }
+                            failureReported = true
+                            callback(message)
+                        }
+                    },
+                )
             } else {
                 ProgressView()
             }
@@ -431,13 +476,13 @@ private struct CatalogPlayerView: View {
             // A SwiftUI value-view reconstruction must not start another tracking session.
             guard viewModel == nil else { return }
             let saved = CatalogProgressStore.shared.progress(title: title, episode: episode, scope: scope)
-            let offset = resumes ? saved?.resumeOffset ?? 0 : 0
+            let offset = resumes ? exactResume ?? saved?.resumeOffset ?? 0 : 0
             viewModel = PlayerViewModel(
                 localMedia: CatalogMediaAdapter.make(title: title, episode: episode, resume: offset > 0 ? offset : nil),
                 localPlaybackURL: url, localExternalSubtitles: subtitles, resumes: resumes,
                 catalogTrackerItem: title.trackerItem(episode: episode),
                 catalogRecorder: CatalogProgressStore.shared.makeRecorder(title: title, episode: episode, scope: scope),
-                catalogResumePercentage: resumes ? saved?.resumePercentage : nil,
+                catalogResumePercentage: resumes && exactResume == nil ? saved?.resumePercentage : nil,
             )
         }
         .onDisappear { CatalogProgressStore.shared.endPlayback(title: title, episode: episode, scope: scope) }
@@ -449,6 +494,7 @@ private struct CatalogPlayerView: View {
 struct NativePlaybackView: View {
     @Environment(\.dismiss) private var dismiss
     @State var viewModel: PlayerViewModel
+    var englishAudioFallback: EnglishAudioFallback?
     var onFailure: ((String) -> Void)?
     @State private var presentationID = UUID()
     var body: some View {
@@ -457,7 +503,11 @@ struct NativePlaybackView: View {
         #elseif os(tvOS)
             PlayerWrapper(viewModel: viewModel, onExit: { dismiss() })
         #else
-            PlayerWrapper(viewModel: viewModel, onPlaybackFailure: onFailure)
+            PlayerWrapper(
+                viewModel: viewModel,
+                onPlaybackFailure: onFailure,
+                englishAudioFallback: englishAudioFallback,
+            )
         #endif
     }
 }
