@@ -33,6 +33,10 @@ struct AirPlayPlaybackPolicyTests {
     }
 
     @Test func `HTTP denial is evidence of authorization failure not proof of expiration`() {
+        let wrapped = NSError(domain: "AVFoundationErrorDomain", code: -11800, userInfo: [
+            NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost),
+        ])
+        #expect(AirPlayPlaybackPolicy.failure(error: wrapped, httpStatus: nil) == .network)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: "HTTP", code: 403) == 403)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: "CoreMediaErrorDomain", code: 403) == nil)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: nil, code: 403) == nil)

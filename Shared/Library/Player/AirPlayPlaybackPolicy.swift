@@ -36,6 +36,19 @@ enum AirPlayPlaybackPolicy {
         case authorizationOrExpiredLink, unavailable, network, incompatible, playback
     }
 
+    static func failure(error: NSError?, httpStatus: Int?) -> Failure {
+        var current = error
+        for _ in 0 ..< 4 {
+            guard let error = current else { break }
+            let category = failure(domain: error.domain, code: error.code, httpStatus: httpStatus)
+            if category != .playback {
+                return category
+            }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return failure(domain: "", code: 0, httpStatus: httpStatus)
+    }
+
     /// Only structured, whitelisted facts are classified. No URL or error description is logged.
     static func failure(domain: String, code: Int, httpStatus: Int?) -> Failure {
         if let httpStatus {

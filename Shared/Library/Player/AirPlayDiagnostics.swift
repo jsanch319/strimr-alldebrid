@@ -112,11 +112,7 @@
             {
                 .incompatible
             } else {
-                AirPlayPlaybackPolicy.failure(
-                    domain: error?.domain ?? "",
-                    code: error?.code ?? 0,
-                    httpStatus: http,
-                )
+                AirPlayPlaybackPolicy.failure(error: error, httpStatus: http)
             }
             record(category.rawValue, detail: http ?? 0)
         }
