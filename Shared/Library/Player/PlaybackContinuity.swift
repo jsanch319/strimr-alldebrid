@@ -24,8 +24,11 @@ struct PlaybackContinuity {
         guard candidate.isFinite, candidate >= 0 else { return false }
         // Rebuilt HLS clocks can briefly publish a new item's zero-based timeline.
         // Do not release the gate until the engine has restored the carried playhead.
-        guard !(position > 2 && candidate < 1),
-              !restoring || candidate >= max(0, position - 2) else { return false }
+        if position > 2, candidate < 1 {
+            beginTransition()
+            return false
+        }
+        guard !restoring || candidate >= max(0, position - 2) else { return false }
         position = candidate
         restoring = false
         return true

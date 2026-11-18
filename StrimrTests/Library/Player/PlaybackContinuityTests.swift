@@ -14,6 +14,8 @@ struct PlaybackContinuityTests {
         #expect(clock.observe(1825))
         #expect(clock.position == 1825)
         #expect(!clock.observe(0))
+        #expect(!clock.observe(1))
+        #expect(!clock.observe(2))
         #expect(clock.position == 1825)
     }
 
