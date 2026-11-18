@@ -45,7 +45,7 @@ struct StremioTests {
         )
     }
 
-    func service(_ client: AddonFixture, store: AddonMemoryStore? = nil) -> StremioPlaybackSources {
+    private func service(_ client: AddonFixture, store: AddonMemoryStore? = nil) -> StremioPlaybackSources {
         .init(client: client, store: store ?? AddonMemoryStore(configuration: configuration))
     }
 
