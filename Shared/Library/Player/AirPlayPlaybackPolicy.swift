@@ -20,6 +20,17 @@ enum AirPlayPlaybackPolicy {
         if host == "localhost" || host == "::1" || host.hasPrefix("127.") {
             return "loopback"
         }
+        let octets = host.split(separator: ".").compactMap { Int($0) }
+        if octets.count == 4, octets.allSatisfy({ (0 ... 255).contains($0) }),
+           octets[0] == 10 || (octets[0] == 192 && octets[1] == 168) ||
+           (octets[0] == 172 && (16 ... 31).contains(octets[1])) ||
+           (octets[0] == 169 && octets[1] == 254)
+        {
+            return "lan"
+        }
+        if host.hasSuffix(".local") {
+            return "lan"
+        }
         if url.isFileURL {
             return "file"
         }

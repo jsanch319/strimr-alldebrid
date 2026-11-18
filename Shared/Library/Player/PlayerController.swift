@@ -356,6 +356,7 @@ final class PlayerController {
     func togglePlayback() {
         #if os(iOS)
             remoteInterruptionToken = nil
+            airPlayDiagnostics.record("toggle-command")
         #endif
         #if os(iOS)
             if needsBackgroundRestore {
@@ -385,6 +386,7 @@ final class PlayerController {
     func pause() {
         #if os(iOS)
             remoteInterruptionToken = nil
+            airPlayDiagnostics.record("pause-command")
         #endif
         #if os(iOS)
             if needsBackgroundRestore {
@@ -402,6 +404,7 @@ final class PlayerController {
     func resume() {
         #if os(iOS)
             remoteInterruptionToken = nil
+            airPlayDiagnostics.record("play-command")
         #endif
         #if os(iOS)
             if needsBackgroundRestore {
@@ -908,6 +911,7 @@ final class PlayerController {
     func stop() {
         #if os(iOS)
             remoteInterruptionToken = nil
+            airPlayDiagnostics.record("session-stop")
         #endif
         loadGeneration = UUID()
         nativeAudioSelection = nil

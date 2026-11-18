@@ -58,11 +58,12 @@ struct AirPlayPlaybackPolicyTests {
     @Test func `diagnostic source categories never include credentials hosts or signed URLs`() throws {
         for value in [
             "https://test-user:test-password@example.invalid/private/signed?token=test-secret",
-            "https://192.168.1.42/private?key=test-secret",
         ] {
             let url = try #require(URL(string: value))
             #expect(AirPlayPlaybackPolicy.sourceCategory(url) == "remote-https")
         }
+        let lan = try #require(URL(string: "https://192.168.1.42/private?key=test-secret"))
+        #expect(AirPlayPlaybackPolicy.sourceCategory(lan) == "lan")
         let local = try #require(URL(string: "http://127.0.0.1:1234/private/master.m3u8"))
         #expect(AirPlayPlaybackPolicy.sourceCategory(local) == "loopback")
     }
