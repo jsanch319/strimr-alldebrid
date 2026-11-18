@@ -50,6 +50,7 @@ final class PlayerController {
     var resumeRecoveryMessage: String?
     private(set) var resumeVerifiedPosition: Double?
     @ObservationIgnored private var resumeVerification: ResumeVerification?
+    @ObservationIgnored private let nativeResumeClock = NativeResumeClock()
     @ObservationIgnored private var resumeVerificationToken = UUID()
     @ObservationIgnored private var resumeSeekTask: Task<Void, Never>?
     @ObservationIgnored private var landedSeekPosition: Double?
@@ -542,7 +543,14 @@ final class PlayerController {
         resumeVerificationToken = UUID()
         resumeSeekTask?.cancel(); resumeSeekTask = nil
         resumeVerification = nil; resumeRecoveryMessage = nil
+        nativeResumeClock.reset()
         resumeVerifiedPosition = nil
+    }
+
+    private func observeNativeResumeClock() {
+        nativeResumeClock.observe(engine.currentAVPlayer) { [weak self] in
+            _ = self?.checkResumePosition()
+        }
     }
 
     private func verifyHandoff(_ item: AVPlayerItem) {
@@ -554,6 +562,7 @@ final class PlayerController {
         let checkpoint = position
         continuity.beginTransition()
         resumeVerification = ResumeVerification(target: checkpoint)
+        observeNativeResumeClock()
         landedSeekPosition = nil
         handoffResumeTask = Task { @MainActor [weak self, weak item] in
             let started = ContinuousClock.now
@@ -565,7 +574,7 @@ final class PlayerController {
                 if resumeVerification == nil || checkResumePosition() {
                     return
                 }
-                let native = engine.currentAVPlayer?.currentTime().seconds
+                let native = nativeResumeClock.position
                 let mapped = native.map { $0 + (videoRoute == .loopback ? engine.playlistShiftSeconds : 0) }
                 let settled = item.status == .readyToPlay && !engine.isBuffering && !engine.isSeeking && engine
                     .state != .loading
@@ -609,7 +618,7 @@ final class PlayerController {
         let ready = item.map { $0.status == .readyToPlay } ?? (!engine.isBuffering && engine.state != .loading)
         // Native time is folded by the same public playlist shift used by the engine.
         // Require agreement with the rendered source clock, not a synthetic currentTime alone.
-        let native = engine.currentAVPlayer?.currentTime().seconds
+        let native = nativeResumeClock.position
         let mapped = native.map { $0 + (videoRoute == .loopback ? engine.playlistShiftSeconds : 0) }
         let rendered = engine.clock.sourceTime
         let actual: Double? = if let mapped, verification.near(mapped), verification.near(rendered) {
@@ -633,6 +642,7 @@ final class PlayerController {
             continuity.seek(to: accepted); _ = continuity.observe(accepted); position = accepted
             resumeVerifiedPosition = accepted
             resumeVerification = nil; resumeRecoveryMessage = nil
+            nativeResumeClock.reset()
             #if os(iOS)
                 airPlayDiagnostics.record("resume-verified")
             #endif
@@ -652,6 +662,7 @@ final class PlayerController {
             return true
         }
         resumeVerification = ResumeVerification(target: time)
+        observeNativeResumeClock()
         landedSeekPosition = nil
         let started = ContinuousClock.now
         var budget = 60.0
@@ -1452,6 +1463,13 @@ final class PlayerController {
     }
 
     private func observeEngine() {
+        engine.$currentAVPlayer
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, resumeVerification != nil else { return }
+                observeNativeResumeClock()
+            }.store(in: &cancellables)
+
         #if os(iOS)
             // Without this the system pauses a player showing video as soon as the app leaves the foreground.
             engine.$currentAVPlayer
@@ -1489,6 +1507,9 @@ final class PlayerController {
                 continuity.beginTransition()
                 if let item, continuityItem !== item {
                     continuityItem = item
+                    if resumeVerification != nil {
+                        nativeResumeClock.reset(); observeNativeResumeClock()
+                    }
                     verifyHandoff(item)
                 }
             }
