@@ -462,7 +462,8 @@ final class PlayerController {
         }
 
         private var needsBackgroundRestore: Bool {
-            !isAirPlayPlaybackActive && (engine.needsForegroundVideoRestore || backgroundRestoreTask != nil)
+            engine.currentAVPlayer?.isExternalPlaybackActive != true &&
+                (engine.needsForegroundVideoRestore || backgroundRestoreTask != nil)
         }
 
         /// The engine releases the video of a session left paused in the background; it has to be rebuilt where it
@@ -472,7 +473,7 @@ final class PlayerController {
             if let resumesPlayback {
                 backgroundRestoreResumesPlayback = resumesPlayback
             }
-            guard !isAirPlayPlaybackActive, backgroundRestoreTask == nil,
+            guard engine.currentAVPlayer?.isExternalPlaybackActive != true, backgroundRestoreTask == nil,
                   engine.needsForegroundVideoRestore else { return }
             if resumesPlayback == nil {
                 backgroundRestoreResumesPlayback = false
