@@ -26,6 +26,12 @@ enum AirPlayPlaybackPolicy {
         return url.scheme == "https" ? "remote-https" : "network-other"
     }
 
+    static func httpStatus(domain: String?, code: Int?) -> Int? {
+        guard let domain, ["HTTP", "HTTPErrorDomain"].contains(domain),
+              let code, (400 ... 599).contains(code) else { return nil }
+        return code
+    }
+
     enum Failure: String {
         case authorizationOrExpiredLink, unavailable, network, incompatible, playback
     }

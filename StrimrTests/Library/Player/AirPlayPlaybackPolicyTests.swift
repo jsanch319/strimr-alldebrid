@@ -33,6 +33,9 @@ struct AirPlayPlaybackPolicyTests {
     }
 
     @Test func `HTTP denial is evidence of authorization failure not proof of expiration`() {
+        #expect(AirPlayPlaybackPolicy.httpStatus(domain: "HTTP", code: 403) == 403)
+        #expect(AirPlayPlaybackPolicy.httpStatus(domain: "CoreMediaErrorDomain", code: 403) == nil)
+        #expect(AirPlayPlaybackPolicy.httpStatus(domain: nil, code: 403) == nil)
         #expect(AirPlayPlaybackPolicy.failure(domain: "", code: 0, httpStatus: 403) == .authorizationOrExpiredLink)
         #expect(AirPlayPlaybackPolicy.failure(domain: "", code: 0, httpStatus: 401) == .authorizationOrExpiredLink)
         #expect(AirPlayPlaybackPolicy.failure(domain: "", code: 0, httpStatus: 410) == .unavailable)

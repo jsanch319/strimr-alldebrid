@@ -100,8 +100,9 @@
 
         private func failure(_ item: AVPlayerItem) {
             let error = item.error as NSError?
-            let status = item.errorLog()?.events.last?.errorStatusCode
-            let http = status.flatMap { (400 ... 599).contains($0) ? $0 : nil }
+            guard player?.currentItem === item else { return }
+            let event = item.errorLog()?.events.last
+            let http = AirPlayPlaybackPolicy.httpStatus(domain: event?.errorDomain, code: event?.errorStatusCode)
             let category: AirPlayPlaybackPolicy.Failure = if error?.domain == AVFoundationErrorDomain,
                                                              [
                                                                  AVError.Code.decoderNotFound.rawValue,
