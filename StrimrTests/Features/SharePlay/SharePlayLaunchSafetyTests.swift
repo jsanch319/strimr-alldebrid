@@ -15,7 +15,10 @@ struct SharePlayLaunchSafetyTests {
     @Test func `one invitation owns activation until session arrival`() {
         var guardState = SharePlayLaunchGuard()
         let first = UUID(), other = UUID(), now = Date()
+        #expect(guardState.canAccept(first))
         #expect(guardState.begin(first, now: now))
+        #expect(guardState.canAccept(first))
+        #expect(!guardState.canAccept(other))
         #expect(!guardState.begin(first, now: now))
         #expect(!guardState.begin(other, now: now))
         guardState.finish(other, now: now) // stale sheet cannot release current request

@@ -11,6 +11,10 @@ struct SharePlayLaunchGuard {
         return true
     }
 
+    func canAccept(_ id: UUID) -> Bool {
+        activeID == nil || activeID == id
+    }
+
     mutating func finish(_ id: UUID, cooldown: Bool = true, now: Date = .now) {
         guard activeID == id else { return }
         activeID = nil

@@ -104,7 +104,7 @@ final class SharePlayCoordinator {
     @ObservationIgnored private var pendingNextItem: MediaItem?
     @ObservationIgnored private var lastLaunchedActivityID: UUID?
     @ObservationIgnored private var completedInvitationID: UUID?
-    @ObservationIgnored private var sharingPresentationActivityID: UUID?
+    private var sharingPresentationActivityID: UUID?
     @ObservationIgnored private var pendingSessionAcceptanceActivityID: UUID?
     @ObservationIgnored private var deferredSessionInvalidation = false
     @ObservationIgnored private var pendingInitialResumeActivityID: UUID?
@@ -394,12 +394,22 @@ final class SharePlayCoordinator {
             return
         }
         guard session !== newSession else { return }
+        guard launchGuard.canAccept(newSession.activity.activityID) else {
+            Self.launchLog.notice("stage=session_access outcome=competing_launch_rejected")
+            newSession.leave()
+            return
+        }
         Self.launchLog.notice("stage=session_access outcome=started")
         let acceptanceActivityID = newSession.activity.activityID
         pendingSessionAcceptanceActivityID = acceptanceActivityID
         do {
             try await ensureAccess(to: newSession.activity)
-            guard pendingSessionAcceptanceActivityID == acceptanceActivityID else {
+            guard pendingSessionAcceptanceActivityID == acceptanceActivityID,
+                  launchGuard.canAccept(acceptanceActivityID)
+            else {
+                if pendingSessionAcceptanceActivityID == acceptanceActivityID {
+                    pendingSessionAcceptanceActivityID = nil
+                }
                 newSession.leave()
                 return
             }
