@@ -72,8 +72,8 @@ struct StremioTests {
         let client = AddonFixture(streams: values)
         let addon = service(client)
         let found = try await addon.discover(title: title, episode: selected)
-        #expect(found.count == 12)
-        #expect(found.filter(\.isSupported).count == 6)
+        #expect(found.count == 13)
+        #expect(found.filter(\.isSupported).count == 7)
         #expect(await client.searches == ["series/tt7631058:2:1"])
         let labels = found.compactMap { source -> StremioSourceLabel? in
             if case let .stremio(label) = source {

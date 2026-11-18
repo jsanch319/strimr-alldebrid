@@ -93,7 +93,9 @@ nonisolated struct StremioStream: Decodable, Sendable, CustomStringConvertible, 
                   fileIdx == nil || fileIdx.map({ $0 < 0 }) == true
         {
             unsupportedReason = "Invalid torrent file index."
-        } else if c.contains(.behaviorHints), behaviorHints == nil {
+        } else if c.contains(.behaviorHints), (try? c.decodeNil(forKey: .behaviorHints)) == false,
+                  behaviorHints == nil
+        {
             unsupportedReason = "Malformed stream behavior hints."
         } else {
             unsupportedReason = nil
