@@ -1,5 +1,6 @@
 import GroupActivities
 import SwiftUI
+import UIKit
 
 struct CatalogSharePlayButton: View {
     @Environment(SharePlayCoordinator.self) private var coordinator

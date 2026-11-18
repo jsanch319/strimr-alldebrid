@@ -103,4 +103,23 @@ struct ResumeVerificationTests {
             stableSeconds: 30,
         ))
     }
+
+    @Test func `handoff checks do not confuse source PTS with display time`() {
+        #expect(!ResumeVerification.shouldCorrectHandoff(
+            target: 300,
+            native: 900,
+            rendered: 900,
+            display: 300,
+            settled: true,
+            stableSeconds: 30,
+        ))
+        #expect(ResumeVerification.shouldCorrectHandoff(
+            target: 900,
+            native: 50,
+            rendered: 50,
+            display: 50,
+            settled: true,
+            stableSeconds: 3,
+        ))
+    }
 }
