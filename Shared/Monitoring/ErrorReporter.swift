@@ -106,7 +106,7 @@ enum ErrorReporter {
 protocol ExpectedConnectivityError: Error {}
 
 extension Error {
-    var isCancellation: Bool {
+    nonisolated var isCancellation: Bool {
         self is CancellationError
             || (self as? URLError)?.code == .cancelled
     }
