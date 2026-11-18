@@ -92,6 +92,33 @@ struct EnglishAudioPreferenceTests {
         #expect(disabled.selection(in: [french, english], enabled: false) == nil)
     }
 
+    @Test func `manual language and role are retained when a replacement has different track IDs and codec`() {
+        let chosen = track(2, language: "fr-CA", title: "French main")
+        var session = EnglishAudioSession(manualTrack: chosen)
+        let english = track(1, language: "eng", mainDefault: true)
+        let french = PlayerTrack(
+            id: 7,
+            ffIndex: 7,
+            providerStreamID: nil,
+            type: .audio,
+            title: "French main",
+            language: "fr-FR",
+            codec: "eac3",
+            isDefault: false,
+            isForced: false,
+            isHearingImpaired: false,
+            isCommentary: false,
+            isExternal: false,
+            isSelected: false,
+        )
+        #expect(session.selection(in: [english, french], enabled: true)?.id == 7)
+        var next = EnglishAudioSession(manualTrack: track(2, language: "eng", title: "Commentary", commentary: true))
+        #expect(next.selection(
+            in: [track(9, language: "en-US", title: "Director commentary", commentary: true), english],
+            enabled: true,
+        )?.id == 9)
+    }
+
     @Test func `late English metadata can improve an initial no-track result without repeated switching`() {
         var session = EnglishAudioSession()
         #expect(session.selection(in: [], enabled: true) == nil)

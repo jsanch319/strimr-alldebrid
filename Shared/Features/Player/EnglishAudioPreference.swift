@@ -1,12 +1,17 @@
 import Foundation
+import Observation
 
 /// Language comes only from track metadata; display names never establish a language.
 enum EnglishAudioPreference {
-    static func isEnglish(_ language: String?) -> Bool {
-        guard let language else { return false }
+    static func languageRoot(_ language: String?) -> String? {
+        guard let language else { return nil }
         let root = language.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             .split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init)
-        return root == "en" || root == "eng"
+        return root == "eng" ? "en" : root
+    }
+
+    static func isEnglish(_ language: String?) -> Bool {
+        languageRoot(language) == "en"
     }
 
     static func preferred(in tracks: [PlayerTrack]) -> PlayerTrack? {
@@ -67,17 +72,28 @@ struct EnglishAudioSession {
         appliedID = nil
     }
 
-    init() {}
+    init(manualTrack: PlayerTrack? = nil) {
+        self.manualTrack = manualTrack
+    }
 
     mutating func selection(in tracks: [PlayerTrack], enabled: Bool) -> PlayerTrack? {
         let target: PlayerTrack?
         if let manualTrack {
-            let matches = tracks
-                .filter {
-                    $0.language == manualTrack.language && $0.title == manualTrack.title && $0.codec == manualTrack
-                        .codec
-                }
+            let matches = tracks.filter {
+                $0.language == manualTrack.language && $0.title == manualTrack.title && $0.codec == manualTrack.codec
+            }
+            let sameLanguage = tracks.filter {
+                guard let expected = EnglishAudioPreference.languageRoot(manualTrack.language) else { return false }
+                return EnglishAudioPreference.languageRoot($0.language) == expected
+            }
             target = matches.first { $0.id == manualTrack.id } ?? matches.first
+                ?? sameLanguage.first { $0.title == manualTrack.title }
+                ?? sameLanguage
+                .first {
+                    $0.isCommentary == manualTrack.isCommentary && $0.isHearingImpaired == manualTrack
+                        .isHearingImpaired
+                }
+                ?? sameLanguage.first
         } else {
             target = enabled ? EnglishAudioPreference.preferred(in: tracks) : nil
         }
@@ -88,7 +104,14 @@ struct EnglishAudioSession {
 }
 
 @MainActor
+@Observable
+final class EnglishAudioPlaybackContext {
+    var manualTrack: PlayerTrack?
+}
+
+@MainActor
 struct EnglishAudioFallback {
+    var context: EnglishAudioPlaybackContext?
     let find: @MainActor () async -> CatalogSourceResolver.Resolved?
     let activate: @MainActor (CatalogSourceResolver.Resolved, Double) -> Void
 }

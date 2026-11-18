@@ -116,6 +116,8 @@ struct PlayerView: View {
         _viewModel = State(initialValue: viewModel)
         self.onPlaybackFailure = onPlaybackFailure
         self.englishAudioFallback = englishAudioFallback
+        _englishSession =
+            State(initialValue: EnglishAudioSession(manualTrack: englishAudioFallback?.context?.manualTrack))
     }
 
     var body: some View {
@@ -1110,6 +1112,7 @@ struct PlayerView: View {
             onSearchSubtitles: showSubtitleSearch,
             onResetTrackSelections: {
                 englishFallbackTask?.cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil
+                englishAudioFallback?.context?.manualTrack = nil
                 viewModel.resetRememberedTrackSelections(); refreshTracks()
             },
             onSelectSync: openOffsetBar(_:),
@@ -1525,6 +1528,7 @@ struct PlayerView: View {
 
         englishFallbackTask?.cancel()
         englishSession.selectManually(track); englishAudioNotice = nil
+        englishAudioFallback?.context?.manualTrack = track
         Task {
             await viewModel.persistStreamSelection(for: track)
             if viewModel.isTranscoding {
@@ -1865,11 +1869,8 @@ struct PlayerView: View {
             startPosition: nil,
             preferredAudioTrackID: settingsManager.playback.alwaysPreferEnglishAudio && englishSession
                 .manualTrack == nil ? nil : preferredAudioTrackID,
-            preferredAudioLanguages: settingsManager.playback.alwaysPreferEnglishAudio && englishSession
-                .manualTrack == nil ? [
-                    "en",
-                    "eng",
-                ] : [],
+            preferredAudioLanguages: englishSession.manualTrack?.language.map { [$0] }
+                ?? (settingsManager.playback.alwaysPreferEnglishAudio ? ["en", "eng"] : []),
             losslessAudio: settingsManager.playback.losslessAudio,
             readAhead: settingsManager.playback.readAhead,
             spatialAudioLayout: settingsManager.playback.spatialAudioLayout,

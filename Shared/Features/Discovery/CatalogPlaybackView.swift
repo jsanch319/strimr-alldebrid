@@ -16,6 +16,7 @@ struct CatalogSourcesView: View {
     @State private var request: Request?
     @State private var englishReplacement: Request?
     @State private var triedEnglishReplacement = false
+    @State private var englishAudioContext = EnglishAudioPlaybackContext()
     @State private var resumes = true
     @State private var automatic = true
     @State private var pendingFailure: String?
@@ -153,7 +154,7 @@ struct CatalogSourcesView: View {
                 .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
                     canPoll = false; sourceScope = nil; resolver = nil; metadata = nil
                     pendingFailure = nil; request = nil; loading = false
-                    englishReplacement = nil; triedEnglishReplacement = false
+                    englishReplacement = nil; triedEnglishReplacement = false; englishAudioContext.manualTrack = nil
                     error = "The AllDebrid connection changed. Checking the current account…"
                     schedule(.refresh)
                 }
@@ -192,6 +193,7 @@ struct CatalogSourcesView: View {
                         resumes: resumes,
                         exactResume: request.exactResume,
                         englishAudioFallback: automatic ? EnglishAudioFallback(
+                            context: englishAudioContext,
                             find: {
                                 guard !triedEnglishReplacement, settingsManager.playback.alwaysPreferEnglishAudio,
                                       scenePhase == .active, sourceScope == request.scope, progress?.completed != true,
