@@ -63,12 +63,13 @@
         func record(_ event: String, detail: Int = 0) {
             let external = player?.isExternalPlaybackActive == true
             let route = AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .airPlay }
+            let sourceCategory = source
             let transport = (player?.currentItem?.asset as? AVURLAsset).map {
                 AirPlayPlaybackPolicy.sourceCategory($0.url)
             } ?? "unknown"
             logger
                 .info(
-                    "event=\(event, privacy: .public) detail=\(detail) external=\(external) airplayRoute=\(route) source=\(source, privacy: .public) transport=\(transport, privacy: .public)",
+                    "event=\(event, privacy: .public) detail=\(detail) external=\(external) airplayRoute=\(route) source=\(sourceCategory, privacy: .public) transport=\(transport, privacy: .public)",
                 )
         }
 
