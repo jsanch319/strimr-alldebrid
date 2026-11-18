@@ -1501,7 +1501,8 @@ final class PlayerController {
                 .combineLatest(engine.$currentAVPlayerItem)
                 .receive(on: DispatchQueue.main)
                 .sink { [weak self] player, item in
-                    guard let self, let player, let item, videoRoute == .remoteBypass else { return }
+                    guard let self, let player, let item, videoRoute == .remoteBypass,
+                          !isCoordinatedPlayback else { return }
                     PlayerAirPlayConfiguration.applyRemoteBuffering(to: player, item: item)
                 }
                 .store(in: &cancellables)
