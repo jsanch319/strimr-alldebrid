@@ -37,6 +37,13 @@ struct AirPlayPlaybackPolicyTests {
             NSUnderlyingErrorKey: NSError(domain: NSURLErrorDomain, code: NSURLErrorNetworkConnectionLost),
         ])
         #expect(AirPlayPlaybackPolicy.failure(error: wrapped, httpStatus: nil) == .network)
+        #expect(AirPlayPlaybackPolicy.diagnosticErrorCode(wrapped) == NSURLErrorNetworkConnectionLost)
+        #expect(AirPlayPlaybackPolicy.diagnosticErrorCode(NSError(domain: "private-provider", code: 403)) == 0)
+        #expect(AirPlayPlaybackPolicy.failure(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorHTTPTooManyRedirects,
+            httpStatus: nil,
+        ) == .redirect)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: "HTTP", code: 403) == 403)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: "CoreMediaErrorDomain", code: 403) == nil)
         #expect(AirPlayPlaybackPolicy.httpStatus(domain: nil, code: 403) == nil)

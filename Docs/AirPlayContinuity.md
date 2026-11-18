@@ -85,13 +85,14 @@ On a signed iPhone, connect macOS Console, select the phone and filter subsystem
 `app.strimr.playback`, category `AirPlay`. Capture the interval around a failure.
 These are OS unified logs, not an analytics upload or an in-app export. The new
 observer logs fixed event categories, route reason numbers, external-active and
-AirPlay-audio-route flags, source *type*, interruption option flags and HTTP error
-status numbers. It observes native-item replacement, waiting/playing/paused,
+AirPlay-audio-route flags, source *type*, interruption option flags, HTTP error
+status numbers and whitelisted Apple error codes. It observes native-item replacement, waiting/playing/paused,
 stalls and item failures. It logs no URLs, IPs, TV names, credentials, headers,
 media identifiers, exact positions or raw NSError descriptions. Error categories
 are diagnostic evidence, not proof: HTTP 401/403 can mean authorization/expiry;
 404/410 means unavailable; known URL-session failures indicate networking;
-selected AVFoundation decoder/format/protection errors indicate incompatibility.
+selected AVFoundation decoder/format/protection errors indicate incompatibility;
+URL-session redirect-limit failures have their own category.
 A generic playback error or a route loss remains unclassified rather than guessed.
 Do not attach unredacted engine/system logs; their privacy behavior is independent
 of this new observer.

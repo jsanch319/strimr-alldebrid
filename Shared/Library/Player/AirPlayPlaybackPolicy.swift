@@ -44,7 +44,20 @@ enum AirPlayPlaybackPolicy {
     }
 
     enum Failure: String {
-        case authorizationOrExpiredLink, unavailable, network, incompatible, playback
+        case authorizationOrExpiredLink, unavailable, network, redirect, incompatible, playback
+    }
+
+    static func diagnosticErrorCode(_ error: NSError?) -> Int {
+        var current = error
+        var result = 0
+        for _ in 0 ..< 4 {
+            guard let error = current else { break }
+            if [NSURLErrorDomain, "AVFoundationErrorDomain"].contains(error.domain) {
+                result = error.code
+            }
+            current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        }
+        return result
     }
 
     static func failure(error: NSError?, httpStatus: Int?) -> Failure {
@@ -71,11 +84,15 @@ enum AirPlayPlaybackPolicy {
             }
         }
         if domain == NSURLErrorDomain {
+            if code == NSURLErrorHTTPTooManyRedirects {
+                return .redirect
+            }
             if [
                 NSURLErrorTimedOut,
                 NSURLErrorNetworkConnectionLost,
                 NSURLErrorNotConnectedToInternet,
                 NSURLErrorCannotConnectToHost,
+                NSURLErrorCannotFindHost,
                 NSURLErrorDNSLookupFailed,
             ].contains(code) {
                 return .network

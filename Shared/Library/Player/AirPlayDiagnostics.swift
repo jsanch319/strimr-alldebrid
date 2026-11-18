@@ -118,7 +118,7 @@
             } else {
                 AirPlayPlaybackPolicy.failure(error: error, httpStatus: http)
             }
-            record(category.rawValue, detail: http ?? 0)
+            record(category.rawValue, detail: http ?? AirPlayPlaybackPolicy.diagnosticErrorCode(error))
         }
     }
 #endif
