@@ -49,13 +49,18 @@ struct ResumeVerification {
         target: Double,
         native: Double?,
         rendered: Double,
+        display: Double? = nil,
         settled: Bool,
         stableSeconds: Double,
     ) -> Bool {
         guard settled, stableSeconds >= 3, target > 2, let native,
               native.isFinite, rendered.isFinite, native >= 0, rendered >= 0,
               abs(native - rendered) <= 2 else { return false }
-        return abs(rendered - target) > 8
+        // Source PTS and display time can have different origins (e.g. disc sources).
+        // Zero corroboration is unambiguous; other positions also need axis agreement.
+        let zero = native < 1 && rendered < 1
+        let sameAxis = display.map { $0.isFinite && abs($0 - rendered) <= 2 } ?? false
+        return (zero || sameAxis) && abs(rendered - target) > 8
     }
 
     static func budget(remote: Bool, buffering: Bool) -> Double {

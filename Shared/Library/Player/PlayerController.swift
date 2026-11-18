@@ -581,6 +581,7 @@ final class PlayerController {
                     target: checkpoint,
                     native: mapped,
                     rendered: engine.clock.sourceTime,
+                    display: engine.clock.currentTime,
                     settled: settled,
                     stableSeconds: stable,
                 ) {
