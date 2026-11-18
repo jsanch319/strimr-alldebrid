@@ -31,6 +31,7 @@ actor AllDebridAPIClient {
         }
     }
 
+    private var importedURLs: [String: URL] = [:]
     private let apiKey: String?
     private let session: URLSession
     private let baseURL = URL(string: "https://api.alldebrid.com/v4/")!
@@ -258,8 +259,78 @@ actor AllDebridAPIClient {
         }
     }
 
+    /// Documented acquisition endpoints; links stay in memory and are never logged or persisted.
+    func uploadMagnet(_ link: String) async throws -> String {
+        guard link.lowercased().hasPrefix("magnet:"),
+              AuthorizedSourceCandidate.validLink(link) else { throw APIError.invalidLink }
+        let payload = try await request(
+            "magnet/upload",
+            parameters: [URLQueryItem(name: "magnets[]", value: link)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any], let rows = data["magnets"] as? [[String: Any]],
+              rows.count == 1, let row = rows.first else { throw APIError.invalidResponse }
+        if row["error"] !=
+            nil
+        {
+            throw APIError
+                .serviceError("AllDebrid rejected the magnet. Check the link, account limits and authorization.")
+        }
+        guard let id = Self.stringValue(row["id"]) else { throw APIError.invalidResponse }
+        return id
+    }
+
+    func importDownloadLink(_ link: String) async throws -> AllDebridLinkImport {
+        guard let url = URL(string: link), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              AuthorizedSourceCandidate.validLink(link) else { throw APIError.invalidLink }
+        let payload = try await request(
+            "link/unlock",
+            parameters: [URLQueryItem(name: "link", value: link)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any], let filename = data["filename"] as? String,
+              !filename.isEmpty else { throw APIError.invalidResponse }
+        if let id = Self.stringValue(data["delayed"]) {
+            return .delayed(id: id, filename: filename)
+        }
+        guard let raw = data["link"] as? String, let ready = URL(string: raw),
+              ["https", "http"].contains(ready.scheme?.lowercased() ?? ""),
+              ready.host != nil else { throw APIError.invalidResponse }
+        importedURLs[link] = ready
+        return .ready(.init(id: link, filename: filename, link: link))
+    }
+
+    func delayedDownload(id: String, original: String, filename: String) async throws -> AllDebridSavedLink? {
+        let payload = try await request(
+            "link/delayed",
+            parameters: [URLQueryItem(name: "id", value: id)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any],
+              let status = Self.integerValue(data["status"]) else { throw APIError.invalidResponse }
+        if status == 1 {
+            return nil
+        }
+        guard status == 2
+        else {
+            throw APIError
+                .serviceError("AllDebrid could not generate this download link. Try another authorized source.")
+        }
+        guard let raw = data["link"] as? String, let url = URL(string: raw),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else { throw APIError.invalidResponse }
+        importedURLs[original] = url
+        return .init(id: original, filename: filename, link: original)
+    }
+
     /// Resolves an AllDebrid link to a streamable URL and confirms the result is not an API or web page.
     func unlock(_ link: String) async throws -> URL {
+        if let imported = importedURLs[link] {
+            return imported
+        }
         guard let candidate = URL(string: link),
               ["https", "http"].contains(candidate.scheme?.lowercased() ?? ""),
               candidate.host != nil else { throw APIError.invalidLink }

@@ -11,7 +11,7 @@ nonisolated protocol CatalogPlaybackClient: Sendable {
 extension AllDebridAPIClient: CatalogPlaybackClient {}
 
 /// One refreshed account-library snapshot and a bounded, quality-ordered fallback queue.
-/// No title acquisition, unlocked-URL persistence, or separate playback/progress implementation.
+/// Optional authorized acquisition feeds this same matcher and player; unlocked URLs are never persisted.
 @MainActor
 @Observable
 final class CatalogSourceResolver {
@@ -35,14 +35,24 @@ final class CatalogSourceResolver {
     private(set) var availability = Availability.checking
     private(set) var processingMagnets: [AllDebridMagnet] = []
     private var verifiedConnection = false
+    private let acquisition: CatalogSourceAcquisition?
+    var needsSourceSetup: Bool {
+        acquisition?.needsSetup ?? true
+    }
+
     private let client: any CatalogPlaybackClient
     private(set) var sources: [AllDebridTitleMatcher.Source] = []
     private(set) var files: [AllDebridMagnetFile] = []
     private(set) var warnings: [String] = []
     private var attempted = Set<String>()
 
-    init(client: any CatalogPlaybackClient) {
-        self.client = client
+    init(client: any CatalogPlaybackClient, acquisition: CatalogSourceAcquisition? = nil) {
+        self.client = client; self.acquisition = acquisition
+    }
+
+    func addAuthorizedLink(_ link: String, title: TMDBTitle, episode: TMDBEpisode?) async throws {
+        guard let acquisition else { throw Failure.noMatch("Connect AllDebrid before adding an authorized link.") }
+        try await acquisition.submitUserLink(link, title: title, episode: episode)
     }
 
     func refresh(title: TMDBTitle, episode: TMDBEpisode?) async throws {
@@ -87,9 +97,33 @@ final class CatalogSourceResolver {
         if !warnings.isEmpty {
             throw Failure.noMatch("The library check for \(label) was incomplete. " + warnings.joined(separator: " "))
         }
+        if let acquisition {
+            let imported = try await acquisition.discover(title: title, episode: episode, snapshot: snapshot)
+            try Task.checkCancellation()
+            sources = AllDebridTitleMatcher.sources(
+                title: title,
+                episode: episode,
+                files: [],
+                links: imported.filter { AuthorizedSourceCandidate.matchesFile(
+                    $0.filename,
+                    title: title,
+                    episode: episode,
+                ) },
+            )
+            if !sources.isEmpty {
+                availability = .ready; return
+            }
+            if acquisition.isProcessing {
+                availability = .processing
+                throw Failure
+                    .processing(
+                        "An authorized source was submitted to AllDebrid. Waiting for the exact matching file; availability refreshes automatically.",
+                    )
+            }
+        }
         throw Failure
             .noMatch(
-                "\(label) is not available as a matching playable file in your connected AllDebrid library. No content was acquired. Check that its filename/folder identifies the correct title, year and episode, or retry after adding your own available file.",
+                "\(label) is not available as a matching playable file in your connected AllDebrid library. No playable authorized source was found. Configure an authorized source provider or add your own authorized link. AllDebrid does not discover titles by itself.",
             )
     }
 

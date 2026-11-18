@@ -45,6 +45,10 @@ struct SettingsPlaybackView: View {
                 }
             #endif
 
+            Section {
+                NavigationLink("Authorized Playback Sources") { AuthorizedSourceSetupView() }
+            }
+
             externalPlayerSection
 
             #if os(iOS)

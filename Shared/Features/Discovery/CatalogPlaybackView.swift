@@ -24,6 +24,10 @@ struct CatalogSourcesView: View {
     @State private var canPoll = false
     @State private var operation = Operation.refresh
     @State private var operationID = UUID()
+    @AppStorage(AuthorizedSourceSettings.key) private var sourceEndpoints = ""
+    @State private var showingLinkEntry = false
+    @State private var authorizedLink = ""
+    @State private var confirmsAuthorization = false
 
     init(title: TMDBTitle, episode: TMDBEpisode?, startsFromBeginning: Bool = false, forceManual: Bool = false) {
         self.title = title; self.episode = episode; self.forceManual = forceManual
@@ -31,7 +35,10 @@ struct CatalogSourcesView: View {
         _automatic = State(initialValue: !forceManual)
     }
 
-    private enum Operation: Equatable { case refresh, selected(AllDebridTitleMatcher.Source), fallback }
+    private enum Operation: Equatable { case refresh, selected(AllDebridTitleMatcher.Source), fallback,
+                                             importLink(String)
+    }
+
     private struct OperationKey: Equatable { let id: UUID; let active: Bool; let scope: String }
     private struct PollKey: Equatable { let enabled: Bool; let active: Bool; let scope: String; let operation: UUID }
     private struct Request: Identifiable {
@@ -114,6 +121,7 @@ struct CatalogSourcesView: View {
                     case .refresh: await load()
                     case let .selected(source): await play(source)
                     case .fallback: await playNext()
+                    case let .importLink(link): await importLink(link)
                     }
                 }
                 .task(id: PollKey(
@@ -124,11 +132,39 @@ struct CatalogSourcesView: View {
                 )) {
                     await pollAvailability()
                 }
+                .onChange(of: sourceEndpoints) { _, _ in
+                    resolver = nil; canPoll = false; sourceScope = nil; schedule(.refresh)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
                     canPoll = false; sourceScope = nil; resolver = nil; metadata = nil
                     pendingFailure = nil; request = nil; loading = false
                     error = "The AllDebrid connection changed. Checking the current account…"
                     schedule(.refresh)
+                }
+                .sheet(isPresented: $showingLinkEntry) {
+                    NavigationStack {
+                        Form {
+                            Section("Authorized magnet or download link") {
+                                TextField("Paste link", text: $authorizedLink).autocorrectionDisabled()
+                                Toggle("I have permission to access this content", isOn: $confirmsAuthorization)
+                                Text("The actual file must match this title, year and episode before it can play.")
+                                    .font(.footnote)
+                                Button("Add and Check Availability") {
+                                    let link = authorizedLink.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    showingLinkEntry = false; authorizedLink = ""; confirmsAuthorization = false
+                                    schedule(.importLink(link))
+                                }
+                                .disabled(!confirmsAuthorization || !AuthorizedSourceCandidate
+                                    .validLink(authorizedLink.trimmingCharacters(in: .whitespacesAndNewlines)))
+                            }
+                        }
+                        .navigationTitle("Add Authorized Link")
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") { showingLinkEntry = false; authorizedLink = "" }
+                            }
+                        }
+                    }
                 }
                 .sheet(item: $request, onDismiss: playerDismissed) { request in
                     CatalogPlayerView(
@@ -176,6 +212,14 @@ struct CatalogSourcesView: View {
                     Button("Select Source") { automatic = false; error = nil; canPoll = false }
                 }
             }
+            if resolver?.availability == .missing || resolver?.availability == .incomplete {
+                HStack {
+                    NavigationLink(resolver?.needsSourceSetup == true ? "Set Up Sources" : "Manage Sources") {
+                        AuthorizedSourceSetupView()
+                    }
+                    Button("Add Authorized Link") { showingLinkEntry = true }.disabled(loading || resolver == nil)
+                }.font(.subheadline)
+            }
             if canPoll {
                 Text("Availability refreshes automatically while this screen is open.").font(.caption2)
                     .foregroundStyle(.secondary)
@@ -222,7 +266,15 @@ struct CatalogSourcesView: View {
             } else {
                 guard let key = try AllDebridCredentialStore().load()
                 else { throw AllDebridAPIClient.APIError.invalidAPIKey }
-                next = try CatalogSourceResolver(client: AllDebridAPIClient(apiKey: key))
+                let client = try AllDebridAPIClient(apiKey: key)
+                let acquisition = CatalogSourceAcquisition(
+                    client: client,
+                    providers: AuthorizedSourceSettings
+                        .providers(UserDefaults.standard
+                            .string(forKey: AuthorizedSourceSettings.key) ?? ""),
+                    account: key,
+                )
+                next = CatalogSourceResolver(client: client, acquisition: acquisition)
                 resolver = next; sourceScope = scope; metadata = nil
             }
             if metadata == nil {
@@ -245,6 +297,22 @@ struct CatalogSourcesView: View {
             self.error = error.localizedDescription
             canPoll = !AllDebridAPIClient.isAuthenticationOrRateLimit(error)
                 && [.processing, .missing, .incomplete].contains(resolver?.availability ?? .checking)
+        }
+    }
+
+    private func importLink(_ link: String) async {
+        guard !loading, let resolver, sourceScope == DiscoveryStore.shared.scope else { return }
+        loading = true; canPoll = false; error = nil
+        do {
+            try await resolver.addAuthorizedLink(link, title: metadata ?? title, episode: episode)
+            try Task.checkCancellation()
+            loading = false
+            schedule(.refresh)
+        } catch {
+            loading = false
+            if !error.isCancellation {
+                self.error = error.localizedDescription
+            }
         }
     }
 
