@@ -71,7 +71,6 @@ final class StremioPlaybackSources {
                 let direct: Bool
                 if let raw = stream.url, AuthorizedSourceCandidate.validLink(raw) {
                     link = raw; direct = URL(string: raw)?.scheme?.lowercased() == "https"
-                    // Browser/hoster links use AllDebrid, not the native player's URL path.
                 } else if let hash = stream.infoHash, hash.range(
                               of: #"^[a-fA-F0-9]{40}$"#,
                               options: .regularExpression,
@@ -123,8 +122,8 @@ final class StremioPlaybackSources {
                 if error.isCancellation {
                     throw CancellationError()
                 }
+                throw StremioError.playback
             }
-            // A compatible hoster page can instead be unlocked through the documented AllDebrid API.
         }
         guard let acquisition else { throw StremioError.unsupportedSource }
         do {

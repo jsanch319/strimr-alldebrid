@@ -140,7 +140,14 @@ struct StremioTests {
             fail4K: true,
         )
         let library = AddonLibrary()
-        let resolver = CatalogSourceResolver(client: library, stremio: service(client))
+        let upload = AddonAcquisition()
+        let acquisition = try CatalogSourceAcquisition(
+            client: upload,
+            providers: [],
+            account: "fixture",
+            defaults: #require(UserDefaults(suiteName: UUID().uuidString)),
+        )
+        let resolver = CatalogSourceResolver(client: library, acquisition: acquisition, stremio: service(client))
         try await resolver.refresh(title: movie, episode: nil)
         #expect(resolver.sources.map { AllDebridTitleMatcher.resolution($0.filename) } == [2160, 1080, 720])
         let first = try await resolver.resolveNext()
@@ -149,6 +156,7 @@ struct StremioTests {
         #expect(next.url.path == "/720.mkv")
         #expect(await client.played.map(\.path) == ["/4k.mkv", "/1080.mkv", "/720.mkv"])
         #expect(await library.unlocks == 0)
+        #expect(await upload.imports == 0) // Never forward a failed private HTTPS stream URL to another provider.
     }
 
     @Test func `manual selection uses opaque identity and never exposes signed URL`() async throws {
@@ -314,11 +322,13 @@ private actor AddonLibrary: CatalogPlaybackClient {
 
 private actor AddonAcquisition: CatalogAcquisitionClient {
     private(set) var uploads = 0
+    private(set) var imports = 0
     func uploadMagnet(_: String) -> String {
         uploads += 1; return "42"
     }
 
     func importDownloadLink(_: String) throws -> AllDebridLinkImport {
+        imports += 1
         throw StremioError.unsupportedSource
     }
 
