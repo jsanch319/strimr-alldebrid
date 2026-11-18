@@ -3,9 +3,12 @@
 Before Auto Play or manual selection, the connected account is authenticated and
 its library snapshot is retrieved. Ready file selection uses the existing strict
 title/alias/year and exact season/episode matcher, including stable external IDs.
-No content is acquired and no new source provider is introduced.
+This library check does not acquire content. Optional, explicitly configured
+authorized acquisition runs only after a complete missing-library result (see below).
 
-Only processing magnets with matching title identity are labeled Processing.
+Existing processing magnets require matching title identity to be labeled Processing.
+A newly submitted authorized magnet can also be tracked by its returned AllDebrid ID;
+its ready files still require exact title/episode matching.
 A season pack can justify waiting for that season, but never proves an individual
 episode is playable: after readiness, the exact requested episode file must exist.
 Unrelated pending magnets do not hide a missing title. Terminal magnet states are
