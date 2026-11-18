@@ -46,6 +46,21 @@ nonisolated struct ProgressArtworkColor: Hashable, Sendable {
         abs(red - other.red) + abs(green - other.green) + abs(blue - other.blue)
     }
 
+    /// Presentation-only emphasis for a thin progress fill. Keep the sampled hue while
+    /// lifting value and restoring chroma; never alter the cached artwork/detail palette.
+    var progressAccent: Self {
+        let minimum = min(red, min(green, blue))
+        let delta = maximum - minimum
+        let value = min(0.98, max(0.90, maximum))
+        guard delta > 0.000001 else { return Self(red: value, green: value, blue: value) }
+        // Nearly neutral artwork stays neutral instead of acquiring an invented accent.
+        let targetSaturation = saturation >= 0.10 ? min(0.95, max(0.65, saturation)) : saturation
+        func channel(_ component: Double) -> Double {
+            value * (1 - targetSaturation + targetSaturation * (component - minimum) / delta)
+        }
+        return Self(red: channel(red), green: channel(green), blue: channel(blue))
+    }
+
     /// Keep the source hue/value; only lift very dark swatches slightly so their fill stays distinguishable.
     /// Unlike value normalization, this bounded white mix never boosts saturation or turns shadows neon.
     var legible: Self {
@@ -230,7 +245,8 @@ struct ArtworkMatchedProgressBar: View {
     @State private var loadedResource: ArtworkResource?
     @State private var colors: [ProgressArtworkColor] = []
     private var palette: [Color] {
-        loadedResource == resource && !colors.isEmpty ? colors.map(\.color) : [.white, .white.opacity(0.9)]
+        loadedResource == resource && !colors.isEmpty
+            ? colors.map(\.progressAccent.color) : [.white, .white]
     }
 
     var body: some View {
@@ -239,9 +255,9 @@ struct ArtworkMatchedProgressBar: View {
                 GeometryReader { proxy in
                     Capsule()
                         .fill(LinearGradient(colors: palette, startPoint: .leading, endPoint: .trailing))
-                        .opacity(contrast == .increased ? 1 : 0.9)
+                        // Opaque fill keeps its artwork hue vivid over the dark artwork scrim.
                         .overlay {
-                            Capsule().strokeBorder(.white.opacity(contrast == .increased ? 0.4 : 0.16), lineWidth: 0.5)
+                            Capsule().strokeBorder(.white.opacity(contrast == .increased ? 0.4 : 0.10), lineWidth: 0.5)
                         }
                         .frame(width: proxy.size.width * ArtworkProgressSampler.fraction(progress))
                 }

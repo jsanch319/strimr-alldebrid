@@ -53,6 +53,37 @@ struct ArtworkProgressTests {
         #expect(palette.allSatisfy { $0.maximum < 0.7 })
     }
 
+    @Test func `thin progress accents brighten muddy colors without changing title hues`() {
+        let artwork = [
+            ProgressArtworkColor(red: 0.18, green: 0.40, blue: 0.52),
+            ProgressArtworkColor(red: 0.40, green: 0.30, blue: 0.20),
+            ProgressArtworkColor(red: 0.38, green: 0.08, blue: 0.06),
+            ProgressArtworkColor(red: 0.70, green: 0.65, blue: 0.50),
+        ]
+        let accents = artwork.map(\.progressAccent)
+        #expect(Set(accents).count == artwork.count)
+        for (source, accent) in zip(artwork, accents) {
+            #expect(accent.maximum >= 0.90 && accent.maximum <= 0.98)
+            #expect(accent.saturation >= 0.65 - 0.000001)
+            #expect(accent.saturation <= 0.95 + 0.000001)
+            #expect(abs((accent.hue ?? -1) - (source.hue ?? -1)) < 0.000001)
+            #expect([accent.red, accent.green, accent.blue].allSatisfy { (0 ... 1).contains($0) })
+        }
+        #expect(accents[0].blue > accents[0].red) // Series artwork stays blue/cyan.
+        #expect(accents[1].red > accents[1].blue) // Warm movie artwork cannot become blue.
+    }
+
+    @Test func `monochrome artwork stays neutral and bright source colors are not washed out`() {
+        for level in [0.0, 0.2, 0.6, 1.0] {
+            let accent = ProgressArtworkColor(red: level, green: level, blue: level).progressAccent
+            #expect(accent.red == accent.green && accent.green == accent.blue)
+            #expect(accent.maximum >= 0.9)
+        }
+        let bright = ProgressArtworkColor(red: 0.95, green: 0.3, blue: 0.2)
+        #expect(abs(bright.progressAccent.maximum - bright.maximum) < 0.000001)
+        #expect(abs(bright.progressAccent.saturation - bright.saturation) < 0.000001)
+    }
+
     @Test func `progress width keeps exact local or remote fraction and bounds invalid values`() {
         #expect(ArtworkProgressSampler.fraction(7200.5 / 10020) == 7200.5 / 10020)
         #expect(ArtworkProgressSampler.fraction(0.37) == 0.37)

@@ -81,7 +81,8 @@ jobs:
           print("iOS app startup smoke passed. This fresh simulator has no user API credentials; authenticated catalog interactions are not covered.")
           PYSMOKE
       - name: Test credential-free catalog interactions and capture screens
-        timeout-minutes: 25
+        # Prior runs exported 11 passing tests but xcodebuild exceeded 25 minutes on the hosted runner.
+        timeout-minutes: 35
         if: env.STRIMR_SMOKE_ID != ''
         shell: bash
         run: |
