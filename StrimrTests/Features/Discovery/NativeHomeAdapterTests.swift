@@ -16,6 +16,102 @@ struct NativeHomeAdapterTests {
         return (CatalogHomeData(discovery: discovery, progress: progress), progress, discovery)
     }
 
+    private func episode(season: Int, number: Int) throws -> TMDBEpisode {
+        try JSONDecoder().decode(TMDBEpisode.self, from: Data(
+            "{\"id\":1,\"season_number\":\(season),\"episode_number\":\(number),\"name\":\"Actual episode\"}".utf8,
+        ))
+    }
+
+    @Test func `Continue Watching labels use only the actual resume episode`() throws {
+        let show = TMDBTitle.reference(id: 12, kind: .tv)
+        for (season, number) in [(1, 1), (1, 7), (2, 10), (0, 1)] {
+            let media = try CatalogMediaAdapter.make(
+                title: show,
+                episode: episode(season: season, number: number),
+                resume: 123.25,
+            )
+            #expect(media.continueWatchingEpisodeLabel == "S\(season) · E\(number)")
+        }
+        #expect(CatalogMediaAdapter.make(title: show, episode: nil, resume: nil).continueWatchingEpisodeLabel == nil)
+        #expect(CatalogMediaAdapter.make(title: .reference(id: 12, kind: .movie), episode: nil, resume: 123)
+            .continueWatchingEpisodeLabel == nil)
+        #expect(try CatalogMediaAdapter.make(title: show, episode: episode(season: 1, number: 0), resume: 123)
+            .continueWatchingEpisodeLabel == nil)
+    }
+
+    @Test func `dismissal persists independently from resume data and account scope`() throws {
+        let defaults = TestDefaults.make(), movie = TMDBTitle.reference(id: 12, kind: .movie)
+        let progress = CatalogProgressStore(defaults: defaults)
+        progress.save(title: movie, episode: nil, position: 123.456, duration: 3600, finished: false, scope: "a")
+        let encoder = JSONEncoder(); encoder.outputFormatting = .sortedKeys
+        let original = try encoder.encode(progress.records(scope: "a"))
+        progress.dismissFromContinueWatching(title: movie, scope: "a")
+        #expect(progress.continueWatchingRecords(scope: "a").isEmpty)
+        #expect(try encoder.encode(progress.records(scope: "a")) == original)
+        let reopened = CatalogProgressStore(defaults: defaults)
+        #expect(reopened.continueWatchingRecords(scope: "a").isEmpty)
+        #expect(reopened.progress(title: movie, episode: nil, scope: "a")?.resumeOffset == 123.456)
+        reopened.save(title: movie, episode: nil, position: 10, duration: 3600, finished: false, scope: "b")
+        #expect(reopened.continueWatchingRecords(scope: "b").count == 1)
+    }
+
+    @Test func `only a new validated playback session restores a dismissed show including a new episode`() throws {
+        let progress = CatalogProgressStore(defaults: TestDefaults.make())
+        let show = TMDBTitle.reference(id: 12, kind: .tv)
+        let first = try episode(season: 1, number: 7), next = try episode(season: 1, number: 8)
+        let running = progress.makeRecorder(title: show, episode: first, scope: "a")
+        running.record(position: 500.125, duration: 3600, isPaused: false)
+        progress.dismissFromContinueWatching(title: show, scope: "a")
+        running.record(position: 501.25, duration: 3600, isPaused: false)
+        #expect(progress.continueWatchingRecords(scope: "a").isEmpty)
+        progress.restart(title: show, episode: next, scope: "a")
+        let fresh = progress.makeRecorder(title: show, episode: next, scope: "a")
+        fresh.record(position: 0, duration: 3600, isPaused: false)
+        #expect(progress.continueWatchingRecords(scope: "a").isEmpty)
+        fresh.record(position: 1.25, duration: 3600, isPaused: false)
+        let records = progress.continueWatchingRecords(scope: "a")
+        #expect(records.count == 1)
+        #expect(records.first?.episode?.episode_number == 8)
+        #expect(records.first?.resumeOffset == 1.25)
+        #expect(progress.progress(title: show, episode: first, scope: "a")?.resumeOffset == 501.25)
+    }
+
+    @Test func `Continue Watching keeps newest title once and hides older episodes after completion`() throws {
+        let progress = CatalogProgressStore(defaults: TestDefaults.make())
+        let show = TMDBTitle.reference(id: 12, kind: .tv), movie = TMDBTitle.reference(id: 12, kind: .movie)
+        let first = try episode(season: 1, number: 1), next = try episode(season: 2, number: 10)
+        progress.save(title: show, episode: first, position: 400, duration: 3600, finished: false, scope: "a")
+        progress.save(title: movie, episode: nil, position: 200, duration: 3600, finished: false, scope: "a")
+        progress.save(title: show, episode: next, position: 800.5, duration: 3600, finished: false, scope: "a")
+        let records = progress.continueWatchingRecords(scope: "a")
+        #expect(records.count == 2)
+        #expect(records.first?.episode?.episode_number == 10)
+        #expect(records.last?.title.kind == .movie)
+        progress.save(title: show, episode: next, position: 3600, duration: 3600, finished: true, scope: "a")
+        #expect(progress.continueWatchingRecords(scope: "a").map(\.title.catalogID) == [movie.catalogID])
+    }
+
+    @Test func `Home dismissal removes only Continue Watching immediately`() throws {
+        let (home, progress, discovery) = stores()
+        let movie = TMDBTitle.reference(id: 12, kind: .movie)
+        progress.save(
+            title: movie,
+            episode: nil,
+            position: 123.456,
+            duration: 3600,
+            finished: false,
+            scope: discovery.scope,
+        )
+        let card = try #require(home.rows.first(where: { $0.kind == .continueWatching })?.items.first?.playableItem)
+        let otherRows = home.rows.filter { $0.kind != .continueWatching }.map(\.id)
+        let revision = progress.revision
+        home.dismissFromContinueWatching(card)
+        #expect(progress.revision > revision)
+        #expect(!home.rows.contains { $0.kind == .continueWatching })
+        #expect(home.rows.filter { $0.kind != .continueWatching }.map(\.id) == otherRows)
+        #expect(progress.progress(title: movie, episode: nil, scope: discovery.scope)?.resumeOffset == 123.456)
+    }
+
     @Test func `Continue Watching reuses native media captions duration and landscape rows`() throws {
         let (home, progress, discovery) = stores()
         let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie", year: 2020)

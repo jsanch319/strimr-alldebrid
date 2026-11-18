@@ -99,6 +99,26 @@ final class CatalogVisualTests: XCTestCase {
         }
     }
 
+    func testContinueWatchingEpisodeLabelAndImmediateDismissal() {
+        let watching = app.otherElements["home.row.catalog:continue"]
+        XCTAssertTrue(watching.waitForExistence(timeout: 30))
+        let episode = watching.descendants(matching: .any).matching(identifier: "catalog.card.tv:95396:s1:e2")
+            .firstMatch
+        scrollTo(episode)
+        let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E2")).firstMatch
+        XCTAssertTrue(label.waitForExistence(timeout: 15), app.debugDescription)
+        episode.press(forDuration: 1.2)
+        let remove = app.buttons["Remove from Continue Watching"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 10), app.debugDescription)
+        remove.tap()
+        let removed = NSPredicate(format: "exists == false")
+        expectation(for: removed, evaluatedWith: episode)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+            .exists)
+        capture("27-Continue-Watching-Dismissed-TV")
+    }
+
     func testHomeContinueWatchingAndScrolling() {
         XCTAssertTrue(app.staticTexts["Continue Watching"].waitForExistence(timeout: 30))
         assertLoadedBackdrop()

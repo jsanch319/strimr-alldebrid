@@ -5,6 +5,7 @@ struct MediaCardActions {
     let play: (MediaItem, _ fromStart: Bool) -> Void
     let resume: (MediaItem) -> Void
     let showMedia: (MediaItem) -> Void
+    var removeFromContinueWatching: ((MediaItem) -> Void)?
 }
 
 extension EnvironmentValues {
@@ -79,7 +80,14 @@ private struct MediaCardContextMenu: ViewModifier {
     @State private var manageController = MediaManageController()
 
     func body(content: Content) -> some View {
-        if let item = media.playableItem, let services, let actions {
+        if let item = media.playableItem, item.guid.hasPrefix("tmdb://"), isInContinueWatching,
+           let remove = actions?.removeFromContinueWatching
+        {
+            content.contextMenu {
+                Button("Remove from Continue Watching", systemImage: "minus.circle") { remove(item) }
+                    .accessibilityIdentifier("catalog.continue.remove")
+            }
+        } else if let item = media.playableItem, let services, let actions {
             content
                 .contextMenu {
                     menu(for: item, services: services, actions: actions)

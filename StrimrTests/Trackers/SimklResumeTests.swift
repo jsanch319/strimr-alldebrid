@@ -38,6 +38,26 @@ struct SimklResumeTests {
         TMDBClient(tokenProvider: { nil })
     }
 
+    @Test func `Simkl refresh and newer remote progress do not undo Continue Watching dismissal`() async throws {
+        let defaults = TestDefaults.make()
+        let cache = CatalogProgressStore(defaults: defaults)
+        let movie = TMDBTitle.reference(id: 12, kind: .movie)
+        cache.save(title: movie, episode: nil, position: 123.456, duration: 3600, finished: false, scope: "a")
+        cache.dismissFromContinueWatching(title: movie, scope: "a")
+        _ = try await cache.reconcile(
+            paused: [pause(percent: 35, date: "2099-01-01T00:00:00Z")], entries: [], scope: "a",
+            activities: activities, tmdb: metadata(), replay: { _, _, _ in true },
+        )
+        #expect(cache.continueWatchingRecords(scope: "a").isEmpty)
+        let saved = try #require(cache.progress(title: movie, episode: nil, scope: "a"))
+        #expect(saved.remotePercentage == 35)
+        #expect(saved.exactCheckpoint?.position == 123.456)
+        #expect(CatalogProgressStore(defaults: defaults).continueWatchingRecords(scope: "a").isEmpty)
+        let player = cache.makeRecorder(title: movie, episode: nil, scope: "a")
+        player.record(position: 1260.25, duration: 3600, isPaused: false)
+        #expect(cache.continueWatchingRecords(scope: "a").first?.resumeOffset == 1260.25)
+    }
+
     @Test func `another device imports saved movie and episode percentages without local history`() async throws {
         let cache = CatalogProgressStore(defaults: TestDefaults.make())
         var writes = 0

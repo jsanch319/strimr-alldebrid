@@ -63,3 +63,12 @@ enum CatalogMediaAdapter {
         )
     }
 }
+
+extension MediaItem {
+    /// Display only the actual resume episode's metadata, never a derived Next Up episode.
+    var continueWatchingEpisodeLabel: String? {
+        guard type == .episode, let season = parentIndex, season >= 0, let episode = index,
+              episode > 0 else { return nil }
+        return "S\(season) · E\(episode)"
+    }
+}

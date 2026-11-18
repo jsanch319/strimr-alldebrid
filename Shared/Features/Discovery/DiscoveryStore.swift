@@ -88,6 +88,38 @@ final class CatalogProgressStore {
         return (try? JSONDecoder().decode([CatalogProgress].self, from: data)) ?? []
     }
 
+    /// Presentation-only suppression, separate from resume/history and remote synchronization.
+    private func dismissedTitles(scope: String) -> Set<String> {
+        Set(defaults.stringArray(forKey: "strimr.catalog.continue-dismissed.\(scope)") ?? [])
+    }
+
+    func dismissFromContinueWatching(title: TMDBTitle, scope: String) {
+        var dismissed = dismissedTitles(scope: scope)
+        guard dismissed.insert(title.catalogID).inserted else { return }
+        defaults.set(dismissed.sorted(), forKey: "strimr.catalog.continue-dismissed.\(scope)")
+        revision += 1
+    }
+
+    private func restoreToContinueWatching(title: TMDBTitle, scope: String) {
+        var dismissed = dismissedTitles(scope: scope)
+        guard dismissed.remove(title.catalogID) != nil else { return }
+        defaults.set(dismissed.sorted(), forKey: "strimr.catalog.continue-dismissed.\(scope)")
+        revision += 1
+    }
+
+    func continueWatchingRecords(scope: String) -> [CatalogProgress] {
+        let dismissed = dismissedTitles(scope: scope)
+        var seen: Set<String> = []
+        return records(scope: scope).sorted {
+            $0.updatedAt == $1.updatedAt ? $0.id < $1.id : $0.updatedAt > $1.updatedAt
+        }.filter { record in
+            guard record.title.kind == .movie || record.episode != nil,
+                  seen.insert(record.title.catalogID).inserted else { return false }
+            return !dismissed.contains(record.title.catalogID) && !record.completed && record.locallyCleared != true
+                && (record.fraction > 0 || record.position > 0)
+        }
+    }
+
     func progress(title: TMDBTitle, episode: TMDBEpisode?, scope: String) -> CatalogProgress? {
         records(scope: scope).first { $0.id == CatalogProgress.key(title: title, episode: episode) }
     }
@@ -193,6 +225,11 @@ final class CatalogProgressStore {
                 return record.resumeOffset
             },
             checkpoint: { [weak self] position, duration, event in
+                // Only a new, validated player session restores visibility. Sync/replay, failed
+                // source selection, restarts and an already-running session cannot undo removal.
+                if event == .start {
+                    self?.restoreToContinueWatching(title: title, scope: scope)
+                }
                 self?.save(
                     title: title,
                     episode: episode,

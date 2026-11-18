@@ -80,7 +80,8 @@ final class CatalogHomeData {
 
     var rows: [HomeRow] {
         var rows: [HomeRow] = []
-        let items = progressRecords.sorted { $0.updatedAt > $1.updatedAt }.map { record in
+        _ = progress.revision
+        let items = progress.continueWatchingRecords(scope: discovery.scope).map { record in
             let duration = record.duration ?? (record.episode?.runtime ?? record.title.runtime).map { Double($0) * 60 }
             let offset = !record.usesExactPosition && record.remotePercentage != nil
                 ? duration.map { $0 * record.fraction } : record.position
@@ -212,6 +213,11 @@ final class CatalogHomeData {
             }
         }
         return nil
+    }
+
+    func dismissFromContinueWatching(_ media: MediaItem) {
+        guard let record = progress.records(scope: discovery.scope).first(where: { $0.id == media.id }) else { return }
+        progress.dismissFromContinueWatching(title: record.title, scope: discovery.scope)
     }
 
     func rawSelection(for media: MediaItem) -> AllDebridHomeItem? {

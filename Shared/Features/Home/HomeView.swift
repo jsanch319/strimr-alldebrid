@@ -271,6 +271,7 @@ struct HomeView: View {
             play: { media, _ in play(media) },
             resume: { play($0) },
             showMedia: { select(.playable($0)) },
+            removeFromContinueWatching: { viewModel.catalog?.dismissFromContinueWatching($0) },
         )
     }
 
@@ -326,6 +327,7 @@ private struct CatalogHubView: View {
             onSelect: onSelect,
         )
         .catalogBackdrop(media: hub.items.first?.playableItem, enabled: usesBackdrop)
+        .environment(\.mediaCardIsInContinueWatching, hub.id == "catalog:continue")
         .navigationTitle(hub.title)
         .toolbar {
             if showsCloseButton {

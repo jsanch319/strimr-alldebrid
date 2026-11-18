@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct MediaCard: View {
+    @Environment(\.mediaCardIsInContinueWatching) private var isInContinueWatching
     @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @Environment(ServerRegistry.self) private var registry
     @Environment(MediaServices.self) private var scopedServices: MediaServices?
@@ -36,13 +37,18 @@ struct MediaCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(media.primaryLabel).font(.subheadline.weight(.semibold)).lineLimit(1)
                         if media.playableItem?.type == .episode {
-                            Text(media.cardSecondaryLabel(remainingTime: nil) ?? "")
+                            Text(episodeCaption)
                                 .font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
                         }
                     }
                 } else {
                     labels
+                    if let episodeLabel {
+                        Text(episodeLabel).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                    }
                 }
+            } else if let episodeLabel {
+                Text(episodeLabel).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
             }
         }
         .frame(width: size.width, alignment: .leading)
@@ -98,6 +104,15 @@ struct MediaCard: View {
         }
         .downloadStatusOverlay(media)
         .artworkProgress(progress, hidePercentage: compactResume)
+    }
+
+    private var episodeLabel: String? {
+        isInContinueWatching ? media.playableItem?.continueWatchingEpisodeLabel : nil
+    }
+
+    private var episodeCaption: String {
+        [episodeLabel, media.cardSecondaryLabel(remainingTime: nil)].compactMap(\.self).filter { !$0.isEmpty }
+            .joined(separator: " · ")
     }
 
     private var compactRemainingTime: String? {
