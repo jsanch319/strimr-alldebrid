@@ -37,6 +37,7 @@ final class CatalogSourceResolver {
     private var verifiedConnection = false
     private let acquisition: CatalogSourceAcquisition?
     private let stremio: StremioPlaybackSources?
+    private var queriedStremio = false
     private var requestedTitle: TMDBTitle?
     private var requestedEpisode: TMDBEpisode?
     var needsSourceSetup: Bool {
@@ -63,7 +64,7 @@ final class CatalogSourceResolver {
     }
 
     func refresh(title: TMDBTitle, episode: TMDBEpisode?) async throws {
-        requestedTitle = title; requestedEpisode = episode
+        requestedTitle = title; requestedEpisode = episode; queriedStremio = false
         sources = []; files = []; warnings = []; attempted = []; processingMagnets = []; availability = .checking
         guard title.kind != .tv || episode != nil else { throw Failure.chooseEpisode }
         if !verifiedConnection {
@@ -96,6 +97,7 @@ final class CatalogSourceResolver {
         let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
         var addonError: Error?
         if warnings.isEmpty, let stremio {
+            queriedStremio = true
             do {
                 sources = try await stremio.discover(title: title, episode: episode)
                 try Task.checkCancellation()
@@ -173,6 +175,16 @@ final class CatalogSourceResolver {
                     throw error
                 }
                 lastError = error
+            }
+        }
+        try Task.checkCancellation()
+        if !queriedStremio, let stremio, let title = requestedTitle {
+            queriedStremio = true
+            let fallback = try await stremio.discover(title: title, episode: requestedEpisode)
+            try Task.checkCancellation()
+            if !fallback.isEmpty {
+                sources += fallback
+                return try await resolveNext()
             }
         }
         throw Failure

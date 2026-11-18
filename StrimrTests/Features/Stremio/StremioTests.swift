@@ -159,6 +159,22 @@ struct StremioTests {
         #expect(await upload.imports == 0) // Never forward a failed private HTTPS stream URL to another provider.
     }
 
+    @Test(arguments: [false, true])
+    func `exhausted library resolution or engine failure discovers add-on fallback`(resolutionFails: Bool) async throws {
+        let client = AddonFixture(streams: streams(#"[{"name":"1080p","url":"https://cdn.test/fallback.mkv"}]"#))
+        let library = AddonLibrary(files: [file("Dune.2021.mkv")], failResolution: resolutionFails)
+        let store = AddonMemoryStore(configuration: configuration)
+        let resolver = CatalogSourceResolver(client: library, stremio: service(client, store: store))
+        try await resolver.refresh(title: movie, episode: nil)
+        #expect(store.loads == 0)
+        if !resolutionFails {
+            #expect(try await resolver.resolveNext().url.host == "library.test")
+        }
+        #expect(try await resolver.resolveNext().url.host == "cdn.test")
+        #expect(await client.searches == ["movie/tt1160419"])
+        #expect(await library.unlocks == 1)
+    }
+
     @Test func `manual selection uses opaque identity and never exposes signed URL`() async throws {
         let client =
             AddonFixture(
@@ -288,8 +304,9 @@ private actor AddonFixture: StremioClientProtocol {
 private actor AddonLibrary: CatalogPlaybackClient {
     var files: [AllDebridMagnetFile]
     private(set) var unlocks = 0
-    init(files: [AllDebridMagnetFile] = []) {
-        self.files = files
+    private let failResolution: Bool
+    init(files: [AllDebridMagnetFile] = [], failResolution: Bool = false) {
+        self.files = files; self.failResolution = failResolution
     }
 
     func setFiles(_ files: [AllDebridMagnetFile]) {
@@ -309,8 +326,11 @@ private actor AddonLibrary: CatalogPlaybackClient {
         )
     }
 
-    func resolvePlaybackURL(_: String, filename _: String) -> AllDebridPlaybackResolution {
+    func resolvePlaybackURL(_: String, filename _: String) throws -> AllDebridPlaybackResolution {
         unlocks += 1
+        if failResolution {
+            throw AllDebridAPIClient.APIError.playbackHTTPStatus(403)
+        }
         return .init(
             url: URL(string: "https://library.test/video.mkv")!,
             statusCode: 200,
