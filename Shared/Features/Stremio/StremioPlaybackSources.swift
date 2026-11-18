@@ -18,6 +18,7 @@ final class StremioPlaybackSources {
         let direct: Bool
         var submitted = false
         var magnetID: String?
+        var submittedAt: Date?
     }
 
     private let client: any StremioClientProtocol
@@ -151,6 +152,19 @@ final class StremioPlaybackSources {
         }.map(\.element)
     }
 
+    func hasPendingSource(snapshot: AllDebridLibrarySnapshot, title: TMDBTitle, episode: TMDBEpisode?) -> Bool {
+        guard let identity = try? Self.identity(title: title, episode: episode),
+              cachedIdentity == "\(title.kind):\(title.id):\(identity.id)" else { return false }
+        return entries.contains { entry in
+            guard entry.submitted, let id = entry.magnetID else { return false }
+            if let magnet = snapshot.magnets.first(where: { $0.id == id }) {
+                return magnet.isProcessing
+            }
+            // Allow the documented upload to appear in the next library snapshot without submitting more hashes.
+            return entry.submittedAt.map { Date().timeIntervalSince($0) < 120 } ?? false
+        }
+    }
+
     func readySources(
         snapshot: AllDebridLibrarySnapshot,
         title: TMDBTitle,
@@ -203,7 +217,7 @@ final class StremioPlaybackSources {
         guard let acquisition else { throw StremioError.unsupportedSource }
         do {
             if let existing = acquisition.submittedMagnetID(for: entry.link) {
-                entries[index].magnetID = existing; entries[index].submitted = true
+                entries[index].magnetID = existing; entries[index].submitted = true; entries[index].submittedAt = Date()
                 throw CatalogSourceResolver.Failure
                     .processing("Checking the already submitted torrent for the exact requested episode.")
             }
@@ -211,7 +225,7 @@ final class StremioPlaybackSources {
             try Task.checkCancellation()
             guard entries.indices.contains(index), entries[index].label == label else { throw CancellationError() }
             entries[index].magnetID = acquisition.submittedMagnetID(for: entry.link)
-            entries[index].submitted = true
+            entries[index].submitted = true; entries[index].submittedAt = Date()
             throw CatalogSourceResolver.Failure
                 .processing("Checking the authorized add-on source in AllDebrid. Availability refreshes automatically.")
         } catch {

@@ -118,6 +118,13 @@ final class CatalogSourceResolver {
             AllDebridTitleMatcher.matchesProcessingMagnet(title: title, episode: episode, magnet: $0)
         }
         let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
+        if stremio?.hasPendingSource(snapshot: snapshot, title: title, episode: episode) == true {
+            availability = .processing
+            throw Failure
+                .processing(
+                    "The selected add-on torrent is processing in AllDebrid. Waiting for its exact matching file; no additional torrent was submitted.",
+                )
+        }
         var addonError: Error?
         if let stremio {
             queriedStremio = true

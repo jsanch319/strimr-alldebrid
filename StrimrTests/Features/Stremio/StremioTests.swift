@@ -144,11 +144,14 @@ struct StremioTests {
         #expect(!StremioStreamPolicy.readyFile(file("S01E03.mkv"), title: show, episode: episode))
         #expect(!StremioStreamPolicy.readyFile(file("video.mkv"), title: show, episode: episode))
         #expect(!StremioStreamPolicy.readyFile(file("Series.S01E02E03.mkv"), title: show, episode: episode))
+        let awaiting = AllDebridLibrarySnapshot(savedLinks: [], magnets: [], readyMagnetCount: 0, magnetFiles: [])
+        #expect(addon.hasPendingSource(snapshot: awaiting, title: show, episode: episode))
         let snapshot = AllDebridLibrarySnapshot(
             savedLinks: [], magnets: [.init(id: "42", filename: "Pack", size: 100, status: "ready", statusCode: 4)],
             readyMagnetCount: 1, magnetFiles: [file("S01E02.mkv"), file("S01E03.mkv"), file("video.mkv")], warnings: [],
         )
         #expect(addon.readySources(snapshot: snapshot, title: show, episode: episode).map(\.filename) == ["S01E02.mkv"])
+        #expect(!addon.hasPendingSource(snapshot: snapshot, title: show, episode: episode))
     }
 
     @Test func `reliable IDs and empty header hints are accepted without relaxing episode conflicts`() async throws {
