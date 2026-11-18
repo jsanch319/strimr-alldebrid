@@ -28,6 +28,13 @@ struct StrimrWatchActivity: GroupActivity, Hashable, Sendable {
         self.initialPosition = initialPosition; self.catalog = catalog
     }
 
+    var hasValidSharePlayMetadata: Bool {
+        guard initialPosition.isFinite, initialPosition >= 0,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !ratingKey.isEmpty, !serverIdentifier.isEmpty else { return false }
+        return catalog.map { $0.matches(self) } ?? true
+    }
+
     var metadata: GroupActivityMetadata {
         get async {
             var metadata = GroupActivityMetadata()

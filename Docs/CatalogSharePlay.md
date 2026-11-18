@@ -64,3 +64,75 @@ per account and English audio per device. Test AirPlay to the LG separately and
 in combination with SharePlay. No physical FaceTime pair or LG receiver was
 available here; neither simulator builds nor entitlement declarations prove those
 flows work on the user's re-signed app.
+
+## FaceTime launch failure: signing preflight and diagnostics
+
+The previous unsigned audit (`signed=null`, `profile=null`, runtime unverified)
+means **unknown**, not proof of either a valid final signature or a missing
+entitlement. It cannot diagnose a FaceTime crash. The final SideStore-signed app
+and a matching device crash report were not available for this investigation.
+No FaceTime process crash has been reproduced or attributed to a specific cause.
+
+Code review found unguarded invitation-controller construction and an activation
+reservation ending before asynchronous session delivery. The iOS preflight now
+reads the installed thin Mach-O executable's XML entitlement blob and embedded
+provisioning profile before constructing a native invitation, querying eligibility,
+starting the session listener, preparing, activating, or accepting a session.
+Both must explicitly grant `com.apple.developer.group-session`. Absent, stripped,
+unknown, malformed, DER-only/unsupported evidence and simulator builds fail closed
+with an informative message. These read-only parsers use Foundation, not private
+entitlement APIs. They do not authenticate CMS, add entitlements, certify profile
+expiry, or replace iOS signature enforcement. Conservatively, a distribution with
+no embedded profile will also be blocked and needs a supported signing-verification
+path before enabling SharePlay; profile presence alone never enables it.
+
+Use the audit command above against the **exported final SideStore-signed app**,
+not the GitHub unsigned IPA. Confirm the final bundle ID, certificate/profile
+validity, entitlement presence in signature and profile, and matching application
+identity on both phones. Apple-account/provisioning restrictions may prevent
+SharePlay in a particular signing configuration. Strimr cannot grant that access.
+Do not modify profiles or inject unauthorized entitlements to bypass the check.
+
+One main-actor launch guard now spans invitation creation, activation and waiting
+for a session. Rapid taps and other details surfaces cannot start a second launch.
+Cancellation/error introduces a two-second cooldown; accepted launches wait at
+most 60 seconds for session delivery before reporting unavailability. There is
+no automatic activation retry. Dismissal without a completed result releases the
+reservation. Invalid titles, non-finite/negative clocks and mismatched catalog
+identity are rejected before GroupActivities. Framework errors are not logged
+verbatim. Swift errors cannot catch a crash in FaceTime's separate process.
+
+### Collect only the necessary evidence
+
+1. Note the local failure time, iOS and Strimr build versions, whether FaceTime was
+   already in a call, and the last visible UI. Avoid repeated attempts if FaceTime
+   crashes. Ordinary playback remains available without SharePlay.
+2. On iPhone, open Settings → Privacy & Security → Analytics & Improvements →
+   Analytics Data. Look near that time for a FaceTime report, Strimr report, or
+   a jetsam report. Alternatively use Xcode → Devices and Simulators → device →
+   View Device Logs on a trusted Mac. A sheet disappearing alone is not evidence
+   of a process crash; jetsam is also different from an exception crash.
+3. Inspect the report's actual process name/path, timestamp, Exception Type,
+   Termination Reason and crashed-thread stack. A FaceTime-process report supports
+   a FaceTime crash; a Strimr report supports an app crash. No matching report
+   leaves the distinction unresolved. Do not assume that opening FaceTime proves
+   activation or joining succeeded.
+4. In macOS Console, select the connected iPhone, enable Info messages and filter
+   subsystem `app.strimr.shareplay`, category `Launch`. Stages are `preflight`,
+   `listener`, `invitation` (constructing/visible/completed/cancelled/dismissed),
+   `preparation`, `activation`, `session_access` and `session_join`. They contain no
+   media title, playback URL, account, activity UUID, source configuration or token.
+   `session_join=requested` is an API call, not proof peers connected successfully.
+5. Share only these filtered events and necessary exception/stack excerpts. Remove
+   device identifiers, account/phone/email details, paths containing usernames,
+   invitation URLs, authorization headers and playback/add-on URLs. Avoid uploading
+   a full sysdiagnose or unredacted crash report to a public GitHub PR.
+
+Regression coverage checks the signing truth table, malformed/truncated executable
+and profile evidence, missing capability, invalid activity metadata, launch
+reservation/cooldown and stale dismissal ownership. Builds/tests cannot establish
+FaceTime service health or final SideStore authorization. Required device tests:
+blocked signing causes no sheet/activation; valid signing can invite outside and
+inside FaceTime; rapid taps, cancellation, late session delivery, joining/leaving,
+backgrounding and post-failure retry. Collect crash evidence before calling this
+an actual FaceTime-crash fix. Existing AirPlay/LG verification remains separate.

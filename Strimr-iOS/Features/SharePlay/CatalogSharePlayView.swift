@@ -9,18 +9,19 @@ struct CatalogSharePlayButton: View {
     let initialPosition: Double
     var body: some View {
         Button("SharePlay", systemImage: "shareplay") { start() }
-            .disabled(coordinator.isActivating || coordinator.catalogInvitationActivity != nil ||
+            .disabled(coordinator.isLaunching || coordinator.catalogInvitationActivity != nil ||
                 (title.kind == .tv && episode == nil))
             .accessibilityIdentifier("catalog.detail.shareplay")
     }
 
     private func start() {
-        guard !coordinator.isActivating, coordinator.catalogInvitationActivity == nil,
+        guard !coordinator.isLaunching, coordinator.catalogInvitationActivity == nil,
               let activity = coordinator.makeCatalogActivity(
                   title: title,
                   episode: episode,
                   initialPosition: initialPosition,
-              ) else { return }
+              ),
+              coordinator.checkLaunchAvailability(for: activity) else { return }
         if coordinator.isEligibleForGroupSession {
             Task { await coordinator.activate(activity) }
         } else {
@@ -44,13 +45,16 @@ struct CatalogSharePlayPresentation: ViewModifier {
         content
             .onChange(of: coordinator.catalogInvitationActivity) { _, activity in
                 guard let activity else { invitation = nil; return }
+                guard invitation == nil, coordinator.beginSharingPresentation(activity) else {
+                    coordinator.catalogInvitationActivity = nil
+                    return
+                }
                 do {
                     let controller = try GroupActivitySharingController(activity)
-                    coordinator.sharingDidStart(activity)
                     invitation = Invitation(activity: activity, controller: controller)
                 } catch {
                     coordinator.catalogInvitationActivity = nil
-                    coordinator.catalogErrorMessage = "SharePlay could not open. Check FaceTime and Group Activities signing for this app."
+                    coordinator.sharingPresentationFailed(activity)
                 }
             }
             .sheet(item: $invitation, onDismiss: {
@@ -58,10 +62,13 @@ struct CatalogSharePlayPresentation: ViewModifier {
                 Task { await coordinator.sharingPresentationDidEnd() }
             }) { request in
                 SharePlaySharingControllerView(controller: request.controller)
+                    .onAppear { coordinator.sharingPresentationDidAppear() }
                     .task {
                         let result = await request.controller.result
                         if result == .cancelled {
                             coordinator.sharingDidCancel(request.activity)
+                        } else {
+                            coordinator.sharingDidComplete(request.activity)
                         }
                         invitation = nil
                     }

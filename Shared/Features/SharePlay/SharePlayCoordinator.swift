@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import GroupActivities
 import Observation
+import OSLog
 
 @MainActor
 @Observable
@@ -18,11 +19,82 @@ final class SharePlayCoordinator {
     var catalogInvitationActivity: StrimrWatchActivity?
 
     var isEligibleForGroupSession: Bool {
-        groupStateObserver.isEligibleForGroupSession
+        signingUnavailableReason == nil && groupStateObserver.isEligibleForGroupSession
+    }
+
+    var isLaunching: Bool {
+        isActivating || launchGuard.activeID != nil || sharingPresentationActivityID != nil
+    }
+
+    @ObservationIgnored private let signingUnavailableReason = SharePlaySigningCheck.installedAppUnavailableReason
+    private var launchGuard = SharePlayLaunchGuard()
+    @ObservationIgnored private var activationDeadline: Task<Void, Never>?
+    @ObservationIgnored private static let launchLog = Logger(subsystem: "app.strimr.shareplay", category: "Launch")
+
+    /// Called before constructing any native invitation controller or invoking GroupActivities.
+    func checkLaunchAvailability(for activity: StrimrWatchActivity) -> Bool {
+        if let signingUnavailableReason {
+            Self.launchLog.notice("stage=preflight outcome=signing_unconfirmed")
+            reportLaunchError(signingUnavailableReason, for: activity)
+            return false
+        }
+        guard activity.hasValidSharePlayMetadata else {
+            reportLaunchError(
+                "This SharePlay invitation has invalid media identity or playback metadata.",
+                for: activity,
+            )
+            Self.launchLog.notice("stage=preflight outcome=invalid_metadata")
+            return false
+        }
+        return true
+    }
+
+    private func reportLaunchError(_ message: String, for activity: StrimrWatchActivity) {
+        if activity.catalog != nil {
+            catalogErrorMessage = message
+        } else {
+            errorMessage = message
+        }
+    }
+
+    func beginSharingPresentation(_ activity: StrimrWatchActivity) -> Bool {
+        guard checkLaunchAvailability(for: activity), !isActivating,
+              launchGuard.begin(activity.activityID) else { return false }
+        completedInvitationID = nil
+        sharingPresentationActivityID = activity.activityID
+        locallyPreparedActivityIDs.insert(activity.activityID)
+        Self.launchLog.notice("stage=invitation outcome=constructing")
+        return true
+    }
+
+    func sharingPresentationDidAppear() {
+        Self.launchLog.notice("stage=invitation outcome=visible")
+    }
+
+    func sharingPresentationFailed(_ activity: StrimrWatchActivity) {
+        sharingDidCancel(activity)
+        sharingPresentationActivityID = nil
+        reportLaunchError(
+            "SharePlay could not present its invitation. Check FaceTime availability and the final signed app's Group Activities authorization.",
+            for: activity,
+        )
+        Self.launchLog.notice("stage=invitation outcome=presentation_failed")
+    }
+
+    private func awaitSession(for activity: StrimrWatchActivity) {
+        activationDeadline?.cancel()
+        activationDeadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            guard let self, launchGuard.activeID == activity.activityID, !isInSession else { return }
+            launchGuard.finish(activity.activityID)
+            locallyPreparedActivityIDs.remove(activity.activityID)
+            setActivationError(for: activity)
+            Self.launchLog.notice("stage=activation outcome=session_not_received")
+        }
     }
 
     @ObservationIgnored private let sessionManager: SessionManager
-    @ObservationIgnored private let groupStateObserver = GroupStateObserver()
+    @ObservationIgnored private lazy var groupStateObserver = GroupStateObserver()
     @ObservationIgnored private var session: GroupSession<StrimrWatchActivity>?
     @ObservationIgnored private weak var playbackPresenter: (any PlaybackPresenting)?
     @ObservationIgnored private weak var playerController: PlayerController?
@@ -31,6 +103,7 @@ final class SharePlayCoordinator {
     @ObservationIgnored private var locallyPreparedActivityIDs: Set<UUID> = []
     @ObservationIgnored private var pendingNextItem: MediaItem?
     @ObservationIgnored private var lastLaunchedActivityID: UUID?
+    @ObservationIgnored private var completedInvitationID: UUID?
     @ObservationIgnored private var sharingPresentationActivityID: UUID?
     @ObservationIgnored private var pendingSessionAcceptanceActivityID: UUID?
     @ObservationIgnored private var deferredSessionInvalidation = false
@@ -39,6 +112,10 @@ final class SharePlayCoordinator {
 
     init(sessionManager: SessionManager) {
         self.sessionManager = sessionManager
+        guard signingUnavailableReason == nil else {
+            Self.launchLog.notice("stage=listener outcome=signing_unconfirmed")
+            return
+        }
         sessionListener = Task { [weak self] in
             for await session in StrimrWatchActivity.sessions() {
                 guard !Task.isCancelled else { return }
@@ -137,13 +214,15 @@ final class SharePlayCoordinator {
     }
 
     func activate(_ activity: StrimrWatchActivity) async {
-        guard !isActivating else { return }
+        guard checkLaunchAvailability(for: activity), !isActivating,
+              launchGuard.begin(activity.activityID) else { return }
 
         isActivating = true
         locallyPreparedActivityIDs.insert(activity.activityID)
         defer { isActivating = false }
 
         if let session {
+            launchGuard.finish(activity.activityID, cooldown: false)
             session.activity = activity
             handleActivityChange(activity)
             if playerController == nil {
@@ -153,11 +232,23 @@ final class SharePlayCoordinator {
         }
 
         do {
+            Self.launchLog.notice("stage=preparation outcome=started")
             let preparationResult = await activity.prepareForActivation()
+            guard !Task.isCancelled else {
+                launchGuard.finish(activity.activityID)
+                locallyPreparedActivityIDs.remove(activity.activityID)
+                return
+            }
             switch preparationResult {
             case .activationPreferred:
+                Self.launchLog.notice("stage=activation outcome=started")
                 let activated = try await activity.activate()
-                if !activated {
+                if activated {
+                    Self.launchLog.notice("stage=activation outcome=waiting_for_session")
+                    if !isInSession {
+                        awaitSession(for: activity)
+                    }
+                } else {
                     locallyPreparedActivityIDs.remove(activity.activityID)
                     setActivationError(for: activity)
                 }
@@ -165,6 +256,8 @@ final class SharePlayCoordinator {
                 locallyPreparedActivityIDs.remove(activity.activityID)
                 setActivationError(for: activity)
             case .cancelled:
+                launchGuard.finish(activity.activityID)
+                Self.launchLog.notice("stage=preparation outcome=cancelled")
                 locallyPreparedActivityIDs.remove(activity.activityID)
             @unknown default:
                 locallyPreparedActivityIDs.remove(activity.activityID)
@@ -172,13 +265,16 @@ final class SharePlayCoordinator {
             }
         } catch {
             locallyPreparedActivityIDs.remove(activity.activityID)
+            launchGuard.finish(activity.activityID)
             guard !Task.isCancelled, !error.isCancellation else { return }
-            ErrorReporter.capture(error)
+            Self.launchLog.notice("stage=activation outcome=failed")
             setActivationError(for: activity)
         }
     }
 
     private func setActivationError(for activity: StrimrWatchActivity) {
+        launchGuard.finish(activity.activityID)
+        Self.launchLog.notice("stage=activation outcome=unavailable")
         if activity.catalog != nil {
             catalogErrorMessage = "SharePlay is unavailable. Check FaceTime access and that both apps are signed with the Group Activities entitlement."
         } else {
@@ -186,18 +282,31 @@ final class SharePlayCoordinator {
         }
     }
 
-    func sharingDidStart(_ activity: StrimrWatchActivity) {
-        locallyPreparedActivityIDs.insert(activity.activityID)
-        sharingPresentationActivityID = activity.activityID
+    func sharingDidCancel(_ activity: StrimrWatchActivity) {
+        launchGuard.finish(activity.activityID)
+        locallyPreparedActivityIDs.remove(activity.activityID)
+        Self.launchLog.notice("stage=invitation outcome=cancelled")
     }
 
-    func sharingDidCancel(_ activity: StrimrWatchActivity) {
-        locallyPreparedActivityIDs.remove(activity.activityID)
+    func sharingDidComplete(_ activity: StrimrWatchActivity) {
+        completedInvitationID = activity.activityID
+        Self.launchLog.notice("stage=invitation outcome=completed")
+        if !isInSession {
+            awaitSession(for: activity)
+        }
     }
 
     func sharingPresentationDidEnd() async {
         guard let activityID = sharingPresentationActivityID else { return }
         sharingPresentationActivityID = nil
+        // A cancelled/dismissed sheet must release its reservation; an accepted invitation
+        // keeps the activation reservation until a session or bounded timeout arrives.
+        if completedInvitationID != activityID, !isInSession {
+            locallyPreparedActivityIDs.remove(activityID)
+            launchGuard.finish(activityID)
+        }
+        completedInvitationID = nil
+        Self.launchLog.notice("stage=invitation outcome=dismissed")
         guard playerController == nil,
               let activity,
               activity.activityID == activityID
@@ -280,6 +389,12 @@ final class SharePlayCoordinator {
     }
 
     private func accept(_ newSession: GroupSession<StrimrWatchActivity>) async {
+        guard checkLaunchAvailability(for: newSession.activity) else {
+            newSession.leave()
+            return
+        }
+        guard session !== newSession else { return }
+        Self.launchLog.notice("stage=session_access outcome=started")
         let acceptanceActivityID = newSession.activity.activityID
         pendingSessionAcceptanceActivityID = acceptanceActivityID
         do {
@@ -302,7 +417,8 @@ final class SharePlayCoordinator {
                 }
                 return
             }
-            ErrorReporter.capture(error)
+            launchGuard.finish(acceptanceActivityID)
+            Self.launchLog.notice("stage=session_access outcome=failed")
             if newSession.activity.catalog != nil {
                 catalogErrorMessage = "This SharePlay movie or episode is unavailable. Check TMDb setup and access to your own playback sources."
             } else {
@@ -360,7 +476,10 @@ final class SharePlayCoordinator {
             }
             .store(in: &sessionSubscriptions)
 
+        Self.launchLog.notice("stage=session_join outcome=requested")
         newSession.join()
+        activationDeadline?.cancel()
+        launchGuard.finish(acceptanceActivityID, cooldown: false)
         if let playerController, let activity {
             if participantCount > 1 {
                 playerController.playbackCoordinator.coordinateWithSession(newSession)
