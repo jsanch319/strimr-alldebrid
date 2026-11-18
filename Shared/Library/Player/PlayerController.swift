@@ -612,10 +612,17 @@ final class PlayerController {
         }
     }
 
+    private var resumeTransportReady: Bool {
+        if let item = engine.currentAVPlayerItem {
+            return item.status == .readyToPlay
+        }
+        guard engine.videoRoute != .loopback, engine.videoRoute != .remoteBypass else { return false }
+        return engine.state == .playing || engine.state == .paused
+    }
+
     private func checkResumePosition() -> Bool {
         guard var verification = resumeVerification else { return false }
-        let item = engine.currentAVPlayerItem
-        let ready = item.map { $0.status == .readyToPlay } ?? (!engine.isBuffering && engine.state != .loading)
+        let ready = resumeTransportReady
         // Native time is folded by the same public playlist shift used by the engine.
         // Require agreement with the rendered source clock, not a synthetic currentTime alone.
         let native = nativeResumeClock.position
@@ -690,7 +697,7 @@ final class PlayerController {
                 #endif
                 return false // Nonfatal. Observers may still confirm a late landing.
             }
-            let ready = engine.currentAVPlayerItem.map { $0.status == .readyToPlay } ?? (engine.state != .loading)
+            let ready = resumeTransportReady
             if resumeSeekTask == nil,
                resumeVerification?.requestSeek(
                    ready: ready,
