@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct PlayerView: View {
@@ -272,6 +273,13 @@ struct PlayerView: View {
 
         let playbackStatusObservers = AnyView(
             playbackObservers
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+                    // Also checkpoint switches initiated from Control Center or receiver removal.
+                    // Route/session recovery remains owned by AetherEngine.
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                }
                 .onChange(of: playerController.videoFormatBadge) { _, newValue in
                     videoFormatBadge = newValue
                 }
