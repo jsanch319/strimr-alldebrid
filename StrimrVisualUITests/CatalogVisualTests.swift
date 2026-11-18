@@ -71,6 +71,9 @@ final class CatalogVisualTests: XCTestCase {
         let loaded = NSPredicate(format: "value CONTAINS %@", "image.tmdb.org/t/p/")
         expectation(for: loaded, evaluatedWith: source)
         waitForExpectations(timeout: 45)
+        let boundary = app.staticTexts["catalog.detail.surface-boundary"]
+        XCTAssertTrue(boundary.waitForExistence(timeout: 15), app.debugDescription)
+        XCTAssertGreaterThan(Double(boundary.value as? String ?? "") ?? 0, 100)
         let play = app.buttons["catalog.detail.play"]
         XCTAssertTrue(play.isHittable, app.debugDescription)
         XCTAssertLessThan(app.staticTexts["catalog.detail.title"].frame.maxY, play.frame.minY)

@@ -5,6 +5,46 @@ import Testing
 
 @MainActor
 struct CatalogDetailAndBackdropTests {
+    @Test func `detail surface follows artwork hues and supports readable secondary text`() {
+        let samples = [
+            ProgressArtworkColor(red: 0.95, green: 0.65, blue: 0.18),
+            ProgressArtworkColor(red: 0.18, green: 0.65, blue: 0.95),
+            ProgressArtworkColor(red: 0.60, green: 0.12, blue: 0.20),
+            ProgressArtworkColor(red: 0.97, green: 0.97, blue: 0.97),
+            ProgressArtworkColor(red: 0, green: 0, blue: 0),
+        ]
+        var results: Set<ProgressArtworkColor> = []
+        for sample in samples {
+            let surface = CatalogDetailSurfacePalette.surface(from: [sample])
+            #expect(surface.luminance <= 0.055001)
+            #expect(surface.maximum > 0.09) // Near-black images still produce a visible surface.
+            // Secondary white text at 70% opacity must retain at least WCAG AA contrast.
+            let secondary = ProgressArtworkColor(
+                red: surface.red * 0.3 + 0.7,
+                green: surface.green * 0.3 + 0.7,
+                blue: surface.blue * 0.3 + 0.7,
+            )
+            #expect((secondary.luminance + 0.05) / (surface.luminance + 0.05) >= 4.5)
+            if sample.saturation > 0.2 {
+                #expect(abs((surface.hue ?? 0) - (sample.hue ?? 0)) < 0.02)
+            }
+            #expect(surface == CatalogDetailSurfacePalette.surface(from: [sample]))
+            results.insert(surface)
+        }
+        #expect(results.count == samples.count)
+        #expect(CatalogDetailSurfacePalette.surface(from: []) == CatalogDetailSurfacePalette.fallback)
+    }
+
+    @Test func `detail fade follows tracking layout and ends before metadata`() {
+        for bottom in [CGFloat(420), 800, 1200] {
+            let end = CatalogDetailSurfacePalette.transitionEnd(trackingBottom: bottom)
+            #expect(end > bottom)
+            #expect(end < bottom + 22) // The next row starts after the existing 22-point spacing.
+        }
+        #expect(CatalogDetailSurfacePalette.transitionEnd(trackingBottom: .nan) == 0)
+        #expect(CatalogDetailSurfacePalette.transitionEnd(trackingBottom: -.infinity) == 0)
+    }
+
     private func title(_ id: Int) -> MediaItem {
         CatalogMediaAdapter.make(title: .reference(id: id, kind: .movie), episode: nil, resume: nil)
     }

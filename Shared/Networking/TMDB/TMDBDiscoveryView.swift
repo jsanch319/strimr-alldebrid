@@ -131,6 +131,8 @@ struct TMDBDetailView: View {
         @State private var presentedTrailer: TrailerSelection?
         @State private var trailerMessage: String?
         @State private var loadingTrailer = false
+        @State private var trackingBottom: CGFloat = 0
+        @State private var artworkModel = CatalogHomeBackdropModel(loader: CatalogDetailArtwork.load)
     #endif
     private let discovery = DiscoveryStore.shared
     private let progress = CatalogProgressStore.shared
@@ -233,6 +235,11 @@ struct TMDBDetailView: View {
                     }
                 #endif
                 trackingActions
+                #if os(iOS)
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.frame(in: .named("catalog.detail.content")).maxY
+                    } action: { trackingBottom = $0 }
+                #endif
                 metadata
                 synopsis
                 genresAndStudio
@@ -256,6 +263,16 @@ struct TMDBDetailView: View {
             }
             .padding(.horizontal, LayoutMetrics.pageMargin)
             .padding(.bottom, 28)
+            #if os(iOS)
+                .coordinateSpace(name: "catalog.detail.content")
+                .background {
+                    CatalogDetailArtwork(
+                        source: CatalogDetailArtworkSource(title: item),
+                        transitionEnd: CatalogDetailSurfacePalette.transitionEnd(trackingBottom: trackingBottom),
+                        model: artworkModel,
+                    )
+                }
+            #endif
         }
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
             if width > 0, abs(detailViewportWidth - width) > 1 {
@@ -264,7 +281,10 @@ struct TMDBDetailView: View {
         }
         #if os(iOS)
         .environment(\.catalogBackdropSelection, nil)
-        .background { CatalogDetailArtwork(source: CatalogDetailArtworkSource(title: item)) }
+        // The viewport/overscroll and all scroll content share exactly the same opaque surface.
+        .background(artworkModel.current?.colors.first ?? CatalogDetailSurfacePalette.fallback.color)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.5), value: artworkModel.current?.id)
+        .preferredColorScheme(.dark)
         .ignoresSafeArea(edges: .top)
         .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
