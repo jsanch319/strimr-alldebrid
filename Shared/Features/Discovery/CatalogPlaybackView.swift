@@ -72,7 +72,7 @@ struct CatalogSourcesView: View {
                                     Text(source.filename).font(.headline)
                                     Text(source.details).font(.caption).foregroundStyle(.secondary)
                                 }
-                            }.disabled(loading)
+                            }.disabled(loading || !source.isSupported)
                         }
                         if let error {
                             Text(error).font(.footnote).foregroundStyle(.secondary)
@@ -192,10 +192,11 @@ struct CatalogSourcesView: View {
                         subtitles: request.subtitles,
                         resumes: resumes,
                         exactResume: request.exactResume,
-                        englishAudioFallback: automatic ? EnglishAudioFallback(
+                        englishAudioFallback: EnglishAudioFallback(
                             context: englishAudioContext,
                             find: {
-                                guard !triedEnglishReplacement, settingsManager.playback.alwaysPreferEnglishAudio,
+                                guard automatic, !triedEnglishReplacement,
+                                      settingsManager.playback.alwaysPreferEnglishAudio,
                                       scenePhase == .active, sourceScope == request.scope, progress?.completed != true,
                                       let resolver else { return nil }
                                 triedEnglishReplacement = true
@@ -215,7 +216,11 @@ struct CatalogSourcesView: View {
                                 )
                                 self.request = nil
                             },
-                        ) : nil,
+                            chooseSource: {
+                                automatic = false; resumes = true; pendingFailure = nil
+                                self.request = nil
+                            },
+                        ),
                         onFailure: automatic ?
                             { message in pendingFailure = message; self.request = nil } : nil,
                     )
@@ -251,7 +256,7 @@ struct CatalogSourcesView: View {
             HStack(spacing: 16) {
                 Button("Retry", systemImage: "arrow.clockwise") { schedule(.refresh) }.disabled(loading)
                 if resolver?.sources.isEmpty == false {
-                    Button("Select Source") { automatic = false; error = nil; canPoll = false }
+                    Button("Select Source") { automatic = false; error = nil; canPoll = false; schedule(.refresh) }
                 }
             }
             if resolver?.availability == .missing || resolver?.availability == .incomplete {
@@ -329,7 +334,12 @@ struct CatalogSourcesView: View {
                 catch is CancellationError { throw CancellationError() }
                 catch { metadata = title }
             }
-            try await next.refresh(title: metadata ?? title, episode: episode)
+            try await next.refresh(
+                title: metadata ?? title,
+                episode: episode,
+                includeAddons: !automatic,
+                preferEnglish: settingsManager.playback.alwaysPreferEnglishAudio,
+            )
             try Task.checkCancellation()
             guard id == operationID, sourceScope == scope, scope == DiscoveryStore.shared.scope else { return }
             if automatic {
@@ -428,6 +438,10 @@ struct CatalogSourcesView: View {
     }
 
     private func playerDismissed() {
+        if !automatic {
+            Task { await DiscoveryStore.shared.sync(force: true) }
+            schedule(.refresh); return
+        }
         if englishReplacement != nil {
             pendingFailure = nil; schedule(.englishReplacement); return
         }

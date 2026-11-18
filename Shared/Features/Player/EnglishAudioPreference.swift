@@ -114,4 +114,5 @@ struct EnglishAudioFallback {
     var context: EnglishAudioPlaybackContext?
     let find: @MainActor () async -> CatalogSourceResolver.Resolved?
     let activate: @MainActor (CatalogSourceResolver.Resolved, Double) -> Void
+    var chooseSource: (@MainActor () -> Void)?
 }

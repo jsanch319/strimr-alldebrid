@@ -14,6 +14,13 @@ enum AllDebridTitleMatcher {
             }
         }
 
+        var isSupported: Bool {
+            if case let .stremio(label) = self {
+                return label.unsupportedReason == nil
+            }
+            return true
+        }
+
         var filename: String {
             switch self {
             case let .magnet(file): file.filename; case let .saved(link): link
@@ -31,7 +38,10 @@ enum AllDebridTitleMatcher {
         var details: String {
             switch self {
             case let .magnet(file): AllDebridLibraryView
-                .sourceDetails(file); case .saved: "Saved link"; case .stremio: "Stremio add-on"
+                .sourceDetails(file); case .saved: "Saved link"; case let .stremio(label): label
+                .unsupportedReason ??
+                ("Stremio add-on · " + label.audioHint
+                    .label + (label.fileIndex.map { " · Torrent file #\($0)" } ?? ""))
             }
         }
     }

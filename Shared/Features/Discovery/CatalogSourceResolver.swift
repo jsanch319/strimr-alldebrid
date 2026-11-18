@@ -38,6 +38,7 @@ final class CatalogSourceResolver {
     private let acquisition: CatalogSourceAcquisition?
     private let stremio: StremioPlaybackSources?
     private var queriedStremio = false
+    private var preferEnglish = true
     private var requestedTitle: TMDBTitle?
     private var requestedEpisode: TMDBEpisode?
     var needsSourceSetup: Bool {
@@ -63,7 +64,13 @@ final class CatalogSourceResolver {
         try await acquisition.submitUserLink(link, title: title, episode: episode)
     }
 
-    func refresh(title: TMDBTitle, episode: TMDBEpisode?) async throws {
+    func refresh(
+        title: TMDBTitle,
+        episode: TMDBEpisode?,
+        includeAddons: Bool = false,
+        preferEnglish: Bool = true,
+    ) async throws {
+        self.preferEnglish = preferEnglish
         requestedTitle = title; requestedEpisode = episode; queriedStremio = false
         sources = []; files = []; warnings = []; attempted = []; processingMagnets = []; availability = .checking
         guard title.kind != .tv || episode != nil else { throw Failure.chooseEpisode }
@@ -90,19 +97,35 @@ final class CatalogSourceResolver {
             links: snapshot.savedLinks,
             magnetNames: names,
         )
-        guard sources.isEmpty else { availability = .ready; return }
+        sources += stremio?.readySources(snapshot: snapshot, title: title, episode: episode) ?? []
+        var seen = Set<String>()
+        sources = sources.filter { seen.insert($0.link).inserted }
+        if !sources.isEmpty {
+            if includeAddons, let stremio {
+                queriedStremio = true
+                do {
+                    sources += try await stremio.discover(title: title, episode: episode, preferEnglish: preferEnglish)
+                } catch {
+                    if error.isCancellation {
+                        throw CancellationError()
+                    }
+                    warnings.append("Additional add-on sources could not be loaded. Check Stremio Add-ons and retry.")
+                }
+            }
+            availability = .ready; return
+        }
         processingMagnets = snapshot.magnets.filter {
             AllDebridTitleMatcher.matchesProcessingMagnet(title: title, episode: episode, magnet: $0)
         }
         let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
         var addonError: Error?
-        if warnings.isEmpty, let stremio {
+        if let stremio {
             queriedStremio = true
             do {
-                sources = try await stremio.discover(title: title, episode: episode)
+                sources = try await stremio.discover(title: title, episode: episode, preferEnglish: preferEnglish)
                 try Task.checkCancellation()
                 if !sources.isEmpty {
-                    availability = .ready; return
+                    availability = sources.contains(where: \.isSupported) ? .ready : .incomplete; return
                 }
             } catch {
                 if error.isCancellation {
@@ -163,7 +186,7 @@ final class CatalogSourceResolver {
 
     func resolveNext() async throws -> Resolved {
         var lastError: Error?
-        for source in sources where !attempted.contains(source.link) {
+        for source in sources where source.isSupported && !attempted.contains(source.link) {
             try Task.checkCancellation()
             attempted.insert(source.link)
             do { return try await resolve(source) }
@@ -180,7 +203,11 @@ final class CatalogSourceResolver {
         try Task.checkCancellation()
         if !queriedStremio, let stremio, let title = requestedTitle {
             queriedStremio = true
-            let fallback = try await stremio.discover(title: title, episode: requestedEpisode)
+            let fallback = try await stremio.discover(
+                title: title,
+                episode: requestedEpisode,
+                preferEnglish: preferEnglish,
+            )
             try Task.checkCancellation()
             if !fallback.isEmpty {
                 sources += fallback
@@ -197,11 +224,11 @@ final class CatalogSourceResolver {
         try Task.checkCancellation()
         if !queriedStremio, let stremio, let title = requestedTitle {
             queriedStremio = true
-            sources += try await stremio.discover(title: title, episode: requestedEpisode)
+            sources += try await stremio.discover(title: title, episode: requestedEpisode, preferEnglish: preferEnglish)
         }
         let probe = inspector ?? EnglishAudioInspector()
         let ready = sources.filter { source in
-            guard !attempted.contains(source.link) else { return false }
+            guard source.isSupported, !attempted.contains(source.link) else { return false }
             if case let .stremio(label) = source {
                 return stremio?.isReadyDirect(label) == true
             }
@@ -235,7 +262,7 @@ final class CatalogSourceResolver {
 
     func resolveSelected(_ source: AllDebridTitleMatcher.Source) async throws -> Resolved {
         try Task.checkCancellation()
-        guard sources.contains(source)
+        guard source.isSupported, sources.contains(source)
         else {
             throw Failure.noMatch("This file is no longer in the current matching source list. Refresh availability.")
         }

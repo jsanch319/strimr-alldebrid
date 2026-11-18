@@ -178,6 +178,10 @@ final class CatalogSourceAcquisition {
         return []
     }
 
+    func submittedMagnetID(for link: String) -> String? {
+        receipts[Self.submissionKey(link)]?.id
+    }
+
     func submitUserLink(_ link: String, title: TMDBTitle, episode: TMDBEpisode?) async throws {
         guard AuthorizedSourceCandidate.validLink(link) else { throw AllDebridAPIClient.APIError.invalidLink }
         if title.kind == .tv, episode == nil {

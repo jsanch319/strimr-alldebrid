@@ -19,6 +19,28 @@ struct StremioTransportTests {
         #expect(try await client.streams(configuration, type: "series", id: "tt1234567:1:2").count == 1)
     }
 
+    @Test func `transport retains more than one hundred standard streams and their file indices`() async throws {
+        let rows = (0 ..< 130).map { [
+            "infoHash": String(repeating: "a", count: 40),
+            "fileIdx": $0,
+            "behaviorHints": ["notWebReady": true],
+        ] as [String: Any] }
+        let payload = try #require(try String(
+            data: JSONSerialization.data(withJSONObject: ["streams": rows]),
+            encoding: .utf8,
+        ))
+        let stub = HTTPStub { _ in .json(payload) }
+        let client = StremioClient(session: stub.session)
+        let values = try await client.streams(
+            .init(url: "https://addon.test/manifest.json", authorized: true),
+            type: "series",
+            id: "tt7631058:2:1",
+        )
+        #expect(values.count == 130)
+        #expect(values.last?.fileIdx == 129)
+        #expect(values.first?.behaviorHints?.notWebReady == true)
+    }
+
     @Test func `catalog-only unconfigured and invalid manifests are rejected`() async throws {
         for raw in [
             #"{"id":"x","version":"1.0.0","name":"x","types":["movie"],"resources":["catalog"]}"#,
@@ -46,7 +68,8 @@ struct StremioTransportTests {
             type: "movie",
             id: "tt1160419",
         )
-        #expect(streams.count == 1)
+        #expect(streams.count == 4)
+        #expect(streams.filter { $0.unsupportedReason == nil }.count == 1)
     }
 
     @Test func `transport failures never echo configured credentials`() async throws {

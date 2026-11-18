@@ -46,19 +46,60 @@ nonisolated struct StremioStream: Decodable, Sendable, CustomStringConvertible, 
     struct Hints: Decodable, Sendable {
         let filename: String?
         let proxyHeaders: [String: [String: String]]?
+        let notWebReady: Bool?
+        let bingeGroup: String?
+        let videoHash: String?
+        let videoSize: Int64?
     }
 
     let name: String?
     let title: String?
     let displayDetails: String?
+    let url: String?
+    let infoHash: String?
+    let fileIdx: Int?
+    let sources: [String]?
+    let languages: [String]?
+    let behaviorHints: Hints?
+    let unsupportedReason: String?
     enum CodingKeys: String, CodingKey {
-        case name, title, url, infoHash, behaviorHints
+        case name, title, url, infoHash, fileIdx, sources, languages, language, behaviorHints
+        case drm, licenseUrl, licenseKey, ytId, externalUrl
         case displayDetails = "description"
     }
 
-    let url: String?
-    let infoHash: String?
-    let behaviorHints: Hints?
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try? c.decode(String.self, forKey: .name)
+        title = try? c.decode(String.self, forKey: .title)
+        displayDetails = try? c.decode(String.self, forKey: .displayDetails)
+        url = try? c.decode(String.self, forKey: .url)
+        infoHash = try? c.decode(String.self, forKey: .infoHash)
+        fileIdx = (try? c.decode(Int.self, forKey: .fileIdx)) ?? (try? c.decode(String.self, forKey: .fileIdx))
+            .flatMap(Int.init)
+        sources = try? c.decode([String].self, forKey: .sources)
+        languages = (try? c.decode([String].self, forKey: .languages)) ??
+            (try? c.decode(String.self, forKey: .language)).map { [$0] }
+        behaviorHints = try? c.decode(Hints.self, forKey: .behaviorHints)
+        if [CodingKeys.drm, .licenseUrl, .licenseKey]
+            .contains(where: { c.contains($0) && (try? c.decodeNil(forKey: $0)) == false })
+        {
+            unsupportedReason = "Protected/DRM source is not supported."
+        } else if [CodingKeys.ytId, .externalUrl]
+            .contains(where: { c.contains($0) && (try? c.decodeNil(forKey: $0)) == false })
+        {
+            unsupportedReason = "External/embedded-player source cannot be used as a native video stream."
+        } else if c.contains(.fileIdx), (try? c.decodeNil(forKey: .fileIdx)) == false,
+                  fileIdx == nil || fileIdx.map({ $0 < 0 }) == true
+        {
+            unsupportedReason = "Invalid torrent file index."
+        } else if c.contains(.behaviorHints), behaviorHints == nil {
+            unsupportedReason = "Malformed stream behavior hints."
+        } else {
+            unsupportedReason = nil
+        }
+    }
+
     var description: String {
         "Stremio stream (redacted)"
     }
@@ -97,11 +138,12 @@ actor StremioClient: StremioClientProtocol {
     func streams(_ configuration: StremioConfiguration, type: String, id: String) async throws -> [StremioStream] {
         let data = try await fetch(configuration.streamURL(type: type, id: id))
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let raw = object["streams"] as? [[String: Any]] else { throw StremioError.noSources }
-        return raw.prefix(100).compactMap { row in
-            guard row["drm"] == nil, row["licenseUrl"] == nil, row["licenseKey"] == nil,
-                  row["ytId"] == nil, row["externalUrl"] == nil,
-                  let data = try? JSONSerialization.data(withJSONObject: row) else { return nil }
+              let raw = object["streams"] as? [Any] else { throw StremioError.noSources }
+        // The response already has a one-MiB transport bound. Do not truncate compatible
+        // results or erase protected/external rows: discovery reports safe reasons for those.
+        return raw.compactMap { row in
+            guard let data = try? JSONSerialization.data(withJSONObject: (row as? [String: Any]) ?? [:])
+            else { return nil }
             return try? JSONDecoder().decode(StremioStream.self, from: data)
         }
     }

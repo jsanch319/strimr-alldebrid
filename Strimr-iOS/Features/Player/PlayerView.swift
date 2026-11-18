@@ -15,6 +15,15 @@ struct PlayerView: View {
     @State private var englishSession = EnglishAudioSession()
     @State private var englishAudioNotice: String?
     @State private var englishFallbackTask: Task<Void, Never>?
+    private struct EnglishOffer {
+        let replacement: CatalogSourceResolver.Resolved
+        let mediaID: String?
+        let sourceURL: URL?
+    }
+
+    @State private var englishOffer: EnglishOffer?
+    @State private var showEnglishOffer = false
+
     @State private var audioMediaSettled = false
     private let onPlaybackFailure: ((String) -> Void)?
     @State private var playerController = PlayerController()
@@ -241,11 +250,14 @@ struct PlayerView: View {
                 }
                 .onChange(of: playerController.audioTrackRevision) { _, _ in refreshTracks() }
                 .onChange(of: settingsManager.playback.alwaysPreferEnglishAudio) { _, _ in
-                    englishFallbackTask?.cancel(); englishAudioNotice = nil
+                    englishFallbackTask?
+                        .cancel(); englishAudioNotice = nil; showEnglishOffer = false; englishOffer = nil
                     englishSession.beginLoad(); refreshTracks()
                 }
                 .onChange(of: viewModel.media?.id) { _, _ in
-                    englishFallbackTask?.cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil
+                    englishFallbackTask?
+                        .cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil; showEnglishOffer =
+                        false; englishOffer = nil
                 }
                 .onChange(of: playerController.duration) { _, newValue in
                     viewModel.handlePlaybackDuration(newValue)
@@ -361,6 +373,16 @@ struct PlayerView: View {
                         }
                     }
                     .equatable()
+                }
+                .confirmationDialog(
+                    "English audio is available in another source",
+                    isPresented: $showEnglishOffer,
+                    titleVisibility: .visible,
+                ) {
+                    Button("Switch to English Source") { acceptEnglishOffer() }
+                    Button("Keep Current Source", role: .cancel) { englishOffer = nil }
+                } message: {
+                    Text("Switch to a verified English source at your current playback position?")
                 }
                 .alert("player.termination.title", isPresented: $showingTerminationAlert) {
                     Button("player.termination.dismiss") {
@@ -1111,12 +1133,22 @@ struct PlayerView: View {
             onSelectDialogueBoost: selectDialogueBoost(_:),
             onSearchSubtitles: showSubtitleSearch,
             onResetTrackSelections: {
-                englishFallbackTask?.cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil
+                englishFallbackTask?
+                    .cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil; showEnglishOffer =
+                    false; englishOffer = nil
                 englishAudioFallback?.context?.manualTrack = nil
                 viewModel.resetRememberedTrackSelections(); refreshTracks()
             },
             onSelectSync: openOffsetBar(_:),
             onShowSubtitleAppearance: showSubtitleAppearance,
+            onChooseSource: englishAudioFallback?.chooseSource.map { choose in
+                {
+                    englishFallbackTask?.cancel(); showEnglishOffer = false; englishOffer = nil
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    choose()
+                }
+            },
         )
     }
 
@@ -1482,12 +1514,13 @@ struct PlayerView: View {
         }
         guard enabled, englishSession.manualTrack == nil else { englishAudioNotice = nil; return }
         if EnglishAudioPreference.preferred(in: tracks) != nil {
-            englishAudioNotice = nil; englishFallbackTask?.cancel(); return
+            englishAudioNotice = nil; englishFallbackTask?
+                .cancel(); showEnglishOffer = false; englishOffer = nil; return
         }
         guard !tracks.isEmpty else { return }
         let definite = EnglishAudioPreference.definitelyUnavailable(in: tracks)
         let notice = definite ?
-            "English audio is unavailable in this source. Use Audio & Subtitles to choose a track." :
+            "English audio is unavailable in this source. Use Audio & Subtitles to choose another source or audio track." :
             "English audio could not be confirmed from track metadata. Use Audio & Subtitles."
         if englishAudioNotice != notice {
             englishAudioNotice = notice
@@ -1508,12 +1541,26 @@ struct PlayerView: View {
                   !playerController.isPictureInPictureActive, !LiveLoadOptions.routesAudioToAirPlay,
                   !sharePlayCoordinator.isInSession,
                   EnglishAudioPreference.preferred(in: audioTracks) == nil else { return }
-            let position = playerController.position
-            guard position.isFinite, position >= 0 else { return }
-            viewModel.handlePlaybackPosition(position, isScrubbing: false)
-            viewModel.saveProgress()
-            englishAudioFallback.activate(replacement, position)
+            englishOffer = EnglishOffer(replacement: replacement, mediaID: mediaID, sourceURL: sourceURL)
+            showEnglishOffer = true
         }
+    }
+
+    private func acceptEnglishOffer() {
+        guard let offer = englishOffer, scenePhase == .active,
+              viewModel.media?.id == offer.mediaID, activePlaybackURL == offer.sourceURL,
+              englishSession.manualTrack == nil, settingsManager.playback.alwaysPreferEnglishAudio,
+              !viewModel.awaitsCatalogResume, !isScrubbing, !playerController.isPictureInPictureActive,
+              !LiveLoadOptions.routesAudioToAirPlay, !sharePlayCoordinator.isInSession
+        else {
+            englishOffer = nil; return
+        }
+        let position = playerController.position
+        guard position.isFinite, position >= 0 else { englishOffer = nil; return }
+        viewModel.handlePlaybackPosition(position, isScrubbing: false)
+        viewModel.saveProgress()
+        englishAudioFallback?.activate(offer.replacement, position)
+        englishOffer = nil
     }
 
     private func selectAudioTrack(_ id: Int?) {
@@ -1527,6 +1574,7 @@ struct PlayerView: View {
         }
 
         englishFallbackTask?.cancel()
+        showEnglishOffer = false; englishOffer = nil
         englishSession.selectManually(track); englishAudioNotice = nil
         englishAudioFallback?.context?.manualTrack = track
         Task {

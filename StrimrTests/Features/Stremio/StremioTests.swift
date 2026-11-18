@@ -49,6 +49,108 @@ struct StremioTests {
         .init(client: client, store: store ?? AddonMemoryStore(configuration: configuration))
     }
 
+    @Test func `realistic Torrentio results retain filename-less hashes and URLs but reject conflicting episodes`(
+    ) async throws {
+        let title = try JSONDecoder().decode(
+            TMDBTitle.self,
+            from: Data(
+                #"{"id":84773,"media_type":"tv","name":"The Lord of the Rings: The Rings of Power","first_air_date":"2022-09-01","external_ids":{"imdb_id":"tt7631058"}}"#
+                    .utf8,
+            ),
+        )
+        let selected = try JSONDecoder().decode(
+            TMDBEpisode.self,
+            from: Data(#"{"id":1,"name":"Elven Kings Under the Sky","season_number":2,"episode_number":1}"#.utf8),
+        )
+        let fixture = try #require(Bundle(for: StremioFixtureBundle.self).url(
+            forResource: "rings-of-power-streams",
+            withExtension: "json",
+            subdirectory: "Fixtures/Stremio",
+        )
+            ?? Bundle(for: StremioFixtureBundle.self).url(forResource: "rings-of-power-streams", withExtension: "json"))
+        let values = try JSONDecoder().decode([StremioStream].self, from: Data(contentsOf: fixture))
+        let client = AddonFixture(streams: values)
+        let addon = service(client)
+        let found = try await addon.discover(title: title, episode: selected)
+        #expect(found.count == 12)
+        #expect(found.filter(\.isSupported).count == 6)
+        #expect(await client.searches == ["series/tt7631058:2:1"])
+        let labels = found.compactMap { source -> StremioSourceLabel? in
+            if case let .stremio(label) = source {
+                return label
+            }; return nil
+        }
+        #expect(labels.first?.audioHint == .english)
+        #expect(labels.filter { $0.unsupportedReason == nil && $0.fileIndex == 5 }.count == 1)
+        #expect(labels.filter { $0.unsupportedReason != nil }.allSatisfy { !$0.filename.contains("fixture-only") })
+        #expect(try await addon.discover(title: title, episode: selected, preferEnglish: false).first?.filename
+            .contains("2160p") == true)
+    }
+
+    @Test func `manual picker includes add-on results even when the library has a ready file`() async throws {
+        let addon =
+            AddonFixture(
+                streams: streams(
+                    #"[{"name":"4K","url":"https://cdn.test/ready.mkv"},{"externalUrl":"https://site.test/player"}]"#,
+                ),
+            )
+        let resolver = CatalogSourceResolver(
+            client: AddonLibrary(files: [file("Dune.2021.mkv")]),
+            stremio: service(addon),
+        )
+        try await resolver.refresh(title: movie, episode: nil, includeAddons: true)
+        #expect(resolver.sources.count == 3)
+        #expect(resolver.sources.filter(\.isSupported).count == 2)
+        #expect(await addon.searches == ["movie/tt1160419"])
+    }
+
+    @Test func `source language declarations are unverified hints and a title word is not English metadata`() {
+        let values =
+            streams(
+                #"[{"title":"English Teacher 1080p"},{"title":"Audio: English"},{"languages":["eng"]},{"title":"MULTI"},{"title":"🇬🇧"},{"languages":["fr"]}]"#,
+            )
+        #expect(values.map(StremioAudioHint.reported) == [
+            .unknown,
+            .english,
+            .english,
+            .multilingual,
+            .english,
+            .other,
+        ])
+    }
+
+    @Test func `raw hash without filename uses acquisition but never guesses torrent file order`() async throws {
+        let client =
+            AddonFixture(streams: streams(#"[{"infoHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fileIdx":7}]"#))
+        let upload = AddonAcquisition()
+        let acquisition = CatalogSourceAcquisition(
+            client: upload,
+            providers: [],
+            account: "raw-fixture",
+            defaults: TestDefaults.make(),
+        )
+        let addon = service(client)
+        let sources = try await addon.discover(title: show, episode: episode)
+        let source = try #require(sources.first)
+        guard case let .stremio(label) = source else { Issue.record("Expected stream"); return }
+        await #expect(throws: CatalogSourceResolver.Failure.self) { try await addon.resolve(
+            label,
+            acquisition: acquisition,
+            title: show,
+            episode: episode,
+        ) }
+        #expect(await upload.uploads == 1)
+        #expect(StremioStreamPolicy.readyFile(file("S01E02.mkv"), title: show, episode: episode))
+        #expect(!StremioStreamPolicy.readyFile(file("S01E03.mkv"), title: show, episode: episode))
+        #expect(!StremioStreamPolicy.readyFile(file("video.mkv"), title: show, episode: episode))
+        #expect(!StremioStreamPolicy.readyFile(file("Series.S01E02E03.mkv"), title: show, episode: episode))
+        let snapshot = AllDebridLibrarySnapshot(
+            savedLinks: [], magnets: [.init(id: "42", filename: "Pack", size: 100, status: "ready", statusCode: 4)],
+            readyMagnetCount: 1, magnetFiles: [file("S01E02.mkv"), file("S01E03.mkv"), file("video.mkv")], warnings: [],
+        )
+        #expect(addon.readySources(snapshot: snapshot, title: show, episode: episode).map(\.filename) == ["S01E02.mkv"])
+    }
+
     @Test func `manifest URLs normalize protocol and preserve private path and query in stream requests`() throws {
         let c = try StremioConfiguration(
             url: "stremio://addon.test/ad%3DfixtureOnly/manifest.json?token=fixtureOnly",
@@ -128,7 +230,8 @@ struct StremioTests {
                 ),
             )
         let sources = try await service(client).discover(title: show, episode: episode)
-        #expect(sources.count == 1)
+        #expect(sources.filter(\.isSupported).count == 1)
+        #expect(sources.filter { !$0.isSupported }.count == 2)
         #expect(await client.searches == ["series/tt1234567:1:2"])
     }
 
@@ -356,3 +459,5 @@ private actor AddonAcquisition: CatalogAcquisitionClient {
         nil
     }
 }
+
+private final class StremioFixtureBundle: NSObject {}
