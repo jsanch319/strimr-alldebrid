@@ -719,6 +719,11 @@ struct PlayerView: View {
             tracksMenuActions: tracksMenuActions,
             onWatchTogether: watchTogetherAction,
             onAirPlayPresentationChanged: { presented in
+                if presented {
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                }
                 isAirPlayPickerPresented = presented
                 showControls(temporarily: !presented)
             },
@@ -1804,8 +1809,7 @@ struct PlayerView: View {
         appliedResumeOffset = true
         let loadedURL = activePlaybackURL
         Task {
-            await playerController.seekAfterReady(to: resume)
-            guard activePlaybackURL == loadedURL else { return }
+            guard await playerController.seekAfterReady(to: resume), activePlaybackURL == loadedURL else { return }
             viewModel.completeInitialCatalogResume()
             finishMediaLoad()
         }
@@ -1832,8 +1836,8 @@ struct PlayerView: View {
             appliedResumeOffset = true
             let loadedURL = activePlaybackURL
             Task {
-                await playerController.seekAfterReady(to: resumePosition)
-                guard activePlaybackURL == loadedURL else { return }
+                guard await playerController.seekAfterReady(to: resumePosition),
+                      activePlaybackURL == loadedURL else { return }
                 viewModel.completeInitialCatalogResume()
                 finishMediaLoad()
             }

@@ -133,6 +133,9 @@ final class PlayerController {
     @ObservationIgnored private var lastAudibleVolume: Float = 1.0
     @ObservationIgnored private var volumeAttenuation: Float = 1.0
     @ObservationIgnored private var pendingSeekTarget: Double?
+    @ObservationIgnored private var continuity = PlaybackContinuity()
+    @ObservationIgnored private var loadGeneration = UUID()
+    @ObservationIgnored private var landedSeekTarget: Double?
     @ObservationIgnored private var scrubThumbnailTask: Task<Void, Never>?
     @ObservationIgnored private var scrubAetherTask: Task<Void, Never>?
     @ObservationIgnored private var scrubExtractorDwellTask: Task<Void, Never>?
@@ -207,6 +210,10 @@ final class PlayerController {
         autoplay: Bool = true,
         nowPlaying: NowPlayingItem? = nil,
     ) {
+        loadGeneration = UUID()
+        let generation = loadGeneration
+        continuity.reset(to: startPosition ?? 0)
+        position = continuity.position
         deactivateASSRendering()
         resetScrubPreviewSession()
         self.showsScrubThumbnailPreviews = showsScrubThumbnailPreviews
@@ -250,7 +257,7 @@ final class PlayerController {
         nowPlayingController?.begin(nowPlaying, isLive: isLive)
 
         Task { @MainActor [weak self] in
-            guard let self else { return }
+            guard let self, loadGeneration == generation else { return }
             do {
                 let sourceProbe = try await engine.load(
                     url: url,
@@ -280,6 +287,7 @@ final class PlayerController {
                     ),
                     audioSourceStreamIndex: preferredAudioTrackID.map(Int32.init),
                 )
+                guard loadGeneration == generation, !Task.isCancelled else { return }
                 if autoplay, live?.autoplay == false {
                     engine.play()
                 }
@@ -293,6 +301,7 @@ final class PlayerController {
                     )
                 }
                 await refreshNativeAudioSelection()
+                guard loadGeneration == generation, !Task.isCancelled else { return }
                 let externalEngineTracks = engine.subtitleTracks.filter(\.isExternal)
                 if externalEngineTracks.count == externalSubtitles.count {
                     externalSubtitleProviderStreamIDs = Dictionary(
@@ -314,7 +323,7 @@ final class PlayerController {
                 nowPlayingController?.playbackDidLoad()
                 onMediaLoaded?()
             } catch {
-                guard !Task.isCancelled, !error.isCancellation else { return }
+                guard loadGeneration == generation, !Task.isCancelled, !error.isCancellation else { return }
                 deactivateASSRendering()
                 nowPlayingController?.stop()
                 TrailerPlaybackCoordinator.shared.endFeature(trailerPlaybackOwner)
@@ -349,6 +358,11 @@ final class PlayerController {
         } else {
             engine.togglePlayPause()
         }
+    }
+
+    func prepareForRouteChange() {
+        guard !isLive else { return }
+        continuity.beginTransition()
     }
 
     func seekToLiveEdge() {
@@ -432,16 +446,36 @@ final class PlayerController {
         performSeek(to: time)
     }
 
-    func seekAfterReady(to time: Double) async {
+    @discardableResult
+    func seekAfterReady(to time: Double) async -> Bool {
+        guard time.isFinite, time >= 0 else { return false }
+        continuity.seek(to: time)
+        let generation = loadGeneration
         if isCoordinatedPlayback {
             engine.playbackCoordinator.coordinateSeek(
-                to: CMTime(seconds: time, preferredTimescale: 600),
-                options: [],
+                to: CMTime(seconds: time, preferredTimescale: 600), options: [],
             )
-            return
+            return true
         }
+        // The engine owns seekability, deferred seeks and route-reload readiness. Its clock
+        // can optimistically publish the target before any frame has actually landed.
+        landedSeekTarget = nil
         pendingSeekTarget = time
         await engine.seek(to: time)
+        for _ in 0 ..< 300 {
+            guard generation == loadGeneration, !Task.isCancelled, !isStopping else { return false }
+            if let landedSeekTarget, abs(landedSeekTarget - time) < 0.01 {
+                return true
+            }
+            if errorMessage != nil {
+                return false
+            }
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+        }
+        guard generation == loadGeneration else { return false }
+        engine.pause()
+        errorMessage = "Playback could not restore the saved position. Retry or choose another compatible source."
+        return false
     }
 
     func seek(by delta: Double) {
@@ -458,6 +492,7 @@ final class PlayerController {
     }
 
     private func performSeek(to time: Double) {
+        continuity.seek(to: time)
         if isCoordinatedPlayback {
             engine.playbackCoordinator.coordinateSeek(
                 to: CMTime(seconds: time, preferredTimescale: 600),
@@ -810,6 +845,7 @@ final class PlayerController {
     }
 
     func stop() {
+        loadGeneration = UUID()
         nativeAudioSelection = nil
         #if os(iOS) || os(macOS)
             pictureInPictureCoordinator.stop()
@@ -1178,6 +1214,31 @@ final class PlayerController {
                 .store(in: &cancellables)
         #endif
 
+        #if os(iOS)
+            engine.$currentAVPlayer
+                .map { player -> AnyPublisher<AVPlayer?, Never> in
+                    guard let player else { return Just(nil).eraseToAnyPublisher() }
+                    return player.publisher(for: \.isExternalPlaybackActive)
+                        .map { _ in Optional(player) }.eraseToAnyPublisher()
+                }
+                .switchToLatest()
+                .combineLatest(engine.$currentAVPlayerItem)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] player, item in
+                    guard let self, let player, let item, videoRoute == .remoteBypass else { return }
+                    PlayerAirPlayConfiguration.applyRemoteBuffering(to: player, item: item)
+                }
+                .store(in: &cancellables)
+        #endif
+
+        engine.$currentAVPlayerItem
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, !isLive, !isStopping else { return }
+                continuity.beginTransition()
+            }
+            .store(in: &cancellables)
+
         engine.$currentAVPlayerItem
             .map { item -> AnyPublisher<CGSize, Never> in
                 guard let item else { return Just(.zero).eraseToAnyPublisher() }
@@ -1255,7 +1316,7 @@ final class PlayerController {
         engine.clock.$currentTime
             .receive(on: DispatchQueue.main)
             .sink { [weak self] time in
-                guard let self else { return }
+                guard let self, !isStopping, isLive || continuity.observe(time) else { return }
                 position = time
                 if let restore = skipBackSubtitles.observe(position: time) {
                     applySubtitleTrack(id: restore.trackID)
@@ -1266,8 +1327,17 @@ final class PlayerController {
         engine.seekEvents
             .receive(on: DispatchQueue.main)
             .sink { [weak self] event in
+                if event.origin == .nativeScrub {
+                    self?.continuity.seek(to: event.target)
+                }
                 switch event.outcome {
-                case .landed, .stalled, .rejected:
+                case let .landed(renderedTime):
+                    self?.landedSeekTarget = event.target
+                    self?.pendingSeekTarget = nil
+                    if let self, continuity.observe(renderedTime) {
+                        position = renderedTime
+                    }
+                case .stalled, .rejected:
                     self?.pendingSeekTarget = nil
                 case .began, .superseded:
                     break
