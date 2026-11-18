@@ -204,6 +204,19 @@ struct AuthorizedSourceTests {
         #expect(!AuthorizedSourceCandidate.matchesFile("Series.S01E02E03.mkv", title: show, episode: episode))
     }
 
+    @Test func `large provider responses cannot cause an unbounded submission burst`() async throws {
+        let client = AcquisitionFixture(importName: "Other.2021.mkv")
+        let provider = ProviderFixture(candidates: (0 ..< 50).map { candidate("https://host.test/file/\($0)") })
+        let acquisition = CatalogSourceAcquisition(
+            client: client,
+            providers: [provider],
+            account: "a",
+            defaults: defaults(),
+        )
+        _ = try await acquisition.discover(title: movie, episode: nil, snapshot: empty)
+        #expect(await client.imports == 3)
+    }
+
     @Test func `provider endpoint rejects credentials insecure schemes and token queries`() {
         for raw in [
             "http://host.test/search",
@@ -240,6 +253,7 @@ private actor AcquisitionFixture: CatalogPlaybackClient, CatalogAcquisitionClien
     let delayed: Bool
     var delayFinished = false
     private(set) var uploads = 0
+    private(set) var imports = 0
     init(
         files: [AllDebridMagnetFile] = [],
         failUpload: Bool = false,
@@ -279,7 +293,12 @@ private actor AcquisitionFixture: CatalogPlaybackClient, CatalogAcquisitionClien
     }
 
     func importDownloadLink(_ link: String) -> AllDebridLinkImport {
-        delayed ? .delayed(id: "7", filename: importName) : .ready(.init(id: link, filename: importName, link: link))
+        imports += 1
+        return delayed ? .delayed(id: "7", filename: importName) : .ready(.init(
+            id: link,
+            filename: importName,
+            link: link,
+        ))
     }
 
     func delayedDownload(id _: String, original: String, filename: String) -> AllDebridSavedLink? {

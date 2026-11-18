@@ -141,6 +141,7 @@ final class CatalogSourceAcquisition {
             candidates
                 .sort { AllDebridTitleMatcher.resolution($0.filename) > AllDebridTitleMatcher.resolution($1.filename) }
         }
+        var submissions = 0
         for candidate in candidates
             where AuthorizedSourceCandidate.validLink(candidate.link) && !failedDirect.contains(candidate.link)
         {
@@ -156,6 +157,8 @@ final class CatalogSourceAcquisition {
                 }
                 continue // Never resubmit on polling, relaunch, or an ambiguous upload response.
             }
+            guard submissions < 3 else { break }
+            submissions += 1
             do {
                 let result = try await submit(candidate.link, identity: identity)
                 if let result {

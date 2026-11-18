@@ -21,7 +21,7 @@ The endpoint receives GET parameters `tmdb_id`, `kind` (`movie` or `tv`), `title
 }]
 ```
 
-Use real IDs, metadata and authorized links. `authorized` is the provider's assertion, not independent rights verification. Mismatched TMDb ID/type/year/episode or filename is rejected. Responses are limited to 1 MiB and 50 entries per endpoint, five endpoints total; provider lookups are cached in memory for 60 seconds. Metadata is shared only with the endpoints you configure; AllDebrid credentials are never sent to providers.
+Use real IDs, metadata and authorized links. `authorized` is the provider's assertion, not independent rights verification. Mismatched TMDb ID/type/year/episode or filename is rejected. Responses are limited to 1 MiB and 50 entries per endpoint, five endpoints total; provider lookups are cached in memory for 60 seconds. At most three new candidates are submitted per availability pass; each AllDebrid client spaces API calls by at least 200 ms (five requests/second). Metadata is shared only with the endpoints you configure; AllDebrid credentials are never sent to providers.
 
 ## Your own links
 

@@ -31,6 +31,7 @@ actor AllDebridAPIClient {
         }
     }
 
+    private var nextAPITurn = ContinuousClock.now
     private var importedURLs: [String: URL] = [:]
     private let apiKey: String?
     private let session: URLSession
@@ -514,6 +515,11 @@ actor AllDebridAPIClient {
     }
 
     private func send(_ request: URLRequest) async throws -> [String: Any] {
+        // Reserve before awaiting so concurrent calls on this actor cannot burst after the same sleep.
+        let turn = max(ContinuousClock.now, nextAPITurn)
+        nextAPITurn = turn.advanced(by: .milliseconds(200))
+        try await ContinuousClock().sleep(until: turn)
+        try Task.checkCancellation()
         var request = request
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
