@@ -434,7 +434,7 @@ final class PlayerController {
 
         func handleAirPlayInterruption(began: Bool, shouldResume: Bool, background: Bool) {
             if began {
-                if !isPaused, isAirPlayPlaybackActive {
+                if hasStartedPlayback, !isPaused, isAirPlayPlaybackActive {
                     remoteInterruptionToken = UUID()
                     remoteInterruptionLoadGeneration = loadGeneration
                 }
