@@ -29,7 +29,8 @@ struct ResumeVerification {
     }
 
     func near(_ position: Double) -> Bool {
-        position.isFinite && position >= max(0, target - 2) && position <= target + 6
+        position.isFinite && !(target > 0 && position == 0) &&
+            position >= max(0, target - min(2, target * 0.1)) && position <= target + 6
     }
 
     mutating func requestSeek(

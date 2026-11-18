@@ -130,4 +130,11 @@ struct ResumeVerificationTests {
         #expect(confirmed)
         #expect(state.requestedPause == true)
     }
+
+    @Test func `a positive fractional checkpoint never confirms a temporary zero`() {
+        var state = ResumeVerification(target: 0.5)
+        let accepted = state.observe(actual: 0, display: 0, ready: true, paused: true, landed: 0)
+        #expect(!accepted)
+        #expect(!state.near(0))
+    }
 }

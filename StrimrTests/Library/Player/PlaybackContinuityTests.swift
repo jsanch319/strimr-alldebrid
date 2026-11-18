@@ -71,4 +71,16 @@ struct PlaybackContinuityTests {
         #expect(!accepted19)
         #expect(clock.position == 1)
     }
+
+    @Test func `fractional unfinished progress is protected until an explicit restart`() {
+        var clock = PlaybackContinuity()
+        clock.reset(to: 0.5)
+        let zero = clock.observe(0)
+        let stale = clock.observe(0.2)
+        #expect(!zero && !stale)
+        #expect(clock.position == 0.5)
+        clock.seek(to: 0)
+        let restart = clock.observe(0)
+        #expect(restart)
+    }
 }

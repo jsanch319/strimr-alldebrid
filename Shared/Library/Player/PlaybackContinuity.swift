@@ -8,11 +8,11 @@ struct PlaybackContinuity {
 
     mutating func reset(to position: Double) {
         self.position = position.isFinite ? max(0, position) : 0
-        restoring = self.position > 1
+        restoring = self.position > 0
     }
 
     mutating func beginTransition() {
-        restoring = position > 1
+        restoring = position > 0
     }
 
     /// Explicit seeks, including Restart, supersede the handoff checkpoint.
@@ -24,11 +24,11 @@ struct PlaybackContinuity {
         guard candidate.isFinite, candidate >= 0 else { return false }
         // Rebuilt HLS clocks can briefly publish a new item's zero-based timeline.
         // Do not release the gate until the engine has restored the carried playhead.
-        if position > 2, candidate < 1 {
+        if position > 0, candidate < min(1, position * 0.5) {
             beginTransition()
             return false
         }
-        guard !restoring || candidate >= max(0, position - 2) else { return false }
+        guard !restoring || candidate >= max(0, position - min(2, position * 0.1)) else { return false }
         position = candidate
         restoring = false
         return true

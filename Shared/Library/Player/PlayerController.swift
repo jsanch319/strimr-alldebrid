@@ -679,8 +679,8 @@ final class PlayerController {
         )
         resumeVerification = verification
         if confirmed {
-            let accepted = landedSeekPosition.flatMap { verification.near($0) ? $0 : nil } ?? actual ?? verification
-                .target
+            // Persist canonical display seconds, not raw source PTS from a different origin.
+            let accepted = landedSeekPosition.flatMap { verification.near($0) ? $0 : nil } ?? engine.clock.currentTime
             continuity.seek(to: accepted); _ = continuity.observe(accepted); position = accepted
             completedResumeTransportIntent = verification.requestedPause
             resumeVerifiedPosition = accepted
