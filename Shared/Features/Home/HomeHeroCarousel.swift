@@ -344,6 +344,8 @@
                             anchor: .bottom,
                         )
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onDetails(slide.media) }
 
                 #if os(iOS)
                     if let preview = trailerPresentation?.preview {
@@ -371,8 +373,6 @@
             }
             #endif
             .clipped()
-            .contentShape(Rectangle())
-            .onTapGesture { onDetails(slide.media) }
             .accessibilityElement(children: .contain)
         }
 
