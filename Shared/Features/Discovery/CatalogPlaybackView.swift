@@ -135,6 +135,10 @@ struct CatalogSourcesView: View {
                 .onChange(of: sourceEndpoints) { _, _ in
                     resolver = nil; canPoll = false; sourceScope = nil; loading = false; schedule(.refresh)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .stremioAddonsDidChange)) { _ in
+                    canPoll = false; sourceScope = nil; resolver = nil; loading = false
+                    schedule(.refresh)
+                }
                 .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
                     canPoll = false; sourceScope = nil; resolver = nil; metadata = nil
                     pendingFailure = nil; request = nil; loading = false
@@ -213,7 +217,8 @@ struct CatalogSourcesView: View {
                 }
             }
             if resolver?.availability == .missing || resolver?.availability == .incomplete {
-                HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    NavigationLink("Stremio Add-ons") { StremioAddonsView() }
                     NavigationLink(resolver?.needsSourceSetup == true ? "Set Up Sources" : "Manage Sources") {
                         AuthorizedSourceSetupView()
                     }
@@ -274,7 +279,11 @@ struct CatalogSourcesView: View {
                             .string(forKey: AuthorizedSourceSettings.key) ?? ""),
                     account: key,
                 )
-                next = CatalogSourceResolver(client: client, acquisition: acquisition)
+                next = CatalogSourceResolver(
+                    client: client,
+                    acquisition: acquisition,
+                    stremio: StremioPlaybackSources(),
+                )
                 resolver = next; sourceScope = scope; metadata = nil
             }
             if metadata == nil {
@@ -296,6 +305,7 @@ struct CatalogSourcesView: View {
             guard !error.isCancellation, id == operationID, sourceScope == scope || sourceScope == nil else { return }
             self.error = error.localizedDescription
             canPoll = !AllDebridAPIClient.isAuthenticationOrRateLimit(error)
+                && !(error is StremioError)
                 && [.processing, .missing, .incomplete].contains(resolver?.availability ?? .checking)
         }
     }

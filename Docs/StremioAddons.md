@@ -1,0 +1,25 @@
+# Personally configured Stremio add-ons
+
+Open **Settings → Playback → Stremio Add-ons** on your iPhone. Paste your already configured HTTPS or `stremio://…/manifest.json` URL into the masked field, confirm you are authorized to use its sources, and select **Validate and Save**. Configuration is for one personal add-on; saving replaces it. Test Connection displays its validated name/status, and Remove deletes it. A compatible hosted Torrentio configuration can be used without a separate server; Strimr does not bundle, configure, endorse or guarantee a particular instance or its content. Configure that add-on for your own AllDebrid account where required before installing its manifest.
+
+Configuration URLs, including private path/query values, are saved **only in iOS Keychain**, not UserDefaults. They are not sent to GitHub or analytics, and app errors/labels do not include them. The settings field is masked and cleared after saving/leaving. Keychain signing/entitlement errors are reported rather than bypassed. Add-on metadata uses ephemeral URLSession with no URL cache/cookies, and HTTPS redirects retain the configured origin. Stream/configuration payloads stay in memory; only opaque IDs and catalog metadata reach the source picker. Never paste real configuration URLs into issue reports or screenshots.
+
+## Discovery and playback
+
+1. The existing exact AllDebrid library match wins before reading add-on configuration or making add-on requests.
+2. With no ready library match, the validated manifest must advertise an IMDb-compatible `stream` resource for `movie` or `series`. Stream queries use TMDb's external IMDb ID: `/stream/movie/tt….json` or `/stream/series/tt…:season:episode.json`. No guessed title search or season/episode substitution is used. Configured private path/query values are preserved for requests to that add-on.
+3. Native-compatible authorized HTTPS streams (including already AllDebrid-resolved URLs) are checked and handed to Strimr's original player without unlocking the same URL again. Quality preference is 2160p/4K, then 1080p, then 720p; unknown quality follows. Stream descriptions are used only to extract quality, never displayed raw.
+4. Supported authorized magnet/download links use the existing documented AllDebrid acquisition, compact status, cancellable foreground polling and exact ready-file matcher. Raw `infoHash` results require a matching `behaviorHints.filename`; Strimr never chooses the largest file or blindly trusts `fileIdx`. Ready-file selection must still match the actual movie/year/episode. Hoster pages can be attempted through AllDebrid if native header validation fails.
+5. Auto Play uses the existing fallback queue both for URL resolution and reported player-engine failures. Manual Select Source stays available. Exact-second local resume, Simkl percentage fallback/tracking, player controls, Home and trailers are unchanged.
+
+Metadata is cached in memory for 60 seconds, with up to 100 stream entries per response. Requests are cancellable and stop with the playback sheet/app lifecycle. Add-on changes invalidate the resolver. Rate limits stop automatic retry; manual Retry remains available. No title availability is guaranteed.
+
+## Compatibility limits
+
+- This first integration installs one personal hosted manifest. Authentication in URL path/query is supported; basic-auth URLs, separate login exchanges and custom HTTP proxy-header requirements are not.
+- Web/browser-only `externalUrl`, YouTube extraction, DRM/license entries, peer-to-peer playback, NZB/archive downloads and arbitrary custom ID namespaces are unsupported. Protected streams are never scraped or decrypted. Authorized `infoHash` acquisition requires a correctly named video and an available AllDebrid account.
+- Provided filenames must match the title/year and exact TV episode. Ambiguous or combined-episode filenames are rejected. When a direct stream omits filename metadata, its identity relies on the configured add-on's exact IMDb stream endpoint, as specified by the Stremio protocol. A mislabelled add-on/file cannot be cryptographically verified from metadata alone.
+- Native HLS/MP4/MKV, codecs, audio, HDR and AirPlay remain subject to Strimr's existing playback engine and device support. A successful manifest connection does not verify real stream playback, account entitlement or source availability.
+- Automated tests use fake manifests/streams and accounts. A signed iPhone must verify real Keychain persistence/removal, your own configured add-on, correct movie/TV source availability, expiring CDN URLs, processing, player-engine fallback, cancellation/backgrounding, manual selection, resume and Simkl tracking. No real configuration credentials are needed or committed for tests.
+
+Protocol reference: [Stremio stream requests](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/requests/defineStreamHandler.md) and [stream objects](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/api/responses/stream.md).

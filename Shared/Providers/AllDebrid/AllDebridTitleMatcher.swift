@@ -5,20 +5,34 @@ enum AllDebridTitleMatcher {
     enum Source: Identifiable, Hashable {
         case magnet(AllDebridMagnetFile)
         case saved(AllDebridSavedLink)
+        case stremio(StremioSourceLabel)
         var id: String {
-            switch self { case let .magnet(file): "magnet:\(file.id)"; case let .saved(link): "saved:\(link.id)" }
+            switch self {
+            case let .magnet(file): "magnet:\(file.id)"; case let .saved(link): "saved:\(link.id)"; case let .stremio(
+                label,
+            ): "stremio:\(label.id)"
+            }
         }
 
         var filename: String {
-            switch self { case let .magnet(file): file.filename; case let .saved(link): link.filename }
+            switch self {
+            case let .magnet(file): file.filename; case let .saved(link): link
+                .filename; case let .stremio(label): label.filename
+            }
         }
 
         var link: String {
-            switch self { case let .magnet(file): file.link; case let .saved(link): link.link }
+            switch self {
+            case let .magnet(file): file.link; case let .saved(link): link
+                .link; case let .stremio(label): "stremio-source://" + label.id
+            }
         }
 
         var details: String {
-            switch self { case let .magnet(file): AllDebridLibraryView.sourceDetails(file); case .saved: "Saved link" }
+            switch self {
+            case let .magnet(file): AllDebridLibraryView
+                .sourceDetails(file); case .saved: "Saved link"; case .stremio: "Stremio add-on"
+            }
         }
     }
 
@@ -71,6 +85,9 @@ enum AllDebridTitleMatcher {
     /// Deterministic quality preference, without discarding lower-resolution fallback candidates.
     static func ranked(_ sources: [Source], magnetNames: [String: String] = [:]) -> [Source] {
         func quality(_ source: Source) -> Int {
+            if case let .stremio(label) = source {
+                return label.quality
+            }
             if case let .magnet(file) = source {
                 let filenameQuality = resolution(file.filename)
                 return filenameQuality > 0 ? filenameQuality :

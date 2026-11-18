@@ -36,8 +36,11 @@ final class CatalogSourceResolver {
     private(set) var processingMagnets: [AllDebridMagnet] = []
     private var verifiedConnection = false
     private let acquisition: CatalogSourceAcquisition?
+    private let stremio: StremioPlaybackSources?
+    private var requestedTitle: TMDBTitle?
+    private var requestedEpisode: TMDBEpisode?
     var needsSourceSetup: Bool {
-        acquisition?.needsSetup ?? true
+        (acquisition?.needsSetup ?? true) && stremio?.configured != true
     }
 
     private let client: any CatalogPlaybackClient
@@ -46,8 +49,12 @@ final class CatalogSourceResolver {
     private(set) var warnings: [String] = []
     private var attempted = Set<String>()
 
-    init(client: any CatalogPlaybackClient, acquisition: CatalogSourceAcquisition? = nil) {
-        self.client = client; self.acquisition = acquisition
+    init(
+        client: any CatalogPlaybackClient,
+        acquisition: CatalogSourceAcquisition? = nil,
+        stremio: StremioPlaybackSources? = nil,
+    ) {
+        self.client = client; self.acquisition = acquisition; self.stremio = stremio
     }
 
     func addAuthorizedLink(_ link: String, title: TMDBTitle, episode: TMDBEpisode?) async throws {
@@ -56,6 +63,7 @@ final class CatalogSourceResolver {
     }
 
     func refresh(title: TMDBTitle, episode: TMDBEpisode?) async throws {
+        requestedTitle = title; requestedEpisode = episode
         sources = []; files = []; warnings = []; attempted = []; processingMagnets = []; availability = .checking
         guard title.kind != .tv || episode != nil else { throw Failure.chooseEpisode }
         if !verifiedConnection {
@@ -86,6 +94,27 @@ final class CatalogSourceResolver {
             AllDebridTitleMatcher.matchesProcessingMagnet(title: title, episode: episode, magnet: $0)
         }
         let label = title.displayTitle + (episode.map { " S\($0.season_number) E\($0.episode_number)" } ?? "")
+        var addonError: Error?
+        if warnings.isEmpty, let stremio {
+            do {
+                sources = try await stremio.discover(title: title, episode: episode)
+                try Task.checkCancellation()
+                if !sources.isEmpty {
+                    availability = .ready; return
+                }
+            } catch {
+                if error.isCancellation {
+                    throw CancellationError()
+                }
+                if let typed = error as? StremioError {
+                    addonError = typed
+                } else if let keychain = error as? KeychainError {
+                    addonError = keychain
+                } else {
+                    addonError = StremioError.connection
+                }
+            }
+        }
         if !processingMagnets.isEmpty {
             availability = .processing
             throw Failure
@@ -121,9 +150,12 @@ final class CatalogSourceResolver {
                     )
             }
         }
+        if let addonError {
+            throw addonError
+        }
         throw Failure
             .noMatch(
-                "\(label) is not available as a matching playable file in your connected AllDebrid library. No playable authorized source was found. Configure an authorized source provider or add your own authorized link. AllDebrid does not discover titles by itself.",
+                "\(label) is not available as a matching playable file in your connected AllDebrid library. No compatible Stremio/authorized source was found. Configure Stremio Add-ons or an authorized source provider or add your own authorized link. AllDebrid does not discover titles by itself.",
             )
     }
 
@@ -134,6 +166,9 @@ final class CatalogSourceResolver {
             attempted.insert(source.link)
             do { return try await resolve(source) }
             catch {
+                if case Failure.processing = error {
+                    availability = .processing; throw error
+                }
                 if error.isCancellation || AllDebridAPIClient.isAuthenticationOrRateLimit(error) {
                     throw error
                 }
@@ -155,6 +190,23 @@ final class CatalogSourceResolver {
     }
 
     private func resolve(_ source: AllDebridTitleMatcher.Source) async throws -> Resolved {
+        if case let .stremio(label) = source {
+            guard let stremio, let title = requestedTitle else { throw StremioError.playback }
+            do {
+                let url = try await stremio.resolve(
+                    label,
+                    acquisition: acquisition,
+                    title: title,
+                    episode: requestedEpisode,
+                )
+                return Resolved(source: source, url: url, subtitles: [])
+            } catch {
+                if case Failure.processing = error {
+                    availability = .processing
+                }
+                throw error
+            }
+        }
         let result = try await client.resolvePlaybackURL(source.link, filename: source.filename)
         try Task.checkCancellation()
         let subtitles: [ExternalSubtitleTrack] = if case let .magnet(file) = source {

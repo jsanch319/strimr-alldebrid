@@ -46,6 +46,7 @@ struct SettingsPlaybackView: View {
             #endif
 
             Section {
+                NavigationLink("Stremio Add-ons") { StremioAddonsView() }
                 NavigationLink("Authorized Playback Sources") { AuthorizedSourceSetupView() }
             }
 
