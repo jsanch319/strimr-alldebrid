@@ -17,6 +17,11 @@ class SharePlayConfigurationTests(unittest.TestCase):
         self.assertTrue(report["entitlementPresentInSignatureAndProfile"])
         self.assertFalse(report["runtimeSharePlayVerified"])
 
+    def test_signed_app_with_empty_entitlements_reports_absence(self):
+        report = configuration_report({}, {KEY: True}, {}, {"Entitlements": {}})
+        self.assertFalse(report["signedGroupSessionEntitlement"])
+        self.assertFalse(report["profileGroupSessionEntitlement"])
+
     def test_audit_omits_private_profile_and_account_fields(self):
         report = configuration_report({"CFBundleIdentifier": "app.example", "token": "private-test"},
                                       {KEY: True}, {KEY: True, "account": "private-test"},

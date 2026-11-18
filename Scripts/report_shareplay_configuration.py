@@ -26,7 +26,8 @@ def command_plist(command):
         result = subprocess.run(command, capture_output=True, timeout=15, check=False)
         if result.returncode != 0:
             return None
-        return parse_plist(result.stdout) or parse_plist(result.stderr)
+        parsed = parse_plist(result.stdout)
+        return parsed if parsed is not None else parse_plist(result.stderr)
     except (OSError, subprocess.TimeoutExpired):
         return None
 
