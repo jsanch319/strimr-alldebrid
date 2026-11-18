@@ -9,6 +9,11 @@ struct ResumeVerification {
     private var previousActual: Double?
     private var lastSeekElapsed: Double?
 
+    init(target: Double) {
+        self.target = target
+        requestedPause = nil
+    }
+
     mutating func observe(
         actual: Double?,
         display: Double,
