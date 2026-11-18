@@ -6,6 +6,9 @@ import Foundation
 import Observation
 import SwiftAssRenderer
 import SwiftUI
+#if os(iOS)
+    import UIKit
+#endif
 
 struct PlayerScrubPreview {
     var position: Double
@@ -127,6 +130,9 @@ final class PlayerController {
     @ObservationIgnored private var nowPlayingController: NowPlayingController?
     @ObservationIgnored private let trailerPlaybackOwner = UUID()
     #if os(iOS)
+        @ObservationIgnored private let airPlayDiagnostics = AirPlayDiagnostics()
+        @ObservationIgnored private var remoteInterruptionToken: UUID?
+        @ObservationIgnored private var remoteInterruptionLoadGeneration: UUID?
         @ObservationIgnored private var backgroundRestoreTask: Task<Void, Never>?
         @ObservationIgnored private var backgroundRestoreResumesPlayback = false
     #endif
@@ -210,6 +216,10 @@ final class PlayerController {
         autoplay: Bool = true,
         nowPlaying: NowPlayingItem? = nil,
     ) {
+        #if os(iOS)
+            remoteInterruptionToken = nil
+            airPlayDiagnostics.setSource(url)
+        #endif
         loadGeneration = UUID()
         let generation = loadGeneration
         continuity.reset(to: startPosition ?? 0)
@@ -345,6 +355,9 @@ final class PlayerController {
 
     func togglePlayback() {
         #if os(iOS)
+            remoteInterruptionToken = nil
+        #endif
+        #if os(iOS)
             if needsBackgroundRestore {
                 restoreAfterBackground(resumesPlayback: !backgroundRestoreResumesPlayback)
                 return
@@ -371,6 +384,9 @@ final class PlayerController {
 
     func pause() {
         #if os(iOS)
+            remoteInterruptionToken = nil
+        #endif
+        #if os(iOS)
             if needsBackgroundRestore {
                 backgroundRestoreResumesPlayback = false
                 return
@@ -385,6 +401,9 @@ final class PlayerController {
 
     func resume() {
         #if os(iOS)
+            remoteInterruptionToken = nil
+        #endif
+        #if os(iOS)
             if needsBackgroundRestore {
                 restoreAfterBackground(resumesPlayback: true)
                 return
@@ -398,8 +417,49 @@ final class PlayerController {
     }
 
     #if os(iOS)
+        var isAirPlayPlaybackActive: Bool {
+            engine.currentAVPlayer?.isExternalPlaybackActive == true || LiveLoadOptions.routesAudioToAirPlay
+        }
+
+        func recordAirPlayDiagnostic(_ event: String) {
+            airPlayDiagnostics.record(event)
+        }
+
+        func cancelAutomaticAirPlayResume() {
+            remoteInterruptionToken = nil
+        }
+
+        func handleAirPlayInterruption(began: Bool, shouldResume: Bool, background: Bool) {
+            if began {
+                if !isPaused, isAirPlayPlaybackActive {
+                    remoteInterruptionToken = UUID()
+                    remoteInterruptionLoadGeneration = loadGeneration
+                }
+                return
+            }
+            guard let token = remoteInterruptionToken, let generation = remoteInterruptionLoadGeneration else { return }
+            Task { @MainActor [weak self] in
+                // AetherEngine owns the foreground/software interruption paths. Give it the
+                // notification first and never issue a competing resume on those paths.
+                await Task.yield()
+                guard let self, remoteInterruptionToken == token else { return }
+                remoteInterruptionToken = nil
+                guard AirPlayPlaybackPolicy.shouldResumeRemoteInterruption(
+                    wasPlaying: true, shouldResume: shouldResume,
+                    background: background && UIApplication.shared.applicationState == .background,
+                    externalPlayback: engine.currentAVPlayer?.isExternalPlaybackActive == true,
+                    nativeVideo: videoRoute == .loopback || videoRoute == .remoteBypass,
+                    sameSession: generation == loadGeneration && !isStopping,
+                    coordinated: isCoordinatedPlayback,
+                ), engine.currentAVPlayer?.timeControlStatus == .paused else { return }
+                airPlayDiagnostics.record("system-authorized-background-resume")
+                // One existing-transport command: no route selection, reload or retries.
+                engine.play()
+            }
+        }
+
         private var needsBackgroundRestore: Bool {
-            engine.needsForegroundVideoRestore || backgroundRestoreTask != nil
+            !isAirPlayPlaybackActive && (engine.needsForegroundVideoRestore || backgroundRestoreTask != nil)
         }
 
         /// The engine releases the video of a session left paused in the background; it has to be rebuilt where it
@@ -409,7 +469,8 @@ final class PlayerController {
             if let resumesPlayback {
                 backgroundRestoreResumesPlayback = resumesPlayback
             }
-            guard backgroundRestoreTask == nil, engine.needsForegroundVideoRestore else { return }
+            guard !isAirPlayPlaybackActive, backgroundRestoreTask == nil,
+                  engine.needsForegroundVideoRestore else { return }
             if resumesPlayback == nil {
                 backgroundRestoreResumesPlayback = false
             }
@@ -845,6 +906,9 @@ final class PlayerController {
     }
 
     func stop() {
+        #if os(iOS)
+            remoteInterruptionToken = nil
+        #endif
         loadGeneration = UUID()
         nativeAudioSelection = nil
         #if os(iOS) || os(macOS)
@@ -1206,7 +1270,8 @@ final class PlayerController {
             // Without this the system pauses a player showing video as soon as the app leaves the foreground.
             engine.$currentAVPlayer
                 .receive(on: DispatchQueue.main)
-                .sink { player in
+                .sink { [weak self] player in
+                    self?.airPlayDiagnostics.attach(player)
                     if let player {
                         PlayerAirPlayConfiguration.apply(to: player)
                     }

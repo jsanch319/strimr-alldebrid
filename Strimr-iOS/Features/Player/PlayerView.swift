@@ -273,7 +273,21 @@ struct PlayerView: View {
 
         let playbackStatusObservers = AnyView(
             playbackObservers
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { note in
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                    let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
+                        == AVAudioSession.InterruptionType.began.rawValue
+                    let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                    playerController.handleAirPlayInterruption(
+                        began: began,
+                        shouldResume: AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume),
+                        background: scenePhase == .background,
+                    )
+                }
                 .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+                    playerController.cancelAutomaticAirPlayResume()
                     // Also checkpoint switches initiated from Control Center or receiver removal.
                     // Route/session recovery remains owned by AetherEngine.
                     viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
@@ -728,10 +742,12 @@ struct PlayerView: View {
             onWatchTogether: watchTogetherAction,
             onAirPlayPresentationChanged: { presented in
                 if presented {
+                    playerController.cancelAutomaticAirPlayResume()
                     viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
                     viewModel.saveProgress()
                     playerController.prepareForRouteChange()
                 }
+                playerController.recordAirPlayDiagnostic(presented ? "picker-opened" : "picker-closed")
                 isAirPlayPickerPresented = presented
                 showControls(temporarily: !presented)
             },
@@ -2004,10 +2020,12 @@ struct PlayerView: View {
     private func handleScenePhaseChange(_ scenePhase: ScenePhase) {
         switch scenePhase {
         case .background:
+            playerController.recordAirPlayDiagnostic("app-background")
             viewModel.saveProgress()
             pauseForBackgroundIfNeeded()
             preparePlaybackForBackground()
         case .active:
+            playerController.recordAirPlayDiagnostic("app-foreground")
             reloadPlaybackAfterBackgroundIfNeeded()
         case .inactive:
             viewModel.saveProgress()
@@ -2019,7 +2037,11 @@ struct PlayerView: View {
     /// A picture in picture window keeps playing: it is on screen, so the audio still belongs to it. A SharePlay
     /// session keeps playing too, since pausing here would pause every participant.
     private func pauseForBackgroundIfNeeded() {
-        guard !settingsManager.playback.backgroundAudio,
+        guard AirPlayPlaybackPolicy.shouldPauseForBackground(
+                  backgroundAudio: settingsManager.playback.backgroundAudio,
+                  externalPlayback: playerController.isAirPlayPlaybackActive,
+                  airPlayRoute: LiveLoadOptions.routesAudioToAirPlay,
+              ),
               !viewModel.isLivePlayback,
               !sharePlayCoordinator.isInSession,
               !playerController.isPictureInPictureActive,
