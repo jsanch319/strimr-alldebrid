@@ -246,7 +246,7 @@ struct StremioTests {
         #expect(resolver.availability == .missing)
     }
 
-    @Test func `wrong filename episode and combined episodes never enter source queue`() async throws {
+    @Test func `wrong episode and combined files remain disabled in the visible source list`() async throws {
         let client =
             AddonFixture(
                 streams: streams(

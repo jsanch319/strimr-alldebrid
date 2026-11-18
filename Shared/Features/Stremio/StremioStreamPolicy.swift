@@ -53,6 +53,12 @@ enum StremioStreamPolicy {
         }
         var prefix = ((text as NSString).lastPathComponent as NSString).deletingPathExtension
         prefix = prefix.replacingOccurrences(of: #"(?i)(?:s\d+e\d+|\d+x\d+).*$"#, with: "", options: .regularExpression)
+        prefix = prefix.trimmingCharacters(in: CharacterSet(charactersIn: ". _-"))
+        // A verified episode-only basename has no show prefix to clean. Appending an
+        // extension to that empty prefix would create a dotfile, not an empty name.
+        if prefix.isEmpty {
+            return true
+        }
         prefix = AllDebridLibraryView.cleanTitle(prefix + ".mkv")
         func normalized(_ raw: String) -> String {
             raw.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "en_US_POSIX"))

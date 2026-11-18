@@ -56,7 +56,7 @@ struct StremioTransportTests {
         }
     }
 
-    @Test func `protected and external streams are filtered without extraction`() async throws {
+    @Test func `protected and external streams retain unsupported reasons without extraction`() async throws {
         let stub = HTTPStub { _ in
             .json(
                 #"{"streams":[{"url":"https://cdn.test/drm","drm":{"type":"widevine"}},{"externalUrl":"https://site.test/player"},{"ytId":"abc"},{"url":"https://cdn.test/video.mkv"}]}"#,
