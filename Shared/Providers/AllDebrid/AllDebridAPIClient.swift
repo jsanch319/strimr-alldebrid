@@ -442,7 +442,10 @@ actor AllDebridAPIClient {
         if parametersInBody {
             var bodyComponents = URLComponents()
             bodyComponents.queryItems = requestParameters
-            guard let body = bodyComponents.percentEncodedQuery?.data(using: .utf8) else {
+            // Query syntax allows literal +, but form bodies decode it as space.
+            guard let body = bodyComponents.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+                .data(using: .utf8)
+            else {
                 throw APIError.invalidResponse
             }
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

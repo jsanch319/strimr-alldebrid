@@ -4,13 +4,14 @@ import Testing
 
 struct AllDebridAcquisitionTests {
     @Test func `magnet upload uses documented POST body and validates per-item errors`() async throws {
-        let magnet = "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=Dune.2021"
+        let magnet = "magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=Dune+2021"
         let stub = HTTPStub { request in
             #expect(request.url?.path == "/v4/magnet/upload")
             #expect(request.httpMethod == "POST")
             #expect(request.url?.query == nil)
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer fixture-key")
             let body = String(data: request.httpBody ?? Data(), encoding: .utf8) ?? ""
+            #expect(body.contains("%2B"))
             #expect(URLComponents(string: "https://test/?" + body)?.queryItems?.first { $0.name == "magnets[]" }?
                 .value == magnet)
             return .json(#"{"status":"success","data":{"magnets":[{"id":42,"name":"Dune.2021","ready":true}]}}"#)
