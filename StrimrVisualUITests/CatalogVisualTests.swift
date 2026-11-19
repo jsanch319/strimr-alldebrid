@@ -101,23 +101,53 @@ final class CatalogVisualTests: XCTestCase {
 
     func testContinueWatchingEpisodeLabelAndImmediateDismissal() {
         let watching = app.otherElements["home.row.catalog:continue"]
-        XCTAssertTrue(watching.waitForExistence(timeout: 30))
-        let episode = watching.descendants(matching: .any).matching(identifier: "catalog.card.tv:95396:s1:e2")
-            .firstMatch
-        scrollTo(episode)
-        let label = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E2 — Episode 2"))
+        XCTAssertTrue(watching.waitForExistence(timeout: 30), app.debugDescription)
+        let episodeID = "catalog.card.tv:95396:s1:e2"
+        let episode = watching.descendants(matching: .any).matching(identifier: episodeID).firstMatch
+        let label = watching.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "S1 · E2 — Episode 2"))
             .firstMatch
         XCTAssertTrue(label.waitForExistence(timeout: 15), app.debugDescription)
-        episode.press(forDuration: 1.2)
+        scrollTo(label)
+        XCTAssertTrue(episode.exists, app.debugDescription)
+        // SwiftUI propagates the card identifier to artwork, overlays and captions. The first
+        // match can be an aspect-fill image with an accessibility frame outside its clipped card.
+        // Long-press the actual on-screen caption, whose bounds belong to this episode's card.
+        XCTAssertTrue(label.isHittable, app.debugDescription)
+        let movieProgress = watching.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ AND label == %@", "catalog.card.movie:693134", "Playback progress",
+        )).firstMatch
+        XCTAssertTrue(movieProgress.exists, app.debugDescription)
+        let savedMovieProgress = movieProgress.value as? String
+        XCTAssertNotNil(savedMovieProgress)
+        capture("27a-Continue-Watching-Episode-Before-Removal")
+        label.press(forDuration: 1.2)
         let remove = app.buttons["Remove from Continue Watching"]
         XCTAssertTrue(remove.waitForExistence(timeout: 10), app.debugDescription)
+        capture("27b-Continue-Watching-Removal-Menu")
         remove.tap()
         let removed = NSPredicate(format: "exists == false")
         expectation(for: removed, evaluatedWith: episode)
         waitForExpectations(timeout: 10)
-        XCTAssertTrue(watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
-            .exists)
+        XCTAssertFalse(label.exists, app.debugDescription)
+        XCTAssertTrue(
+            watching.descendants(matching: .any).matching(identifier: "catalog.card.movie:693134").firstMatch
+                .exists,
+            app.debugDescription,
+        )
+        XCTAssertEqual(movieProgress.value as? String, savedMovieProgress)
         capture("27-Continue-Watching-Dismissed-TV")
+
+        // Removing the card must not remove the exact episode's saved playback progress.
+        tab("TV Shows")
+        let series = card("tv:95396")
+        XCTAssertTrue(series.waitForExistence(timeout: 25), app.debugDescription)
+        series.tap()
+        let resume = app.buttons["catalog.detail.play"]
+        XCTAssertTrue(resume.waitForExistence(timeout: 25), app.debugDescription)
+        let resumes = NSPredicate(format: "label BEGINSWITH %@", "Resume ")
+        expectation(for: resumes, evaluatedWith: resume)
+        waitForExpectations(timeout: 20)
+        capture("27c-Dismissed-Episode-Still-Resumable")
     }
 
     func testHomeContinueWatchingAndScrolling() {

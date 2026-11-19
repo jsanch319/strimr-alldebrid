@@ -2,6 +2,14 @@ name: AllDebrid iOS compile check
 
 on:
   workflow_dispatch:
+    inputs:
+      ui_test:
+        description: 'Run all UI tests or repeat the Continue Watching regression (stops on first failure)'
+        type: choice
+        options:
+          - all
+          - continue-watching
+        default: all
   push:
     paths:
       - 'Shared/**'
@@ -85,13 +93,27 @@ jobs:
         timeout-minutes: 35
         if: env.STRIMR_SMOKE_ID != ''
         shell: bash
+        env:
+          UI_TEST_SELECTION: ${{ inputs.ui_test || 'all' }}
         run: |
           set -o pipefail
+          ui_test_args=()
+          case "$UI_TEST_SELECTION" in
+            all) ;;
+            continue-watching)
+              ui_test_args=(
+                -only-testing:StrimrVisualUITests/CatalogVisualTests/testContinueWatchingEpisodeLabelAndImmediateDismissal
+                -run-tests-until-failure -test-iterations 3
+              )
+              ;;
+            *) echo "Unsupported UI test selection"; exit 2 ;;
+          esac
           xcodebuild -quiet test \
             -project Strimr.xcodeproj \
             -scheme Strimr-VisualTests \
             -destination "platform=iOS Simulator,id=$STRIMR_SMOKE_ID" \
             -parallel-testing-enabled NO \
+            "${ui_test_args[@]}" \
             -derivedDataPath build/DerivedData \
             -resultBundlePath build/CatalogVisualTests.xcresult \
             CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES 2>&1 | tee build/visual-tests.log
