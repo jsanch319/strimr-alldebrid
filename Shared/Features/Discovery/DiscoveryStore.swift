@@ -277,6 +277,8 @@ final class DiscoveryStore {
     private let tmdb: TMDBClient
     private let progress: CatalogProgressStore
     private var syncTask: Task<Void, Never>?
+    private var syncRequestID = UUID()
+    private weak var lastClient: SimklClient?
     init(
         defaults: UserDefaults = .standard,
         coordinator: TrackerCoordinator? = nil,
@@ -351,6 +353,11 @@ final class DiscoveryStore {
             loadedScope = nil; lastSync = nil; retryAt = nil
             return
         }
+        if lastClient !== client {
+            syncTask?.cancel(); syncTask = nil
+            lastClient = client
+            retryAt = nil; lastSync = nil; lastPlaybackActivities = nil
+        }
         if let syncTask {
             await syncTask.value; return
         }
@@ -358,18 +365,24 @@ final class DiscoveryStore {
             return
         }
         guard force || (lastSync.map { Date().timeIntervalSince($0) > 60 } ?? true) else { return }
-        let task = Task { await pull(client: client, scope: currentScope) }
+        let requestID = UUID()
+        syncRequestID = requestID
+        let task = Task { await pull(client: client, scope: currentScope, requestID: requestID) }
         syncTask = task
         await task.value
-        if loadedScope == currentScope {
+        if loadedScope == currentScope, syncRequestID == requestID {
             syncTask = nil
         }
     }
 
-    private func pull(client: SimklClient, scope: String) async {
+    private func pull(client: SimklClient, scope: String, requestID: UUID) async {
         isSyncing = true; errorMessage = nil
         var stage = "flush_playback"
-        defer { isSyncing = false }
+        defer {
+            if syncRequestID == requestID {
+                isSyncing = false
+            }
+        }
         do {
             await coordinator.flushCatalogPlaybackReports()
             stage = "activities"
@@ -439,8 +452,12 @@ final class DiscoveryStore {
                     errorMessage =
                         "Some Simkl playbacks have no verified TMDb/episode mapping and cannot be resumed automatically."
                 }
+                try Task.checkCancellation()
+                guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
                 lastPlaybackActivities = activities
             }
+            try Task.checkCancellation()
+            guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
             consecutiveFailures = 0
             retryAt = nil
             lastSync = Date()

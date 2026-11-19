@@ -106,6 +106,25 @@ struct SimklSyncTests {
         #expect(stub.requests.count { $0.url?.path == "/oauth2/token" } == 1)
     }
 
+    @Test func `reconnection refreshes immediately instead of retaining an old authorization backoff`() async {
+        let stub = HTTPStub { Self.successful($0) }
+        let (store, _, coordinator) = await rig(stub)
+        await store.sync(force: true)
+        stub.respond { request in
+            request.url?.path == "/oauth2/token" ? .json(#"{"error":"invalid_grant"}"#, statusCode: 400) : .status(401)
+        }
+        await store.sync(force: true)
+        #expect(coordinator.state(for: .simkl).settings.needsReconnect)
+        stub.respond { Self.successful($0) }
+        await coordinator.connect(.simkl, session: session)
+        let before = stub.requests.count
+        await store.sync(force: true)
+        #expect(!coordinator.state(for: .simkl).settings.needsReconnect)
+        #expect(store.errorMessage == nil)
+        #expect(stub.requests.count > before)
+        #expect(store.entries.count == 1)
+    }
+
     @Test func `network and malformed snapshots cannot zero or erase movie and episode checkpoints`() async {
         for malformed in [false, true] {
             let stub = HTTPStub { Self.successful($0) }
