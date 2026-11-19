@@ -145,7 +145,9 @@ private struct CatalogWatchlistTab: View {
     @State private var selection: TMDBTitle?
     private let discovery = DiscoveryStore.shared
     private var entries: [SimklListEntry] {
-        discovery.planned.filter { kind == "all" || $0.kind.rawValue == kind }
+        var seen = Set<String>()
+        return discovery.planned.filter { kind == "all" || $0.kind.rawValue == kind }
+            .filter { seen.insert(discovery.title(for: $0)?.catalogID ?? $0.id).inserted }
     }
 
     private var titles: [TMDBTitle] {
@@ -162,17 +164,23 @@ private struct CatalogWatchlistTab: View {
             }.pickerStyle(.segmented).padding(.horizontal, LayoutMetrics.pageMargin)
             ScrollView {
                 PosterGrid(spacing: 12, rowSpacing: 20) { width in
-                    ForEach(titles, id: \.catalogID) { title in
-                        PortraitMediaCard(
-                            media: .playable(CatalogMediaAdapter.make(title: title, episode: nil, resume: nil)),
-                            width: width,
-                            showsLabels: settingsManager.interface.showsCardLabels,
-                        ) { selection = title }
+                    ForEach(entries) { entry in
+                        Group {
+                            if let title = discovery.title(for: entry) {
+                                PortraitMediaCard(
+                                    media: .playable(CatalogMediaAdapter.make(title: title, episode: nil, resume: nil)),
+                                    width: width,
+                                    showsLabels: settingsManager.interface.showsCardLabels,
+                                ) { selection = title }
+                            } else {
+                                Text("\(entry.media?.title ?? "Unmapped title") · No verified TMDb match")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }.task { _ = await discovery.hydrateArtwork(for: entry) }
                     }
                 }.padding(.horizontal, LayoutMetrics.pageMargin)
-                ForEach(entries.filter { $0.catalogID == nil }) { entry in
-                    Text("\(entry.media?.title ?? "Unmapped title") · No verified TMDb match")
-                        .font(.footnote).foregroundStyle(.secondary).padding(.horizontal, LayoutMetrics.pageMargin)
+                if let error = discovery.artworkErrorMessage {
+                    Text(error).font(.footnote).foregroundStyle(.secondary).padding()
                 }
                 if discovery.isSyncing {
                     ProgressView().padding()

@@ -7,8 +7,8 @@ nonisolated struct SimklCatalogIDs: Codable, Hashable, Sendable {
     let imdb: String?
     let tvdb: String?
     enum CodingKeys: String, CodingKey { case simkl, tmdb, imdb, tvdb }
-    init(tmdb: String, imdb: String? = nil, tvdb: String? = nil) {
-        simkl = nil; self.tmdb = tmdb; self.imdb = imdb; self.tvdb = tvdb
+    init(tmdb: String?, imdb: String? = nil, tvdb: String? = nil, simkl: String? = nil) {
+        self.simkl = simkl; self.tmdb = tmdb; self.imdb = imdb; self.tvdb = tvdb
     }
 
     init(from decoder: Decoder) throws {
@@ -42,11 +42,15 @@ nonisolated struct SimklListEntry: Codable, Hashable, Identifiable, Sendable {
     let seasons: [Season]?
     let watched_episodes_count: Int?
     let total_episodes_count: Int?
-    static func planned(_ title: TMDBTitle) -> SimklListEntry {
+    static func planned(_ title: TMDBTitle, ids: SimklCatalogIDs? = nil) -> SimklListEntry {
         let media = Media(
             title: title.displayTitle,
             year: Int(title.date.prefix(4)),
-            ids: SimklCatalogIDs(tmdb: String(title.id), imdb: title.matchingIDs.imdb, tvdb: title.matchingIDs.tvdb),
+            ids: ids ?? SimklCatalogIDs(
+                tmdb: String(title.id),
+                imdb: title.matchingIDs.imdb,
+                tvdb: title.matchingIDs.tvdb,
+            ),
         )
         return SimklListEntry(
             status: "plantowatch",
@@ -74,7 +78,8 @@ nonisolated struct SimklListEntry: Codable, Hashable, Identifiable, Sendable {
     }
 
     var catalogID: String? {
-        media?.ids.tmdb.map { "\(kind.rawValue):\($0)" }
+        guard let raw = media?.ids.tmdb, let id = Int(raw), id > 0 else { return nil }
+        return "\(kind.rawValue):\(id)"
     }
 
     var isPlanned: Bool {
@@ -121,7 +126,12 @@ extension SimklClient {
         try await libraryDecode(SimklActivities.self, path: "sync/activities")
     }
 
-    func library(type: String, since: String? = nil, idsOnly: Bool = false) async throws -> [SimklListEntry] {
+    func library(
+        type: String,
+        since: String? = nil,
+        idsOnly: Bool = false,
+        status: String? = nil,
+    ) async throws -> [SimklListEntry] {
         var query = [URLQueryItem(name: "extended", value: idsOnly ? "ids_only" : "full")]
         if !idsOnly {
             query += [
@@ -132,7 +142,8 @@ extension SimklClient {
         if let since {
             query.append(URLQueryItem(name: "date_from", value: since))
         }
-        return try await libraryDecode(SimklLibraryResponse.self, path: "sync/all-items/\(type)", query: query).entries
+        let path = "sync/all-items/\(type)" + (status.map { "/\($0)" } ?? "")
+        return try await libraryDecode(SimklLibraryResponse.self, path: path, query: query).entries
     }
 
     func markCatalogWatched(_ title: TMDBTitle, episode: TMDBEpisode?, at date: Date) async throws {
@@ -145,15 +156,114 @@ extension SimklClient {
         try await libraryWrite("sync/history", body: body)
     }
 
-    func setPlanned(_ title: TMDBTitle, planned: Bool) async throws {
-        var media: [String: Any] = ["ids": ["tmdb": String(title.id)], "title": title.displayTitle]
+    @discardableResult
+    func setPlanned(
+        _ title: TMDBTitle,
+        planned: Bool,
+        knownIDs: SimklCatalogIDs? = nil,
+    ) async throws -> SimklListEntry? {
+        guard title.id > 0 else { throw TrackerAPIError.invalidResponse }
+        let ids = SimklCatalogIDs(
+            tmdb: String(title.id),
+            imdb: title.matchingIDs.imdb ?? knownIDs?.imdb,
+            tvdb: title.matchingIDs.tvdb ?? knownIDs?.tvdb,
+            simkl: knownIDs?.simkl,
+        )
+        var sentIDs: [String: String] = ["tmdb": String(title.id)]
+        sentIDs["imdb"] = ids.imdb; sentIDs["tvdb"] = ids.tvdb; sentIDs["simkl"] = ids.simkl
+        var media: [String: Any] = ["ids": sentIDs, "title": title.displayTitle]
         if let year = Int(title.date.prefix(4)) {
             media["year"] = year
         }
         if planned {
             media["to"] = "plantowatch"
         }
-        let body: [String: Any] = [title.kind == .movie ? "movies" : "shows": [media]]
-        try await libraryWrite(planned ? "sync/add-to-list" : "sync/history/remove", body: body)
+        let key = title.kind == .movie ? "movies" : "shows"
+        let result = try await libraryWrite(planned ? "sync/add-to-list" : "sync/history/remove", body: [key: [media]])
+        if planned, let rows = (result["added"] as? [String: Any])?[key] as? [[String: Any]] {
+            for row in rows {
+                guard let rawIDs = row["ids"] else { continue }
+                let decoded = try JSONDecoder().decode(
+                    SimklCatalogIDs.self,
+                    from: JSONSerialization.data(withJSONObject: rawIDs),
+                )
+                guard SimklWatchlistIdentity.matches(decoded, requested: ids),
+                      row["to"] as? String == "plantowatch" || row["status"] as? String == "plantowatch"
+                else {
+                    throw SimklWatchlistError.notConfirmed
+                }
+                return .planned(title, ids: SimklCatalogIDs(
+                    tmdb: String(title.id),
+                    imdb: decoded.imdb ?? ids.imdb,
+                    tvdb: decoded.tvdb ?? ids.tvdb,
+                    simkl: decoded.simkl ?? ids.simkl,
+                ))
+            }
+        }
+        if !planned, let deleted = result["deleted"] as? [String: Any],
+           let countData = try? JSONSerialization.data(withJSONObject: deleted),
+           let counts = try? JSONDecoder().decode([String: Int].self, from: countData),
+           counts[key] == 1
+        {
+            return nil
+        }
+        // Legacy/count-only envelopes do not establish title identity. Read back once;
+        // never retry a POST after an uncertain server-side outcome.
+        guard result[planned ? "added" : "deleted"] is [String: Any] else { throw TrackerAPIError.invalidResponse }
+        let rows: [SimklListEntry]
+        do { rows = try await library(type: key, status: "plantowatch") }
+        catch {
+            SimklSyncFailure.record(error, stage: "watchlist_confirmation")
+            throw SimklWatchlistError.confirmationUnavailable
+        }
+        let matching = rows
+            .first { $0.kind == title.kind && $0.isPlanned && $0.media.map { SimklWatchlistIdentity.matches(
+                $0.ids,
+                requested: ids,
+            ) } == true }
+        if planned {
+            guard let matching else { throw SimklWatchlistError.notConfirmed }
+            return matching
+        }
+        guard matching == nil else { throw SimklWatchlistError.notConfirmed }
+        return nil
+    }
+}
+
+nonisolated enum SimklWatchlistError: LocalizedError {
+    case notConfirmed, confirmationUnavailable, busy
+    var errorDescription: String? {
+        switch self {
+        case .notConfirmed: "Simkl did not confirm the requested watchlist state. Refresh My List before retrying."
+        case .confirmationUnavailable: "The request may have reached Simkl, but its watchlist state could not be checked. Refresh My List when Simkl is available."
+        case .busy: "This watchlist item is already being updated."
+        }
+    }
+
+    static func message(_ error: Error) -> String {
+        if let error = error as? Self {
+            return error.errorDescription ?? "Simkl could not confirm this update."
+        }
+        switch error as? TrackerAPIError {
+        case .unauthorized, .sessionExpired, .unavailable: return "Connect or reconnect Simkl in Settings to update My List."
+        case .rateLimited: return "Simkl's request limit was reached. Retry after the limit resets; reconnecting does not reset it."
+        case .notFound: return "Simkl could not match this title. Your saved watchlist was retained."
+        case .unexpected(status: 403), .throttled: return "Simkl denied this update. Check app access and write permission in Simkl settings."
+        default: return "Simkl could not confirm this update. Your saved watchlist was retained. Please refresh before retrying."
+        }
+    }
+}
+
+nonisolated enum SimklWatchlistIdentity {
+    static func matches(_ returned: SimklCatalogIDs, requested: SimklCatalogIDs) -> Bool {
+        let pairs = [
+            (returned.tmdb, requested.tmdb),
+            (returned.simkl, requested.simkl),
+            (returned.imdb, requested.imdb),
+            (returned.tvdb, requested.tvdb),
+        ]
+        // A conflicting shared identifier must never be rescued by a weaker title match.
+        guard !pairs.contains(where: { $0.0 != nil && $0.1 != nil && $0.0 != $0.1 }) else { return false }
+        return pairs.contains { $0.0 != nil && $0.0 == $0.1 }
     }
 }

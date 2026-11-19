@@ -9,6 +9,14 @@ enum SharePlaySigningCheck {
         signature == true && profile == true
     }
 
+    static func unavailableReason(signature: Bool?, profile: Bool?) -> String? {
+        guard !permitsLaunch(signature: signature, profile: profile) else { return nil }
+        func state(_ value: Bool?) -> String {
+            switch value { case true: "present"; case false: "missing"; case nil: "unreadable or unavailable" }
+        }
+        return "SharePlay requires Apple-authorized Group Activities signing. Signature: \(state(signature)); provisioning profile: \(state(profile)). A free Apple ID, including free SideStore signing, cannot grant this capability. Use an eligible paid Apple Developer Program team with Group Activities enabled and an authorized profile, installed as a development/ad-hoc build through Xcode or Apple-supported device installation. Re-signing must preserve that authorization; a setting cannot add it. Unreadable evidence is not proof that an entitlement is missing."
+    }
+
     static var installedAppUnavailableReason: String? {
         #if os(iOS)
             #if targetEnvironment(simulator)
@@ -19,10 +27,7 @@ enum SharePlaySigningCheck {
                     .flatMap { try? Data(contentsOf: $0) }.flatMap(profileEntitlement)
                 let signature = bundle.executableURL.flatMap { try? Data(contentsOf: $0, options: .mappedIfSafe) }
                     .flatMap(signedEntitlement)
-                guard permitsLaunch(signature: signature, profile: profile) else {
-                    return "SharePlay is unavailable in this installed build. Strimr could not confirm Group Activities in both the app signature and provisioning profile. SideStore re-signing must preserve an entitlement authorized by your Apple provisioning profile. A project declaration or unsigned IPA is not enough. Verify the final signed app; no playback or account settings need to change."
-                }
-                return nil
+                return unavailableReason(signature: signature, profile: profile)
             #endif
         #else
             return nil

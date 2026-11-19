@@ -172,3 +172,39 @@ physical iPhones with the final SideStore profile, starting both inside and
 outside FaceTime, rapid tapping, canceled invitations, delayed/duplicate delivery,
 source selection/replacement, leaving, and background/foreground transitions.
 AirPlay and real Simkl synchronization must be tested separately as well.
+
+## Free Apple ID / SideStore warning
+
+The user confirmed free Apple ID signing. Apple's current [iOS capability
+matrix](https://developer.apple.com/help/account/reference/supported-capabilities-ios/)
+lists **Group Activities** for ADP and ADEP, with no support in the free "Apple
+Developer" column. Apple's [entitlement documentation](https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.developer.group-session)
+requires enabling Group Activities in Xcode. A free SideStore installation cannot
+grant this capability by retaining an unsigned project's entitlement declaration.
+SideSign's [paid entitlement set](https://github.com/SideStore/SideSign/blob/752d1ef602aa792a432ffa1e71646dc1ecf7363c/Sources/Models/Entitlement.swift)
+also includes `groupSession`; recognizing its name is not authorization to use it.
+
+The warning is therefore not removed. It now reports signature/profile evidence
+separately as present, missing, or unreadable/unavailable. The actual final signed
+IPA/profile was not supplied, so we cannot independently establish which fields
+SideStore stripped or whether this installation's XML evidence is readable. An
+unknown value is not declared a missing entitlement, and neither permits launch.
+The parser deliberately does not use private entitlement APIs or infer an account
+from a profile's lifetime, device list, or receipt filename.
+
+The verifiable alternative for this branch is an eligible **paid Apple Developer
+Program** team: use a real team-owned bundle identifier, enable Group Activities,
+regenerate the authorized development/ad-hoc provisioning profile, let Xcode sign
+with that profile, and install directly through Xcode or supported ad-hoc device
+installation. Audit the resulting app signature AND embedded profile, and test
+with two compatible signed physical iPhones. A paid account alone does not prove
+that a SideStore re-sign preserves the profile/capability. Do not inject a true
+flag into a profile that does not authorize it.
+
+TestFlight/App Store are normal Apple distribution routes for SharePlay-capable
+apps, but this branch's conservative offline gate requires readable embedded
+profile evidence. We have not implemented/verified the alternate authenticated
+StoreKit receipt path needed when Apple distribution removes that profile. Do
+not claim an uninspected TestFlight build passes this gate; the concrete tested
+signing instructions here target development/ad-hoc profiles. Neither unsigned
+CI artifacts nor successful builds verify actual FaceTime operation.

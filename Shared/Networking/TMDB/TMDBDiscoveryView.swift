@@ -643,7 +643,7 @@ struct TMDBDetailView: View {
         changingList = true
         defer { changingList = false }
         do { try await discovery.setPlanned(item, planned: planned) }
-        catch { self.error = "Simkl could not update My List. \(error.localizedDescription)" }
+        catch { self.error = SimklWatchlistError.message(error) }
     }
 
     private func markWatched() async {

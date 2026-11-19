@@ -22,6 +22,12 @@ class SharePlayConfigurationTests(unittest.TestCase):
         self.assertFalse(report["signedGroupSessionEntitlement"])
         self.assertFalse(report["profileGroupSessionEntitlement"])
 
+    def test_free_account_limitation_is_not_runtime_authorization(self):
+        report = configuration_report({}, {KEY: True}, None, None)
+        self.assertFalse(report["freeAppleIDSupportsGroupActivities"])
+        self.assertFalse(report["runtimeSharePlayVerified"])
+        self.assertIn("paid Apple Developer Program", report["note"])
+
     def test_audit_omits_private_profile_and_account_fields(self):
         report = configuration_report({"CFBundleIdentifier": "app.example", "token": "private-test"},
                                       {KEY: True}, {KEY: True, "account": "private-test"},

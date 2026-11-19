@@ -85,7 +85,9 @@ struct DiscoveryIntegrationTests {
     }
 
     @Test func `watchlist writes use per-item destinations and report unresolved titles`() async throws {
-        let stub = HTTPStub { _ in .json(#"{"added":{"movies":[{}]},"not_found":{"movies":[]}}"#) }
+        let stub = HTTPStub { _ in
+            .json(#"{"added":{"movies":[{"to":"plantowatch","ids":{"tmdb":"12"}}]},"not_found":{"movies":[]}}"#)
+        }
         let client = client(stub)
         let title = TMDBTitle.reference(id: 12, kind: .movie, title: "Movie", year: 2020)
         try await client.setPlanned(title, planned: true)
@@ -145,7 +147,9 @@ struct DiscoveryIntegrationTests {
             if request.url?
                 .path == "/sync/add-to-list"
             {
-                return .json(#"{"added":{"movies":[{}]},"not_found":{"movies":[]}}"#)
+                return .json(
+                    #"{"added":{"movies":[{"to":"plantowatch","ids":{"tmdb":"13"}}]},"not_found":{"movies":[]}}"#,
+                )
             }
             return .json(#"{"all":"2026-11-15T00:00:00Z","movies":{"all":"2026-11-15T00:00:00Z"}}"#)
         }

@@ -289,7 +289,8 @@ final class SimklClient: TrackerClient {
         }
     }
 
-    func libraryWrite(_ path: String, body: [String: Any]) async throws {
+    @discardableResult
+    func libraryWrite(_ path: String, body: [String: Any]) async throws -> [String: Any] {
         let data = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
         let response = try await write { token in
             var request = URLRequest.trackerJSON(
@@ -301,12 +302,19 @@ final class SimklClient: TrackerClient {
             request.httpBody = data
             return request
         }
-        let result = try JSONSerialization.jsonObject(with: response.data) as? [String: Any]
-        if let notFound = result?["not_found"] as? [String: Any],
-           notFound.values.contains(where: { ($0 as? [Any])?.isEmpty == false })
-        {
-            throw TrackerAPIError.notFound
+        guard let result = try JSONSerialization.jsonObject(with: response.data) as? [String: Any] else {
+            throw TrackerAPIError.invalidResponse
         }
+        if let raw = result["not_found"] {
+            guard let notFound = raw as? [String: Any] else { throw TrackerAPIError.invalidResponse }
+            for value in notFound.values {
+                guard let rows = value as? [Any] else { throw TrackerAPIError.invalidResponse }
+                if !rows.isEmpty {
+                    throw TrackerAPIError.notFound
+                }
+            }
+        }
+        return result
     }
 
     private static func readStage(_ path: String) -> String {

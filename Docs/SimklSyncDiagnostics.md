@@ -56,3 +56,39 @@ Tests use isolated URLSession fixtures, no real account credentials. Live token
 refresh, actual watchlist/progress delivery between signed iPhones, and quota
 behavior for the user's account remain device/account checks. No client ID,
 secret or Apple entitlement was changed by this fix.
+
+## Server-confirmed watchlist and persisted posters
+
+The current toolchain regression confirms that the old numeric code 0 is the
+`rateLimited` branch originating from HTTP 429. Its original burst/user/app quota
+reason cannot be recovered from the old footer. Existing bounded reads and quota
+holds remain; reconnecting does not reset a quota.
+
+Explicit Plan to Watch uses `/sync/add-to-list`, with `to: plantowatch` on each
+movie/show and stable identifiers. An HTTP 200 or empty `added` object alone does
+not fill the bookmark. A matching response ID and destination confirm addition;
+incomplete/legacy acknowledgements require one read-back of that media kind's
+Plan to Watch list. Contradictory IDs/status, unresolved titles, malformed replies,
+denied credentials or failed confirmation produce useful errors and retain the
+prior bookmark/cache. There is no automatic retry of an uncertain POST.
+
+Removal uses Simkl's canonical `/sync/history/remove`. A one-item deletion count
+confirms removal; ambiguous replies require a read-back. This Simkl API removes
+its library/history entry, as the existing confirmation dialog explains. Local
+exact resume records are not deleted. No separate remote watchlist-only deletion
+API is invented.
+
+Discovery pulls and watchlist changes share an operation gate so an in-flight
+older pull cannot overwrite a newly confirmed bookmark. Confirmation is persisted
+even before the first successful sync; cold mutation first restores existing
+account cache. A follow-up sync updates My List automatically. Failed follow-up
+reads retain the already confirmed change.
+
+Every visible My List card hydrates TMDb metadata through the shared store rather
+than relying on Home's first 40 items. Movie and TV namespaces remain distinct.
+Absent TMDb IDs use exact IMDb/TVDB lookup constrained to the correct media kind;
+there is no title-text fallback. Verified poster/backdrop paths and ID mappings
+are cached per account across restarts, without copying full cast/season payloads.
+Unmapped titles remain explicitly unmapped; missing artwork is never replaced
+with an unrelated poster. TMDb configuration errors show actionable My List
+messages. This cache and watchlist data contain no access/refresh tokens.

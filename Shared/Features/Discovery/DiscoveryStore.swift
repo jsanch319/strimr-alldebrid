@@ -277,6 +277,18 @@ final class DiscoveryStore {
     private let coordinator: TrackerCoordinator
     private let tmdb: TMDBClient
     private let progress: CatalogProgressStore
+    private let libraryOperations = TrackerWriteGate(spacing: .zero)
+    private var changingWatchlist: Set<String> = []
+    private struct ArtworkSnapshot: Codable {
+        var titles: [String: TMDBTitle]
+        var mappings: [String: String]
+    }
+
+    private var artworkMappings: [String: String] = [:]
+    private var artworkTasks: [String: Task<TMDBTitle?, Error>] = [:]
+    private var artworkRetryAt: [String: Date] = [:]
+    private var artworkGeneration = UUID()
+    private(set) var artworkErrorMessage: String?
     private var syncTask: Task<Void, Never>?
     private var syncRequestID = UUID()
     @ObservationIgnored private weak var lastClient: SimklClient?
@@ -311,17 +323,111 @@ final class DiscoveryStore {
     }
 
     func entry(for title: TMDBTitle) -> SimklListEntry? {
-        entries.first { $0.catalogID == title.catalogID }
+        entries.first { ($0.catalogID ?? artworkMappings[$0.id]) == title.catalogID }
     }
 
     func title(for entry: SimklListEntry) -> TMDBTitle? {
-        guard let raw = entry.media?.ids.tmdb, let id = Int(raw), id > 0 else { return nil }
-        return artwork["\(entry.kind.rawValue):\(id)"] ?? .reference(
-            id: id,
-            kind: entry.kind,
-            title: entry.media?.title ?? "Untitled",
-            year: entry.media?.year,
-        )
+        let key = entry.catalogID ?? artworkMappings[entry.id]
+        if let key, let cached = artwork[key] {
+            return cached
+        }
+        guard let key, key.hasPrefix(entry.kind.rawValue + ":"),
+              let id = Int(key.dropFirst(entry.kind.rawValue.count + 1)), id > 0 else { return nil }
+        return .reference(id: id, kind: entry.kind, title: entry.media?.title ?? "Untitled", year: entry.media?.year)
+    }
+
+    private func persistArtwork(scope: String) {
+        let snapshot = ArtworkSnapshot(titles: artwork.mapValues { $0.artworkReference }, mappings: artworkMappings)
+        if let data = try? JSONEncoder()
+            .encode(snapshot)
+        {
+            defaults.set(data, forKey: "strimr.simkl.artwork.\(scope)")
+        }
+    }
+
+    /// Shared, demand-driven metadata hydration for Home and each visible My List card.
+    /// External-ID lookup is exact and media-kind constrained; no title-text guessing.
+    @discardableResult
+    func hydrateArtwork(for entry: SimklListEntry) async -> Bool {
+        let currentScope = scope, generation = artworkGeneration
+        guard entries.contains(where: { $0.id == entry.id }) else { return false }
+        if let key = entry.catalogID ?? artworkMappings[entry.id], artwork[key] != nil {
+            return true
+        }
+        if let retry = artworkRetryAt[entry.id], retry > Date() {
+            return false
+        }
+        let task: Task<TMDBTitle?, Error>
+        if let pending = artworkTasks[entry.id] {
+            task = pending
+        } else {
+            task = Task {
+                if let reference = self.title(for: entry) {
+                    return try await self.tmdb.details(reference)
+                }
+                guard let media = entry.media,
+                      let found = try await self.tmdb.find(imdb: media.ids.imdb, tvdb: media.ids.tvdb, kind: entry.kind)
+                else { return nil }
+                return try await self.tmdb.details(found)
+            }
+            artworkTasks[entry.id] = task
+        }
+        do {
+            let title = try await task.value
+            guard scope == currentScope, generation == artworkGeneration else { return false }
+            artworkTasks[entry.id] = nil
+            guard let title, title.kind == entry.kind, title.id > 0,
+                  entry.catalogID == nil || entry.catalogID == title.catalogID
+            else {
+                artworkRetryAt[entry.id] = Date().addingTimeInterval(300)
+                return true
+            }
+            artwork[title.catalogID] = title
+            artworkMappings[entry.id] = title.catalogID
+            artworkErrorMessage = nil
+            persistArtwork(scope: currentScope)
+            return true
+        } catch {
+            guard scope == currentScope, generation == artworkGeneration else { return false }
+            artworkTasks[entry.id] = nil
+            artworkRetryAt[entry.id] = Date().addingTimeInterval(60)
+            if case let TMDBError.rateLimited(date) = error {
+                artworkRetryAt[entry.id] = date
+            }
+            if case TMDBError
+                .missingToken = error
+            {
+                artworkErrorMessage = "Configure TMDb in Settings to load My List posters."
+            }
+            if case TMDBError
+                .unauthorized = error
+            {
+                artworkErrorMessage = "Check the TMDb token in Settings to load My List posters."
+            }
+            return false
+        }
+    }
+
+    private func restoreScopeIfNeeded() {
+        let currentScope = scope
+        if loadedScope != currentScope {
+            syncTask?.cancel(); syncTask = nil
+            loadedScope = currentScope
+            snapshot = defaults.data(forKey: "strimr.simkl.library.\(currentScope)")
+                .flatMap { try? JSONDecoder().decode(
+                    Snapshot.self,
+                    from: $0,
+                ) }
+            entries = snapshot?.entries ?? []
+            artworkGeneration = UUID()
+            artworkTasks.values.forEach { $0.cancel() }; artworkTasks = [:]; artworkRetryAt = [:]
+            let cachedArtwork = defaults.data(forKey: "strimr.simkl.artwork.\(currentScope)")
+                .flatMap { try? JSONDecoder().decode(ArtworkSnapshot.self, from: $0) }
+            artwork = cachedArtwork?.titles ?? [:]; artworkMappings = cachedArtwork?.mappings ?? [:]
+            artworkErrorMessage = nil
+            lastSync = nil; retryAt = nil
+            lastPlaybackActivities = nil; consecutiveFailures = 0; lastSyncFailure = nil
+        }
     }
 
     func sync(force: Bool = false) async {
@@ -334,17 +440,7 @@ final class DiscoveryStore {
             }
         #endif
         let currentScope = scope
-        if loadedScope != currentScope {
-            syncTask?.cancel(); syncTask = nil
-            loadedScope = currentScope
-            snapshot = defaults.data(forKey: "strimr.simkl.library.\(currentScope)")
-                .flatMap { try? JSONDecoder().decode(
-                    Snapshot.self,
-                    from: $0,
-                ) }
-            entries = snapshot?.entries ?? []; artwork = [:]; lastSync = nil; retryAt = nil
-            lastPlaybackActivities = nil; consecutiveFailures = 0; lastSyncFailure = nil
-        }
+        restoreScopeIfNeeded()
         guard let client = coordinator.simklLibraryClient else {
             if coordinator.state(for: .simkl).settings.needsReconnect {
                 lastSyncFailure = "authorization"
@@ -369,7 +465,14 @@ final class DiscoveryStore {
         guard force || (lastSync.map { Date().timeIntervalSince($0) > 60 } ?? true) else { return }
         let requestID = UUID()
         syncRequestID = requestID
-        let task = Task { await pull(client: client, scope: currentScope, requestID: requestID) }
+        let task = Task {
+            do {
+                try await libraryOperations.run { [self] in
+                    guard scope == currentScope, coordinator.simklLibraryClient === client else { return }
+                    await pull(client: client, scope: currentScope, requestID: requestID)
+                }
+            } catch { /* Cancellation leaves cached lists and progress intact. */ }
+        }
         syncTask = task
         await task.value
         if loadedScope == currentScope, syncRequestID == requestID {
@@ -464,16 +567,9 @@ final class DiscoveryStore {
             lastSyncFailure = nil
             retryAt = nil
             lastSync = Date()
-            // Only hydrate visible rails; My List can fetch additional metadata on demand.
+            // Home's initial batch is bounded. My List hydrates every visible card on demand.
             for entry in Array((planned + nextUp).prefix(40)) {
-                guard let reference = title(for: entry), artwork[reference.catalogID] == nil else { continue }
-                do {
-                    let title = try await tmdb.details(reference)
-                    try Task.checkCancellation()
-                    guard self.scope == scope else { return }
-                    artwork[title.catalogID] = title
-                } catch is CancellationError { throw CancellationError() }
-                catch { break } // TMDb setup/rate errors must not discard a successful Simkl sync.
+                guard await hydrateArtwork(for: entry) else { break }
             }
         } catch {
             guard self.scope == scope, !Task.isCancelled else { return }
@@ -516,25 +612,45 @@ final class DiscoveryStore {
     }
 
     func setPlanned(_ title: TMDBTitle, planned: Bool) async throws {
+        restoreScopeIfNeeded()
         guard let client = coordinator.simklLibraryClient else { throw TrackerAPIError.unavailable }
-        let scope = scope
-        await syncTask?.value
-        guard self.scope == scope, coordinator.simklLibraryClient === client else { throw TrackerAPIError.unavailable }
-        try await client.setPlanned(title, planned: planned)
-        guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
-        // Apply a confirmed write locally, retaining the pre-write checkpoint for the next delta.
-        var changed = entry(for: title) ?? SimklListEntry.planned(title)
-        changed.status = "plantowatch"
-        entries.removeAll { $0.catalogID == title.catalogID }
-        if planned {
-            entries.append(changed)
+        let currentScope = scope
+        let mutationKey = currentScope + "|" + title.catalogID
+        guard changingWatchlist.insert(mutationKey).inserted else { throw SimklWatchlistError.busy }
+        defer { changingWatchlist.remove(mutationKey) }
+        do {
+            try await libraryOperations.run { [self] in
+                guard scope == currentScope,
+                      coordinator.simklLibraryClient === client else { throw TrackerAPIError.unavailable }
+                let existing = entry(for: title)
+                let confirmed = try await client.setPlanned(title, planned: planned, knownIDs: existing?.media?.ids)
+                guard scope == currentScope,
+                      coordinator.simklLibraryClient === client else { throw TrackerAPIError.unavailable }
+                if planned, confirmed == nil {
+                    throw SimklWatchlistError.notConfirmed
+                }
+                entries.removeAll { ($0.catalogID ?? artworkMappings[$0.id]) == title.catalogID }
+                if planned, let confirmed {
+                    entries.append(confirmed)
+                    artworkMappings[confirmed.id] = title.catalogID
+                    if title.poster_path != nil {
+                        artwork[title.catalogID] = title
+                    }
+                }
+                // Persist even when this is the first successful operation after connecting.
+                // Keep the pre-write activities checkpoint so the next delta still catches server changes.
+                snapshot = Snapshot(
+                    activities: snapshot?.activities ?? SimklActivities(all: nil, movies: nil, tv_shows: nil),
+                    entries: entries,
+                )
+                try defaults.set(JSONEncoder().encode(snapshot), forKey: "strimr.simkl.library.\(currentScope)")
+                persistArtwork(scope: currentScope)
+                lastSync = nil; retryAt = nil
+            }
+        } catch {
+            SimklSyncFailure.record(error, stage: "watchlist_mutation")
+            throw error
         }
-        if snapshot != nil {
-            snapshot?.entries = entries
-            try defaults.set(JSONEncoder().encode(snapshot), forKey: "strimr.simkl.library.\(scope)")
-        }
-        lastSync = nil
-        retryAt = nil
         await sync(force: true)
     }
 }
@@ -707,5 +823,26 @@ extension CatalogProgressStore {
         }
         replace(Array(resolved.values), scope: scope)
         return (replayed, unmapped)
+    }
+}
+
+private extension TMDBTitle {
+    var artworkReference: TMDBTitle {
+        TMDBTitle(
+            id: id,
+            media_type: kind.rawValue,
+            title: title,
+            name: name,
+            overview: nil,
+            poster_path: poster_path,
+            backdrop_path: backdrop_path,
+            release_date: release_date,
+            first_air_date: first_air_date,
+            vote_average: nil,
+            genres: nil,
+            seasons: nil,
+            external_ids: external_ids,
+            runtime: runtime,
+        )
     }
 }

@@ -12,6 +12,18 @@ struct SharePlayLaunchSafetyTests {
         }
     }
 
+    @Test func `signing guidance distinguishes absence from unreadability and explains free account limits`() {
+        #expect(SharePlaySigningCheck.unavailableReason(signature: true, profile: true) == nil)
+        let missing = SharePlaySigningCheck.unavailableReason(signature: false, profile: false)
+        #expect(missing?.contains("Signature: missing") == true)
+        #expect(missing?.contains("free Apple ID") == true)
+        #expect(missing?.contains("paid Apple Developer Program") == true)
+        let unknown = SharePlaySigningCheck.unavailableReason(signature: nil, profile: nil)
+        #expect(unknown?.contains("Signature: unreadable or unavailable") == true)
+        #expect(unknown?.contains("not proof") == true)
+        #expect(!SharePlaySigningCheck.permitsLaunch(signature: true, profile: nil))
+    }
+
     @Test func `one invitation owns activation until session arrival`() {
         var guardState = SharePlayLaunchGuard()
         let first = UUID(), other = UUID(), now = Date()

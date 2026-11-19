@@ -42,7 +42,8 @@ def configuration_report(info, declared, signed, profile):
         "profileGroupSessionEntitlement": profile_value,
         "entitlementPresentInSignatureAndProfile": signed_value is True and profile_value is True,
         "runtimeSharePlayVerified": False,
-        "note": "Unsigned builds cannot verify SharePlay. Audit the app after SideStore signing; FaceTime requires compatible signing and a physical-device test.",
+        "freeAppleIDSupportsGroupActivities": False,
+        "note": "Unsigned builds cannot verify SharePlay. Free Apple ID signing does not support Group Activities. Use an eligible paid Apple Developer Program team with the capability enabled and an authorized profile, installed through Xcode or Apple-supported development/ad-hoc installation. Audit the final re-signed app; runtime still requires physical-device testing.",
     }
 
 
