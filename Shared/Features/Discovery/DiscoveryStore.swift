@@ -278,7 +278,7 @@ final class DiscoveryStore {
     private let progress: CatalogProgressStore
     private var syncTask: Task<Void, Never>?
     private var syncRequestID = UUID()
-    private weak var lastClient: SimklClient?
+    @ObservationIgnored private weak var lastClient: SimklClient?
     init(
         defaults: UserDefaults = .standard,
         coordinator: TrackerCoordinator? = nil,

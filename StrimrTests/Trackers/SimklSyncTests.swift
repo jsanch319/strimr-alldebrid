@@ -159,15 +159,21 @@ struct SimklSyncTests {
                 finished: false,
                 scope: store.scope,
             )
-            stub.respond { _ in
+            stub.respond { request in
                 if malformed {
-                    return .json("not-json")
+                    if request.url?.path == "/sync/activities" {
+                        return .json(#"{"all":"2026-11-19T00:00:00Z"}"#)
+                    }
+                    if request.url?.path == "/sync/playback" {
+                        return .json("not-json")
+                    }
+                    return Self.successful(request)
                 }
                 throw URLError(.networkConnectionLost)
             }
             let before = stub.requests.count
             await store.sync(force: true)
-            #expect(stub.requests.count - before == (malformed ? 1 : 3))
+            #expect(stub.requests.count - before == (malformed ? 4 : 3))
             #expect(store.entries.count == 1)
             #expect(progress.progress(title: movie, episode: nil, scope: store.scope)?.resumeOffset == 789.625)
             #expect(progress.progress(title: show, episode: episode, scope: store.scope)?.resumeOffset == 420.125)
@@ -204,6 +210,22 @@ struct SimklSyncTests {
         }
         _ = try await client(burst).activities()
         #expect(burst.requests.count == 2)
+    }
+
+    @Test func `a valid Simkl refresh retries once and persists rotated credentials`() async throws {
+        let stub = HTTPStub { request in
+            if request.url?.path == "/oauth2/token" {
+                return .json(#"{"access_token":"fixture-new","refresh_token":"fixture-rotated","expires_in":604800}"#)
+            }
+            return request
+                .value(forHTTPHeaderField: "Authorization") == "Bearer fixture-new" ? .json("{}") : .status(401)
+        }
+        var updated: [TrackerSession] = []
+        var invalidated = 0
+        _ = try await client(stub, updated: { updated.append($0) }, invalidated: { invalidated += 1 }).activities()
+        #expect(updated.map(\.refreshToken) == ["fixture-rotated"])
+        #expect(invalidated == 0)
+        #expect(stub.requests.map(\.url?.path) == ["/sync/activities", "/oauth2/token", "/sync/activities"])
     }
 
     @Test func `a renewed but rejected token invalidates once and does not retry invalid credentials`() async {
