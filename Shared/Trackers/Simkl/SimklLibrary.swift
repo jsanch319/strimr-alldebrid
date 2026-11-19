@@ -187,11 +187,15 @@ extension SimklClient {
                     SimklCatalogIDs.self,
                     from: JSONSerialization.data(withJSONObject: rawIDs),
                 )
-                guard SimklWatchlistIdentity.matches(decoded, requested: ids),
-                      row["to"] as? String == "plantowatch" || row["status"] as? String == "plantowatch"
-                else {
+                guard !SimklWatchlistIdentity.conflicts(decoded, requested: ids) else {
                     throw SimklWatchlistError.notConfirmed
                 }
+                // Simkl may return only its canonical ID instead of echoing external IDs.
+                // Unknown identity requires read-back; conflicting identity is rejected.
+                guard SimklWatchlistIdentity.matches(decoded, requested: ids) else { continue }
+                let status = row["to"] as? String ?? row["status"] as? String
+                guard let status else { continue }
+                guard status == "plantowatch" else { throw SimklWatchlistError.notConfirmed }
                 return .planned(title, ids: SimklCatalogIDs(
                     tmdb: String(title.id),
                     imdb: decoded.imdb ?? ids.imdb,
