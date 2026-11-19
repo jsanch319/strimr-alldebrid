@@ -53,7 +53,12 @@ struct MediaCard: View {
             }
         }
         .frame(width: size.width, alignment: .leading)
-        .offlineAvailability(of: media)
+        #if os(iOS)
+            // Artwork is clipped and captions contain transparent space. Give the card's
+            // tap and context-menu gestures one stable hit region across both children.
+            .contentShape(Rectangle())
+        #endif
+            .offlineAvailability(of: media)
         #if os(tvOS)
             .focusable()
             .focused($isFocused)
