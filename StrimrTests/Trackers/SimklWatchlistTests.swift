@@ -102,10 +102,14 @@ struct SimklWatchlistTests {
         #expect(stub.requests.last?.url?.path == "/sync/history/remove")
     }
 
-    @Test func `incomplete acknowledgements read back the actual status instead of guessing success`() async throws {
+    @Test(arguments: [false, true])
+    func `incomplete acknowledgements read back the actual status instead of guessing success`(
+        simklOnly: Bool,
+    ) async throws {
         let stub = HTTPStub { request in
             if request.httpMethod == "POST" {
-                return .json(#"{"added":{"movies":[{}]}}"#)
+                return .json(simklOnly ? #"{"added":{"movies":[{"to":"plantowatch","ids":{"simkl":777}}]}}"# :
+                    #"{"added":{"movies":[{}]}}"#)
             }
             return .json(#"{"movies":[{"status":"plantowatch","movie":{"ids":{"tmdb":"12"}}}]}"#)
         }

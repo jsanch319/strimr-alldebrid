@@ -255,15 +255,21 @@ nonisolated enum SimklWatchlistError: LocalizedError {
 }
 
 nonisolated enum SimklWatchlistIdentity {
-    static func matches(_ returned: SimklCatalogIDs, requested: SimklCatalogIDs) -> Bool {
-        let pairs = [
+    private static func pairs(_ returned: SimklCatalogIDs, _ requested: SimklCatalogIDs) -> [(String?, String?)] {
+        [
             (returned.tmdb, requested.tmdb),
             (returned.simkl, requested.simkl),
             (returned.imdb, requested.imdb),
             (returned.tvdb, requested.tvdb),
         ]
-        // A conflicting shared identifier must never be rescued by a weaker title match.
-        guard !pairs.contains(where: { $0.0 != nil && $0.1 != nil && $0.0 != $0.1 }) else { return false }
-        return pairs.contains { $0.0 != nil && $0.0 == $0.1 }
+    }
+
+    static func conflicts(_ returned: SimklCatalogIDs, requested: SimklCatalogIDs) -> Bool {
+        pairs(returned, requested).contains { $0.0 != nil && $0.1 != nil && $0.0 != $0.1 }
+    }
+
+    static func matches(_ returned: SimklCatalogIDs, requested: SimklCatalogIDs) -> Bool {
+        guard !conflicts(returned, requested: requested) else { return false }
+        return pairs(returned, requested).contains { $0.0 != nil && $0.0 == $0.1 }
     }
 }
