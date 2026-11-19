@@ -266,6 +266,7 @@ final class DiscoveryStore {
     private(set) var artwork: [String: TMDBTitle] = [:]
     private(set) var isSyncing = false
     var errorMessage: String?
+    private(set) var lastSyncFailure: String?
     private var snapshot: Snapshot?
     private var loadedScope: String?
     private var lastSync: Date?
@@ -342,10 +343,11 @@ final class DiscoveryStore {
                     from: $0,
                 ) }
             entries = snapshot?.entries ?? []; artwork = [:]; lastSync = nil; retryAt = nil
-            lastPlaybackActivities = nil; consecutiveFailures = 0
+            lastPlaybackActivities = nil; consecutiveFailures = 0; lastSyncFailure = nil
         }
         guard let client = coordinator.simklLibraryClient else {
             if coordinator.state(for: .simkl).settings.needsReconnect {
+                lastSyncFailure = "authorization"
                 errorMessage = "Reconnect Simkl in Settings to refresh your lists and progress."
                 return // Keep this account's last successful snapshot and exact local checkpoints.
             }
@@ -459,6 +461,7 @@ final class DiscoveryStore {
             try Task.checkCancellation()
             guard self.scope == scope, coordinator.simklLibraryClient === client else { return }
             consecutiveFailures = 0
+            lastSyncFailure = nil
             retryAt = nil
             lastSync = Date()
             // Only hydrate visible rails; My List can fetch additional metadata on demand.
@@ -480,6 +483,7 @@ final class DiscoveryStore {
                 retryAt = Date().addingTimeInterval(60)
             }
             consecutiveFailures += 1
+            lastSyncFailure = SimklSyncFailure.category(error)
             SimklSyncFailure.record(error, stage: stage)
             errorMessage = SimklSyncFailure.message(error, consecutiveFailures: consecutiveFailures)
         }

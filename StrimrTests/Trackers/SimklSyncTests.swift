@@ -244,17 +244,19 @@ struct SimklSyncTests {
         #expect(stub.requests.count == 3)
     }
 
-    @Test func `legacy numeric error zero is identified without relying on it for retry policy`() {
-        let errors: [(String, TrackerAPIError)] = [
-            ("authorization", .unauthorized), ("session_expired", .sessionExpired), ("not_found", .notFound),
-            ("conflict", .conflict), ("rate_limit", .rateLimited(retryAfter: nil)), ("write_lock", .writeLocked),
-            ("throttle", .throttled), ("account_limit", .accountLimit), ("account_locked", .accountLocked),
-            ("server", .server(status: 503)), ("http_rejection", .unexpected(status: 403)),
-            ("invalid_response", .invalidResponse), ("unavailable", .unavailable),
-        ]
-        let zero = errors.filter { ($0.1 as NSError).code == 0 }.map(\.0)
-        print("Legacy TrackerAPIError numeric code 0 categories: \(zero.joined(separator: ","))")
-        #expect(zero.count == 1)
+    @Test func `failed initial account validation cannot overwrite the reconnect flag`() async {
+        let stub = HTTPStub { request in
+            request.url?.path == "/oauth2/token" ? .json(#"{"error":"invalid_grant"}"#, statusCode: 400) : .status(401)
+        }
+        let (_, _, coordinator) = await rig(stub)
+        #expect(coordinator.state(for: .simkl).settings.needsReconnect)
+        #expect(!coordinator.state(for: .simkl).isConnected)
+    }
+
+    @Test func `legacy numeric error zero is rate limiting in the current toolchain`() {
+        #expect((TrackerAPIError.rateLimited(retryAfter: nil) as NSError).code == 0)
+        #expect((TrackerAPIError.rateLimited(retryAfter: 12) as NSError).code == 0)
+
         #expect(SimklSyncFailure.retryDelay(TrackerAPIError.sessionExpired, attempt: 0) == nil)
         #expect(SimklSyncFailure.retryDelay(TrackerAPIError.invalidResponse, attempt: 0) == nil)
         #expect(SimklSyncFailure.message(TrackerAPIError.server(status: 503), consecutiveFailures: 1) == nil)

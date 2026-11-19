@@ -532,7 +532,20 @@ final class SharePlayCoordinator {
         newSession.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                guard case .invalidated = state, let self, session === newSession else { return }
+                guard let self, session === newSession else { return }
+                switch state {
+                case .waiting:
+                    Self.launchLog.notice("stage=session_state outcome=waiting")
+                    return
+                case .joined:
+                    Self.launchLog.notice("stage=session_state outcome=joined")
+                    return
+                case .invalidated:
+                    break
+                @unknown default:
+                    Self.launchLog.notice("stage=session_state outcome=unknown")
+                    return
+                }
                 if pendingSessionAcceptanceActivityID != nil {
                     deferredSessionInvalidation = true
                     return

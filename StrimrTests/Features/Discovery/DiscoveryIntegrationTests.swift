@@ -155,7 +155,8 @@ struct DiscoveryIntegrationTests {
         stub.respond { _ in .status(503) }
         await store.sync(force: true)
         #expect(store.planned.count == 2)
-        #expect(store.errorMessage != nil)
+        #expect(store.errorMessage == nil) // Short server failures do not require a Home footer.
+        #expect(store.lastSyncFailure == "server") // Failure is retained, never disguised as success.
         coordinator.setEnabled(false, for: .simkl)
         await store.sync()
         #expect(store.entries.isEmpty)
