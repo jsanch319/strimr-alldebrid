@@ -92,3 +92,34 @@ are cached per account across restarts, without copying full cast/season payload
 Unmapped titles remain explicitly unmapped; missing artwork is never replaced
 with an unrelated poster. TMDb configuration errors show actionable My List
 messages. This cache and watchlist data contain no access/refresh tokens.
+
+### Canonical-only save receipts
+
+A single-title `/sync/add-to-list` response may acknowledge the requested status
+with only `ids.simkl`. The old confirmation fallback discarded that canonical ID
+and searched the read-back solely using the originally sent external IDs. If the
+read-back also supplied only the canonical ID, Strimr rejected an accepted save.
+The failure message was below all details content, away from the tapped button.
+
+The single response row in the requested movie/show namespace now supplies a
+canonical identity for the confirmation read. It does not itself count as
+success: the read must contain that identity in `plantowatch`, with no conflicting
+external ID. Multiple ambiguous receipts, wrong media types, conflicting IDs,
+wrong status, empty lists and failed reads never fill the bookmark. After a
+match, retain both the requested TMDb identity and confirmed Simkl identity so
+My List, the details bookmark and subsequent syncs refer to the same title.
+Missing TMDb artwork is hydrated separately after confirmation and cached.
+
+Save failures appear directly under the watchlist controls. Authorization and
+quota errors during read-back retain their actionable messages; no uncertain
+POST is automatically repeated. Diagnostic categories distinguish unconfirmed
+status from unavailable confirmation and HTTP/network failures, without logging
+tokens, request bodies, account details or title identifiers.
+
+Reference contract: https://api.simkl.org/openapi.json (`/sync/add-to-list` and
+`/sync/all-items/{type}/{status}`). Tests use isolated HTTP fixtures, including
+canonical-only movie/show acknowledgements and reads, not a real user's token.
+These reproduce the code defect; they do not establish the HTTP response seen on
+an individual iPhone. A recurring device failure still needs the privacy-safe
+stage/category/HTTP status above to distinguish quota, authorization and network
+causes. The old numeric error alone cannot recover its original response body.

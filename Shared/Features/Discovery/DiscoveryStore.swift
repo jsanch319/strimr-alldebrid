@@ -651,6 +651,11 @@ final class DiscoveryStore {
             SimklSyncFailure.record(error, stage: "watchlist_mutation")
             throw error
         }
+        if planned, let confirmed = entry(for: title) {
+            // A confirmed save is visible immediately; missing artwork is a separate,
+            // best-effort TMDb read and must never turn a successful save into failure.
+            await hydrateArtwork(for: confirmed)
+        }
         await sync(force: true)
     }
 }

@@ -27,6 +27,13 @@ nonisolated enum SimklSyncFailure {
         if error.isCancellation {
             return "cancelled"
         }
+        if let error = error as? SimklWatchlistError {
+            switch error {
+            case .notConfirmed: return "watchlist_not_confirmed"
+            case .confirmationUnavailable: return "watchlist_confirmation_unavailable"
+            case .busy: return "watchlist_busy"
+            }
+        }
         return "other"
     }
 

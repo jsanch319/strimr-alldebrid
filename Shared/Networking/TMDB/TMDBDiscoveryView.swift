@@ -110,6 +110,7 @@ struct TMDBDetailView: View {
     var initialEpisode: TMDBEpisode?
     @State private var selectedPlayback: PlaybackSelection?
     @State private var changingList = false
+    @State private var watchlistError: String?
     @State private var changingWatched = false
     @State private var confirmRemoval = false
     @State private var detail: TMDBTitle?
@@ -460,6 +461,13 @@ struct TMDBDetailView: View {
             if changingList || changingWatched {
                 ProgressView()
             }
+            if let watchlistError {
+                Label(watchlistError, systemImage: "exclamationmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("catalog.detail.watchlist-error")
+            }
             if TrackerCoordinator.shared.simklLibraryClient == nil {
                 NavigationLink("Connect Simkl for watchlist and watched status") { TrackerSettingsView(service: .simkl)
                 }
@@ -640,10 +648,12 @@ struct TMDBDetailView: View {
     }
 
     private func changeList(planned: Bool) async {
+        guard !changingList else { return }
         changingList = true
+        watchlistError = nil
         defer { changingList = false }
         do { try await discovery.setPlanned(item, planned: planned) }
-        catch { self.error = SimklWatchlistError.message(error) }
+        catch { watchlistError = SimklWatchlistError.message(error) }
     }
 
     private func markWatched() async {

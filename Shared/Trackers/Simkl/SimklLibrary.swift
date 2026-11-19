@@ -86,6 +86,26 @@ nonisolated struct SimklListEntry: Codable, Hashable, Identifiable, Sendable {
         status == "plantowatch"
     }
 
+    /// Attach the caller's TMDb identity only after the server row has been matched.
+    /// Some Simkl responses contain only the canonical ID, which cannot drive TMDb cards alone.
+    func resolvingCatalogIdentity(_ title: TMDBTitle, knownIDs: SimklCatalogIDs) -> Self {
+        let resolved = Media(
+            title: media?.title ?? title.displayTitle,
+            year: media?.year ?? Int(title.date.prefix(4)),
+            ids: SimklCatalogIDs(
+                tmdb: String(title.id),
+                imdb: media?.ids.imdb ?? knownIDs.imdb,
+                tvdb: media?.ids.tvdb ?? knownIDs.tvdb,
+                simkl: media?.ids.simkl ?? knownIDs.simkl,
+            ),
+        )
+        return Self(
+            status: status, movie: kind == .movie ? resolved : nil, show: kind == .tv ? resolved : nil,
+            last_watched_at: last_watched_at, next_to_watch: next_to_watch, seasons: seasons,
+            watched_episodes_count: watched_episodes_count, total_episodes_count: total_episodes_count,
+        )
+    }
+
     func watched(season: Int, episode: Int) -> Bool {
         seasons?.first { $0.number == season }?.episodes?.contains { $0.number == episode } == true
     }
@@ -180,8 +200,12 @@ extension SimklClient {
         }
         let key = title.kind == .movie ? "movies" : "shows"
         let result = try await libraryWrite(planned ? "sync/add-to-list" : "sync/history/remove", body: [key: [media]])
+        var confirmationIDs = ids
         if planned, let rows = (result["added"] as? [String: Any])?[key] as? [[String: Any]] {
             for row in rows {
+                if let type = row["type"] as? String, type != (title.kind == .movie ? "movie" : "show") {
+                    throw SimklWatchlistError.notConfirmed
+                }
                 guard let rawIDs = row["ids"] else { continue }
                 let decoded = try JSONDecoder().decode(
                     SimklCatalogIDs.self,
@@ -192,10 +216,20 @@ extension SimklClient {
                 }
                 // Simkl may return only its canonical ID instead of echoing external IDs.
                 // Unknown identity requires read-back; conflicting identity is rejected.
-                guard SimklWatchlistIdentity.matches(decoded, requested: ids) else { continue }
                 let status = row["to"] as? String ?? row["status"] as? String
                 guard let status else { continue }
                 guard status == "plantowatch" else { throw SimklWatchlistError.notConfirmed }
+                if !SimklWatchlistIdentity.matches(decoded, requested: ids) {
+                    // This POST submits exactly one item. A single canonical acknowledgement
+                    // in its namespace can identify that request for a subsequent status read.
+                    // It is not enough by itself to show success. Never adopt conflicting IDs.
+                    if rows.count == 1, let canonical = decoded.simkl, !canonical.isEmpty {
+                        confirmationIDs = SimklCatalogIDs(
+                            tmdb: ids.tmdb, imdb: ids.imdb, tvdb: ids.tvdb, simkl: canonical,
+                        )
+                    }
+                    continue
+                }
                 return .planned(title, ids: SimklCatalogIDs(
                     tmdb: String(title.id),
                     imdb: decoded.imdb ?? ids.imdb,
@@ -218,16 +252,23 @@ extension SimklClient {
         do { rows = try await library(type: key, status: "plantowatch") }
         catch {
             SimklSyncFailure.record(error, stage: "watchlist_confirmation")
+            // Keep actionable authorization and quota failures intact instead of
+            // hiding them behind a generic confirmation error.
+            switch error as? TrackerAPIError {
+            case .unauthorized, .sessionExpired, .rateLimited, .unexpected(status: 403), .throttled:
+                throw error
+            default: break
+            }
             throw SimklWatchlistError.confirmationUnavailable
         }
         let matching = rows
             .first { $0.kind == title.kind && $0.isPlanned && $0.media.map { SimklWatchlistIdentity.matches(
                 $0.ids,
-                requested: ids,
+                requested: confirmationIDs,
             ) } == true }
         if planned {
             guard let matching else { throw SimklWatchlistError.notConfirmed }
-            return matching
+            return matching.resolvingCatalogIdentity(title, knownIDs: confirmationIDs)
         }
         guard matching == nil else { throw SimklWatchlistError.notConfirmed }
         return nil
@@ -248,11 +289,17 @@ nonisolated enum SimklWatchlistError: LocalizedError {
         if let error = error as? Self {
             return error.errorDescription ?? "Simkl could not confirm this update."
         }
+        if let network = error as? URLError {
+            return network.code == .notConnectedToInternet ?
+                "Connect to the internet and retry. Simkl has not confirmed this watchlist update." :
+                "Couldn't reach Simkl to confirm this update. Your saved watchlist is retained. Retry when connected."
+        }
         switch error as? TrackerAPIError {
         case .unauthorized, .sessionExpired, .unavailable: return "Connect or reconnect Simkl in Settings to update My List."
         case .rateLimited: return "Simkl's request limit was reached. Retry after the limit resets; reconnecting does not reset it."
         case .notFound: return "Simkl could not match this title. Your saved watchlist was retained."
         case .unexpected(status: 403), .throttled: return "Simkl denied this update. Check app access and write permission in Simkl settings."
+        case .invalidResponse: return "Simkl returned an unreadable save response. Your saved watchlist is retained. Please refresh My List before retrying."
         default: return "Simkl could not confirm this update. Your saved watchlist was retained. Please refresh before retrying."
         }
     }
