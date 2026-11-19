@@ -136,3 +136,39 @@ blocked signing causes no sheet/activation; valid signing can invite outside and
 inside FaceTime; rapid taps, cancellation, late session delivery, joining/leaving,
 backgrounding and post-failure retry. Collect crash evidence before calling this
 an actual FaceTime-crash fix. Existing AirPlay/LG verification remains separate.
+
+## Duplicate-session and FaceTime-call termination investigation
+
+The user additionally reports an entire FaceTime call ending and Strimr closing
+to the Home Screen; SharePlay in other apps works. This narrows the symptom to
+this integration/build, but without a matching device crash/termination report or
+stage trace it does not establish which process failed or why. Do not label this
+fixed based on simulator builds or tests.
+
+Code review found that duplicate deliveries could overlap during the awaited
+media-access check. The second acceptance could subsequently treat the same
+session as its predecessor and call `leave`. Acceptance now rejects already
+active/in-flight native session IDs, isolates asynchronous completions by generation,
+and never leaves the active session when declining stale incoming work. Only a
+distinct previous session is left during replacement; stale publisher events
+cannot change the current activity/participants. Source-sheet dismissal must own
+the presented/current activity before it can leave a party. The coordinator never
+calls `GroupSession.end()` or a FaceTime-call termination API. Leaving a SharePlay
+session is not evidence that FaceTime itself crashed or that this was the cause
+of the reported call termination.
+
+The eligibility observer starts after the installed-signing preflight at app
+coordinator initialization, rather than being constructed on the first tap during
+a call. Invitation and activation share the existing main-actor reservation,
+including while a native sharing controller remains visible. Existing signing
+checks remain conservative; no unauthorized entitlements are added.
+
+The safe Launch log also records duplicate acceptance, rejection preserving an
+active session, distinct-session replacement, stale sheet dismissals, explicit
+local leave requests and invalidation that continues locally. Pair those events
+with actual device reports and note whether the call ends before the invitation,
+during activation, at join, or when source playback appears. Test two signed
+physical iPhones with the final SideStore profile, starting both inside and
+outside FaceTime, rapid tapping, canceled invitations, delayed/duplicate delivery,
+source selection/replacement, leaving, and background/foreground transitions.
+AirPlay and real Simkl synchronization must be tested separately as well.

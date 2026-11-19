@@ -269,6 +269,8 @@ final class DiscoveryStore {
     private var snapshot: Snapshot?
     private var loadedScope: String?
     private var lastSync: Date?
+    private var lastPlaybackActivities: SimklActivities?
+    private var consecutiveFailures = 0
     private var retryAt: Date?
     private let defaults: UserDefaults
     private let coordinator: TrackerCoordinator
@@ -338,8 +340,13 @@ final class DiscoveryStore {
                     from: $0,
                 ) }
             entries = snapshot?.entries ?? []; artwork = [:]; lastSync = nil; retryAt = nil
+            lastPlaybackActivities = nil; consecutiveFailures = 0
         }
         guard let client = coordinator.simklLibraryClient else {
+            if coordinator.state(for: .simkl).settings.needsReconnect {
+                errorMessage = "Reconnect Simkl in Settings to refresh your lists and progress."
+                return // Keep this account's last successful snapshot and exact local checkpoints.
+            }
             entries = []; snapshot = nil; artwork = [:]
             loadedScope = nil; lastSync = nil; retryAt = nil
             return
@@ -361,14 +368,17 @@ final class DiscoveryStore {
 
     private func pull(client: SimklClient, scope: String) async {
         isSyncing = true; errorMessage = nil
+        var stage = "flush_playback"
         defer { isSyncing = false }
         do {
             await coordinator.flushCatalogPlaybackReports()
+            stage = "activities"
             let activities = try await client.activities() // Capture BEFORE the pull to avoid lost concurrent writes.
             if snapshot?.activities != activities || snapshot == nil {
                 var merged = snapshot?.entries ?? []
                 let since = snapshot?.activities.all
                 for type in ["movies", "shows"] {
+                    stage = type == "movies" ? "movie_list" : "episode_list"
                     let delta = try await client.library(type: type, since: since)
                     let changed = Set(delta.map(\.id))
                     let catalogIDs = Set(delta.compactMap(\.catalogID))
@@ -378,6 +388,7 @@ final class DiscoveryStore {
                 if let old = snapshot?.activities, old.removals != activities.removals {
                     var remaining = Set<String>()
                     for type in ["movies", "shows"] {
+                        stage = "removal_check"
                         let ids = try await client.library(type: type, idsOnly: true)
                         remaining.formUnion(ids.map(\.id))
                     }
@@ -389,39 +400,49 @@ final class DiscoveryStore {
                 entries = merged
                 try defaults.set(JSONEncoder().encode(snapshot), forKey: "strimr.simkl.library.\(scope)")
             }
-            // A full saved-playback snapshot detects clears, rewinds and updates made on another Apple device.
-            let paused = try await client.pausedPlaybacks()
-            let result = await progress.reconcile(
-                paused: paused,
-                entries: entries,
-                scope: scope,
-                activities: activities,
-                tmdb: tmdb,
-                isCurrent: { self.scope == scope && self.coordinator.simklLibraryClient === client },
-                replay: { item, percent, date in
-                    guard self.scope == scope, self.coordinator.simklLibraryClient === client else { return false }
-                    return await self.coordinator.replayCatalogCheckpoint(item: item, progress: percent, date: date)
-                },
-            )
-            if result.replayed {
-                let refreshed = try await client.pausedPlaybacks()
-                _ = await progress.reconcile(
-                    paused: refreshed,
+            // Once this launch has a complete playback snapshot, unchanged activities need no
+            // additional playback read. Failed pulls never advance this marker.
+            if lastPlaybackActivities != activities || progress.records(scope: scope)
+                .contains(where: { $0.pendingSync == true })
+            {
+                // A full saved-playback snapshot detects clears, rewinds and updates made on another Apple device.
+                stage = "paused_playback"
+                let paused = try await client.pausedPlaybacks()
+                let result = await progress.reconcile(
+                    paused: paused,
                     entries: entries,
                     scope: scope,
                     activities: activities,
                     tmdb: tmdb,
                     isCurrent: { self.scope == scope && self.coordinator.simklLibraryClient === client },
-                    replay: { _, _, _ in false },
+                    replay: { item, percent, date in
+                        guard self.scope == scope, self.coordinator.simklLibraryClient === client else { return false }
+                        return await self.coordinator.replayCatalogCheckpoint(item: item, progress: percent, date: date)
+                    },
                 )
+                if result.replayed {
+                    let refreshed = try await client.pausedPlaybacks()
+                    _ = await progress.reconcile(
+                        paused: refreshed,
+                        entries: entries,
+                        scope: scope,
+                        activities: activities,
+                        tmdb: tmdb,
+                        isCurrent: { self.scope == scope && self.coordinator.simklLibraryClient === client },
+                        replay: { _, _, _ in false },
+                    )
+                }
+                if result
+                    .unmapped >
+                    0
+                {
+                    errorMessage =
+                        "Some Simkl playbacks have no verified TMDb/episode mapping and cannot be resumed automatically."
+                }
+                lastPlaybackActivities = activities
             }
-            if result
-                .unmapped >
-                0
-            {
-                errorMessage =
-                    "Some Simkl playbacks have no verified TMDb/episode mapping and cannot be resumed automatically."
-            }
+            consecutiveFailures = 0
+            retryAt = nil
             lastSync = Date()
             // Only hydrate visible rails; My List can fetch additional metadata on demand.
             for entry in Array((planned + nextUp).prefix(40)) {
@@ -441,7 +462,9 @@ final class DiscoveryStore {
             } else {
                 retryAt = Date().addingTimeInterval(60)
             }
-            errorMessage = "Simkl sync failed. Cached lists and resume positions are retained; cross-device progress could not be refreshed. \(error.localizedDescription)"
+            consecutiveFailures += 1
+            SimklSyncFailure.record(error, stage: stage)
+            errorMessage = SimklSyncFailure.message(error, consecutiveFailures: consecutiveFailures)
         }
     }
 

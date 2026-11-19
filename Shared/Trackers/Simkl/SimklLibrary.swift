@@ -118,7 +118,7 @@ nonisolated struct SimklActivities: Codable, Equatable, Sendable {
 
 extension SimklClient {
     func activities() async throws -> SimklActivities {
-        try await libraryRead("sync/activities").decode(SimklActivities.self)
+        try await libraryDecode(SimklActivities.self, path: "sync/activities")
     }
 
     func library(type: String, since: String? = nil, idsOnly: Bool = false) async throws -> [SimklListEntry] {
@@ -132,7 +132,7 @@ extension SimklClient {
         if let since {
             query.append(URLQueryItem(name: "date_from", value: since))
         }
-        return try await libraryRead("sync/all-items/\(type)", query: query).decode(SimklLibraryResponse.self).entries
+        return try await libraryDecode(SimklLibraryResponse.self, path: "sync/all-items/\(type)", query: query).entries
     }
 
     func markCatalogWatched(_ title: TMDBTitle, episode: TMDBEpisode?, at date: Date) async throws {

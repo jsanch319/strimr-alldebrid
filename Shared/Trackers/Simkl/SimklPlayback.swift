@@ -81,10 +81,9 @@ nonisolated struct SimklPausedPlayback: Decodable, Sendable {
 extension SimklClient {
     /// Full snapshot, not date_from: starting playback clears saved pauses without creating a new paused_at.
     func pausedPlaybacks() async throws -> [SimklPausedPlayback] {
-        let response = try await libraryRead("sync/playback", query: [
+        let items = try await libraryDecode([SimklPausedPlayback].self, path: "sync/playback", query: [
             URLQueryItem(name: "hide_watched", value: "true"), URLQueryItem(name: "limit", value: "10000"),
         ])
-        let items = try response.decode([SimklPausedPlayback].self)
         // A truncated or malformed snapshot must never clear another device's cached progress.
         guard items.count < 10000, items.allSatisfy(\.isValid) else { throw TrackerAPIError.invalidResponse }
         return items

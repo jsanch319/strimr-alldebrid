@@ -33,6 +33,7 @@ struct CatalogSharePlayButton: View {
 struct CatalogSharePlayPresentation: ViewModifier {
     @Environment(SharePlayCoordinator.self) private var coordinator
     @State private var invitation: Invitation?
+    @State private var presentedActivityID: UUID?
     private struct Invitation: Identifiable {
         let activity: StrimrWatchActivity
         let controller: GroupActivitySharingController
@@ -76,15 +77,18 @@ struct CatalogSharePlayPresentation: ViewModifier {
             .sheet(
                 item: Binding(
                     get: { coordinator.catalogPlaybackActivity },
-                    set: { coordinator.catalogPlaybackActivity = $0 },
+                    set: { value in
+                        if value == nil {
+                            coordinator.catalogPresentationDismissed(expectedID: presentedActivityID)
+                        }
+                    },
                 ),
                 onDismiss: {
-                    if coordinator.catalogPlaybackActivity == nil, coordinator.isInSession {
-                        coordinator.leave()
-                    }
+                    coordinator.catalogPresentationDismissed(expectedID: presentedActivityID)
                 },
             ) { activity in
                 CatalogSharePlayLaunchView(activity: activity).id(activity.activityID)
+                    .onAppear { presentedActivityID = activity.activityID }
             }
             .alert("SharePlay", isPresented: Binding(
                 get: { coordinator.catalogErrorMessage != nil },

@@ -58,7 +58,7 @@ final class SharePlayCoordinator {
     }
 
     func beginSharingPresentation(_ activity: StrimrWatchActivity) -> Bool {
-        guard checkLaunchAvailability(for: activity), !isActivating,
+        guard checkLaunchAvailability(for: activity), !isLaunching,
               launchGuard.begin(activity.activityID) else { return false }
         completedInvitationID = nil
         sharingPresentationActivityID = activity.activityID
@@ -96,6 +96,8 @@ final class SharePlayCoordinator {
     @ObservationIgnored private let sessionManager: SessionManager
     @ObservationIgnored private lazy var groupStateObserver = GroupStateObserver()
     @ObservationIgnored private var session: GroupSession<StrimrWatchActivity>?
+    @ObservationIgnored private var acceptingSession: GroupSession<StrimrWatchActivity>?
+    @ObservationIgnored private var acceptanceGeneration = UUID()
     @ObservationIgnored private weak var playbackPresenter: (any PlaybackPresenting)?
     @ObservationIgnored private weak var playerController: PlayerController?
     @ObservationIgnored private var sessionSubscriptions: Set<AnyCancellable> = []
@@ -116,6 +118,9 @@ final class SharePlayCoordinator {
             Self.launchLog.notice("stage=listener outcome=signing_unconfirmed")
             return
         }
+        // Begin observing eligibility once signing is confirmed, rather than creating an
+        // observer on the first tap and immediately consulting its initial state.
+        _ = groupStateObserver
         sessionListener = Task { [weak self] in
             for await session in StrimrWatchActivity.sessions() {
                 guard !Task.isCancelled else { return }
@@ -214,7 +219,7 @@ final class SharePlayCoordinator {
     }
 
     func activate(_ activity: StrimrWatchActivity) async {
-        guard checkLaunchAvailability(for: activity), !isActivating,
+        guard checkLaunchAvailability(for: activity), !isLaunching,
               launchGuard.begin(activity.activityID) else { return }
 
         isActivating = true
@@ -376,8 +381,29 @@ final class SharePlayCoordinator {
     }
 
     func leave() {
+        Self.launchLog.notice("stage=session_leave outcome=explicit_local_request")
+        acceptanceGeneration = UUID()
+        acceptingSession = nil
+        pendingSessionAcceptanceActivityID = nil
+        activationDeadline?.cancel()
+        if let id = launchGuard.activeID {
+            launchGuard.finish(id)
+        }
         session?.leave()
         detach(continueLocally: false)
+    }
+
+    func catalogPresentationDismissed(expectedID: UUID?) {
+        guard SharePlaySessionLifecycle.ownsDismissal(
+            expected: expectedID, presented: catalogPlaybackActivity?.activityID, active: activity?.activityID,
+        ) else {
+            Self.launchLog.notice("stage=playback_sheet outcome=stale_dismissal_ignored")
+            return
+        }
+        catalogPlaybackActivity = nil
+        if isInSession {
+            leave()
+        }
     }
 
     private var isLocalLeader: Bool {
@@ -388,34 +414,57 @@ final class SharePlayCoordinator {
         return leader?.id == session.localParticipant.id
     }
 
-    private func accept(_ newSession: GroupSession<StrimrWatchActivity>) async {
-        guard checkLaunchAvailability(for: newSession.activity) else {
-            newSession.leave()
+    private func rejectIncomingSession(_ incoming: GroupSession<StrimrWatchActivity>) {
+        guard SharePlaySessionLifecycle.mayLeaveRejected(incoming: incoming.id, active: session?.id) else {
+            Self.launchLog.notice("stage=session_reject outcome=active_session_preserved")
             return
         }
-        guard session !== newSession else { return }
+        Self.launchLog.notice("stage=session_reject outcome=distinct_session_declined")
+        incoming.leave()
+    }
+
+    private func accept(_ newSession: GroupSession<StrimrWatchActivity>) async {
+        guard checkLaunchAvailability(for: newSession.activity) else {
+            rejectIncomingSession(newSession)
+            return
+        }
+        guard SharePlaySessionLifecycle.shouldAccept(
+            incoming: newSession.id, active: session?.id, accepting: acceptingSession?.id,
+        ) else {
+            Self.launchLog.notice("stage=session_access outcome=duplicate_ignored")
+            return
+        }
         guard launchGuard.canAccept(newSession.activity.activityID) else {
             Self.launchLog.notice("stage=session_access outcome=competing_launch_rejected")
-            newSession.leave()
+            rejectIncomingSession(newSession)
             return
         }
         Self.launchLog.notice("stage=session_access outcome=started")
         let acceptanceActivityID = newSession.activity.activityID
+        let generation = UUID()
+        acceptanceGeneration = generation
+        acceptingSession = newSession
+        defer {
+            if acceptanceGeneration == generation {
+                acceptingSession = nil
+            }
+        }
         pendingSessionAcceptanceActivityID = acceptanceActivityID
         do {
             try await ensureAccess(to: newSession.activity)
-            guard pendingSessionAcceptanceActivityID == acceptanceActivityID,
+            guard acceptanceGeneration == generation, session?.id != newSession.id,
+                  pendingSessionAcceptanceActivityID == acceptanceActivityID,
                   launchGuard.canAccept(acceptanceActivityID)
             else {
                 if pendingSessionAcceptanceActivityID == acceptanceActivityID {
                     pendingSessionAcceptanceActivityID = nil
                 }
-                newSession.leave()
+                rejectIncomingSession(newSession)
                 return
             }
         } catch {
-            guard pendingSessionAcceptanceActivityID == acceptanceActivityID else {
-                newSession.leave()
+            guard acceptanceGeneration == generation, pendingSessionAcceptanceActivityID == acceptanceActivityID else {
+                rejectIncomingSession(newSession)
                 return
             }
             pendingSessionAcceptanceActivityID = nil
@@ -434,7 +483,7 @@ final class SharePlayCoordinator {
             } else {
                 errorMessage = String(localized: "sharePlay.error.mediaUnavailable")
             }
-            newSession.leave()
+            rejectIncomingSession(newSession)
             if deferredSessionInvalidation {
                 deferredSessionInvalidation = false
                 detach(continueLocally: true)
@@ -444,13 +493,16 @@ final class SharePlayCoordinator {
 
         let previousSession = session
         sessionSubscriptions.removeAll()
-        if previousSession != nil,
-           previousSession !== newSession,
+        if let previousSession,
+           previousSession.id != newSession.id,
            playerController?.isCoordinatedPlayback == true
         {
             playerController?.endCoordinatedPlayback(continueLocally: true)
         }
-        previousSession?.leave()
+        if let previousSession, previousSession.id != newSession.id {
+            Self.launchLog.notice("stage=session_replace outcome=leaving_distinct_session")
+            previousSession.leave()
+        }
         session = newSession
         handleActivityChange(newSession.activity)
         isInSession = true
@@ -460,13 +512,16 @@ final class SharePlayCoordinator {
 
         newSession.$activity
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] activity in self?.handleActivityChange(activity) }
+            .sink { [weak self] activity in
+                guard let self, session === newSession else { return }
+                handleActivityChange(activity)
+            }
             .store(in: &sessionSubscriptions)
 
         newSession.$activeParticipants
             .receive(on: DispatchQueue.main)
             .sink { [weak self] participants in
-                guard let self else { return }
+                guard let self, session === newSession else { return }
                 let previousCount = participantCount
                 participantCount = participants.count
                 handleParticipantCountChange(previousCount: previousCount)
@@ -482,6 +537,7 @@ final class SharePlayCoordinator {
                     deferredSessionInvalidation = true
                     return
                 }
+                Self.launchLog.notice("stage=session_state outcome=invalidated_continuing_locally")
                 detach(continueLocally: true)
             }
             .store(in: &sessionSubscriptions)

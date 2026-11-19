@@ -144,6 +144,12 @@ final class TrackerCoordinator {
                 ErrorReporter.capture(error)
             }
         }
+        // A rejected settings request can invalidate this binding during the await. Do not
+        // overwrite its needsReconnect flag, or a newly connected account/profile's settings.
+        guard activeProfileID == profileID, bindings[service] === binding, binding.isActive else {
+            refreshState(service)
+            return
+        }
         // Writes queued under another account must not land on this one.
         if previousUsername != nil, previousUsername != settings.username {
             queue.removeAll(profileID: profileID, service: service)

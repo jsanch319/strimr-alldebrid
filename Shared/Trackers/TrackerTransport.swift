@@ -49,6 +49,15 @@ final class TrackerTokenProvider {
     private let onInvalidated: () -> Void
     private let now: () -> Date
     private var refreshTask: Task<TrackerSession, Error>?
+    private var invalidated = false
+
+    @discardableResult
+    func invalidateRejectedToken(_ rejected: String) -> Bool {
+        guard !invalidated, session.accessToken == rejected else { return false }
+        invalidated = true
+        onInvalidated()
+        return true
+    }
 
     init(
         session: TrackerSession,
@@ -65,6 +74,7 @@ final class TrackerTokenProvider {
     }
 
     func validAccessToken() async throws -> String {
+        guard !invalidated else { throw TrackerAPIError.sessionExpired }
         guard session.expiresAt.timeIntervalSince(now()) < Self.refreshMargin else { return session.accessToken }
         do {
             return try await renew().accessToken
@@ -79,6 +89,7 @@ final class TrackerTokenProvider {
     }
 
     func accessToken(afterRejecting rejected: String) async throws -> String {
+        guard !invalidated else { throw TrackerAPIError.sessionExpired }
         // Another request may have renewed it while this one was in flight.
         guard session.accessToken == rejected else { return session.accessToken }
         return try await renew().accessToken
@@ -98,7 +109,7 @@ final class TrackerTokenProvider {
                 onUpdated(renewed)
                 return renewed
             } catch let error as TrackerAPIError where error == .sessionExpired {
-                onInvalidated()
+                invalidateRejectedToken(current.accessToken)
                 throw error
             }
         }
@@ -141,6 +152,9 @@ final class TrackerTransport {
         if response.statusCode == 401 {
             let renewed = try await tokens.accessToken(afterRejecting: token)
             response = try await http.send(build(renewed))
+            if response.statusCode == 401, tokens.invalidateRejectedToken(renewed) {
+                throw TrackerAPIError.sessionExpired
+            }
         }
         guard response.isSuccess else { throw mapError(response) }
         return response
