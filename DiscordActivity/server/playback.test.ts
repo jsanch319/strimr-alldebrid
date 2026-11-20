@@ -128,3 +128,13 @@ test("completed video is held at the end rather than automatically replayed", as
   await sync.apply(room(true, 3600), 10_000);
   assert.equal(video.plays, 0); assert.equal(video.currentTime, 3600);
 });
+
+test("rendition replacement restores sub-1.5-second resume and precise paused seeks", async () => {
+  const video = fakeVideo(); video.readyState = 1; video.seekable.length = 1;
+  const sync = new VideoSync(video);
+  await sync.apply(room(false, 1.25), 10_000);
+  assert.equal(video.currentTime, 1.25);
+  await sync.apply(room(false, 2.125), 10_000);
+  assert.equal(video.currentTime, 2.125);
+  assert.equal(video.plays, 0);
+});

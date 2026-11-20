@@ -9,7 +9,9 @@
     "dev:client": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
-    "test": "tsx --test server/*.test.ts"
+    "test": "tsx --test server/*.test.ts",
+    "prepare:mkv": "tsx tools/prepareMkv.ts",
+    "test:browser": "tsx --test browser/*.test.ts"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",
@@ -27,6 +29,7 @@
     "@types/react-dom": "^18.3.5",
     "@types/ws": "^8.5.13",
     "concurrently": "^9.1.2",
+    "puppeteer-core": "^25.18.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.7"

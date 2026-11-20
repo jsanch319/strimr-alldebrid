@@ -192,9 +192,9 @@ compatibility. For local development only, add a Vite `/media` proxy to your own
 authorized media origin; none is configured by default.
 
 MP4/H.264/AAC is a practical compatibility starting point. Clear HLS uses native HLS
-where available, otherwise hls.js where MediaSource is supported. MKV, unsupported
-codecs, encrypted/DRM services and arbitrary AllDebrid links are not converted or
-unlocked. No paid video API is added; hosting/media bandwidth is operator-provided.
+where available, otherwise hls.js where MediaSource is supported. Authorized local
+MKVs can be prepared offline as described below. Encrypted/DRM services and arbitrary
+private AllDebrid links are not converted, relayed or unlocked. No paid video API is added; hosting/media bandwidth is operator-provided.
 The native iPhone continues using its original source, quality and player pipeline.
 
 The catalog ACL controls source discovery, **not the origin's asset access policy**.
@@ -271,5 +271,89 @@ Authorization headers, `/api/auth`/pair request bodies or private pairing respon
   AllDebrid keys/private URLs. Browser viewers see only their authorized mapped asset.
 
 Until these pass on the deployed app, report the feature as implemented but unverified
-in Discord, including any mobile limitations. The local test suite mocks Discord's
-identity service and uses simulated video ports; it does not claim end-to-end playback.
+in Discord, including any mobile limitations. Local tests mock Discord identity and
+room endpoints. The MKV component test below decodes real generated media in Chromium;
+it does not claim end-to-end Discord playback.
+
+## Authorized MKV preparation
+
+Discord's embedded browser does not reliably play Matroska directly. The Activity
+now accepts prepared MP4 renditions with independent audio choices and WebVTT
+captions. This is an **offline operator preparation job**, not an AllDebrid proxy
+or automatic transfer of private Strimr streams. You must have permission to deliver
+the media to every participant through Discord; a personal download entitlement
+alone does not establish redistribution permission.
+
+Install Node 24, FFmpeg/FFprobe (tested locally with 7.1.5, including libx264,
+zscale and tonemap), then `npm ci --include=dev`. For an authorized local MKV:
+
+```sh
+mkdir -p /srv/strimr-prepared
+npm run prepare:mkv -- \
+  --input /private/authorized-title.mkv \
+  --output-root /srv/strimr-prepared \
+  --slug authorized-title-v1 --media-id movie:42 \
+  --users YOUR_DISCORD_USER_ID,FRIEND_DISCORD_USER_ID \
+  --authorized-for-discord
+```
+
+For an episode, use the exact existing room media ID plus `--season 1 --episode 2`.
+Use actual Discord user IDs; no tokens or credentials belong in this command.
+The input must be a local `.mkv`; network URLs, decryption keys and arbitrary
+FFmpeg arguments are not accepted. Processing errors omit source paths and FFmpeg
+stderr. No original input is deleted. Failed jobs clean staging outputs and never
+publish a partial catalog entry. Default job timeout is six hours; allow sufficient
+CPU, disk and output storage, especially for 4K and multiple audio tracks.
+
+The job writes a versioned directory with MP4s, VTTs, `catalog-entry.json`, an
+operator-only preparation report and, when applicable, original subtitles/fonts in
+`subtitles-original.mks`. Merge the generated entry into the catalog file configured by
+`AUTHORIZED_MEDIA_CATALOG_PATH`. Publish **only approved MP4/VTT assets**
+under the existing `/media` URL mapping. Keep source MKVs, reports and subtitle
+archives outside the public media origin. Configure HTTPS, byte-range responses,
+correct MP4/VTT content types and CORS for the mapped Discord origin. Protect asset
+access at the origin as well as catalog lookup: the catalog's participant ACL does
+not itself protect a static file server. Never publish private AllDebrid URLs or keys.
+
+- H.264/HEVC video is stream-copied into MP4 where possible, without re-encoding or
+  downscaling. The local 3840×2160 fixture test compares decoded frame hashes.
+  Compatible audio is also copied. Incompatible audio gets an AAC stereo alternative
+  while retaining the original video; this changes the audio, not the video.
+- By default a separate H.264/AAC compatibility encode is prepared at source
+  resolution (odd dimensions may be padded one pixel). It is **lossy**, CRF 18,
+  not a claim of identical original quality. Video is encoded once, then muxed
+  separately per audio track. `--no-transcode` disables video re-encoding.
+- HDR compatibility encoding requires explicit `--allow-sdr-fallback` and tone-maps
+  to SDR. Original HDR video remains in successful copy renditions. HDR10, Dolby
+  Vision and HEVC playback depend on the Discord browser and receiver; neither
+  HDR nor Dolby Vision support is certified here. Unusual timelines that cannot be
+  preserved within the validation tolerance fail instead of silently changing sync.
+- Each audio track is locally selectable. Auto prefers browser-supported copied
+  video/audio, then compatible alternatives; decoding failures try the finite
+  remaining prepared variants for the same audio. Users can explicitly choose
+  copied video or compatibility mode. Changing tracks/renditions restores the shared
+  room timestamp and does not publish a temporary zero or change other viewers' audio.
+- Text subtitles retain cue timing as WebVTT. ASS styling is not fully representable;
+  originals/fonts are archived. Bitmap subtitles are preserved in the archive but
+  shown as unavailable in the browser until an authorized WebVTT is provided. There
+  is no automatic OCR, subtitle burn-in or claim that every MKV subtitle renders.
+
+### Verification scope
+
+`npm test` includes real FFmpeg preparation tests for original-resolution 4K remux,
+frame identity, incompatible video fallback, audio conversion, captions, input
+restrictions and catalog authorization. `npm run test:browser` uses installed Chrome
+or `STRIMR_CHROMIUM_PATH` to decode generated owned media with the **production
+EmbeddedVideo component**: nonzero fractional resume, audio/compatibility switching,
+caption cues, play/pause and seeking. Set `STRIMR_BROWSER_ARTIFACTS` for its screenshot
+and JSON results. This harness mocks room/auth endpoints and is explicitly labeled
+**not Discord**. It does not certify Discord's URL proxy, sandbox, mobile codecs or
+real participant synchronization.
+
+Actual Discord acceptance testing remains required: two authorized participants,
+Discord desktop and supported iOS/Android Activity builds, copied H.264 and HEVC 4K,
+compatibility fallback, audio/captions, late join/resume, network interruptions and
+mobile gesture/background behavior. No deployed Activity credentials, participant
+devices or Discord session are available in this workspace, so these tests have
+**not** been performed. Native Strimr playback continues resolving its own source;
+the operator must prepare the exact same cut/timeline for Discord viewers.

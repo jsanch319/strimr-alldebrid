@@ -21,6 +21,19 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: DiscordActivity/package-lock.json
+      - name: Install media tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - name: Test prepared MKV playback in Chromium (not Discord)
+        run: npm run test:browser
+        env:
+          STRIMR_CHROMIUM_PATH: /usr/bin/google-chrome
+          STRIMR_BROWSER_ARTIFACTS: ${{ runner.temp }}/mkv-browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mkv-chromium-component-results
+          path: ${{ runner.temp }}/mkv-browser
+          if-no-files-found: ignore

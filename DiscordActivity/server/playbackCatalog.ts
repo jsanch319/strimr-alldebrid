@@ -1,7 +1,9 @@
 import type { SafeMediaMetadata } from "../src/shared.js";
 import { isMappedVideoPath } from "../src/sourceResolver.js";
 
-export interface AuthorizedVideo {
+import { parsePreparedMedia, type PreparedMedia } from "../src/preparedMedia.js";
+
+export interface AuthorizedVideo extends PreparedMedia {
   mediaId: string;
   season: number | null;
   episode: number | null;
@@ -27,7 +29,7 @@ export function parseCatalog(raw: unknown): AuthorizedVideo[] {
         !item.allowedDiscordUserIds.every((id) => /^\d{17,20}$/.test(id))) {
       throw new Error("Invalid authorized media catalog entry.");
     }
-    return { mediaId: item.mediaId, season: item.season, episode: item.episode,
+    return { ...parsePreparedMedia(item), mediaId: item.mediaId, season: item.season, episode: item.episode,
       sourceIdentifier: item.sourceIdentifier, browserPath: item.browserPath,
       mimeType: item.mimeType, allowedDiscordUserIds: [...item.allowedDiscordUserIds] };
   });
@@ -39,5 +41,5 @@ export function authorizedVideo(catalog: AuthorizedVideo[], media: SafeMediaMeta
     (!media.selectedSourceIdentifier || item.sourceIdentifier === media.selectedSourceIdentifier) &&
     item.allowedDiscordUserIds.includes(userId));
   if (!entry) throw new Error("No authorized browser-compatible video is configured for this title and participant.");
-  return { browserPath: entry.browserPath, mimeType: entry.mimeType, sourceIdentifier: entry.sourceIdentifier };
+  return { ...parsePreparedMedia(entry), browserPath: entry.browserPath, mimeType: entry.mimeType, sourceIdentifier: entry.sourceIdentifier };
 }

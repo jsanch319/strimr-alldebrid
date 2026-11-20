@@ -1,22 +1,22 @@
+import { parsePreparedMedia, type PreparedMedia } from "./preparedMedia.js";
 export interface LocalPlaybackSource {
   playbackURL: URL;
   authorizationHeaders?: Readonly<Record<string, string>>;
 }
 
-export function isMappedVideoPath(value: unknown): value is string {
-  return typeof value === "string" && /^\/media\/[a-zA-Z0-9_/-]+\.(mp4|m3u8)$/.test(value);
-}
+export { isMappedVideoPath } from "./shared.js";
+import { isMappedVideoPath } from "./shared.js";
 
 export async function resolveBrowserVideo(token: string, signal: AbortSignal) {
   const response = await fetch("/api/playback", {
     method: "POST", headers: { Authorization: `Bearer ${token}` }, signal,
   });
   if (!response.ok) throw new Error("No authorized browser-compatible video is configured for you. Ask the operator to configure this exact title and your Discord user ID.");
-  const source = await response.json() as { browserPath?: string; mimeType?: string };
+  const source = await response.json() as PreparedMedia & { browserPath?: string; mimeType?: string };
   if (!isMappedVideoPath(source.browserPath) || !["video/mp4", "application/vnd.apple.mpegurl"].includes(source.mimeType ?? "")) {
     throw new Error("The configured video mapping is invalid.");
   }
-  return { browserPath: source.browserPath, mimeType: source.mimeType };
+  return { ...parsePreparedMedia(source), browserPath: source.browserPath, mimeType: source.mimeType };
 }
 
 export interface ClientPlaybackSourceResolver {

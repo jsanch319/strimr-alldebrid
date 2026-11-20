@@ -18,12 +18,13 @@ export interface VideoPort {
 export class VideoSync {
   blocked = false;
   private playing = false;
+  private restored = false;
   constructor(private readonly video: VideoPort) {}
   enable() { this.blocked = false; }
   async apply(room: WatchRoom, now: number): Promise<"ready" | "waiting" | "tap"> {
     const target = positionAt(room, now);
     if (this.video.readyState < 1) return "waiting";
-    if (Math.abs(this.video.currentTime - target) > 1.5) {
+    if (Math.abs(this.video.currentTime - target) > (!this.restored || !room.isPlaying ? 0.05 : 1.5)) {
       let seekable = false;
       for (let i = 0; i < this.video.seekable.length; i++) {
         if (target >= this.video.seekable.start(i) && target <= this.video.seekable.end(i)) seekable = true;
@@ -31,6 +32,7 @@ export class VideoSync {
       if (!seekable) { this.video.pause(); return "waiting"; }
       this.video.currentTime = target;
     }
+    this.restored = true;
     if (!room.isPlaying || (room.media.duration > 0 && target >= room.media.duration - 0.05)) this.video.pause();
     else if (this.video.paused && !this.playing && !this.blocked) {
       this.playing = true;
