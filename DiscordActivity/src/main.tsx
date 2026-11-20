@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { DiscordSDK } from "@discord/embedded-app-sdk";
 import type { InitialPlaybackState, SafeMediaMetadata } from "./shared.js";
+import { optionalQueryInteger } from "./shared.js";
 import { WatchTogetherActivity, type ActivitySession } from "./watchTogetherActivity.js";
 import "./style.css";
 
@@ -124,10 +125,7 @@ function initialPlaybackFromURL(): InitialPlaybackState {
 
 function mediaFromURL(): SafeMediaMetadata {
   const query = new URLSearchParams(location.search);
-  const positiveInteger = (key: string) => {
-    const value = Number(query.get(key));
-    return Number.isSafeInteger(value) && value >= 0 ? value : null;
-  };
+  const positiveInteger = (key: string) => optionalQueryInteger(query, key);
   const type = query.get("media_type");
   return {
     mediaId: query.get("media_id")?.slice(0, 180) ?? "",

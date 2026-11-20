@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { NativePairing } from "./nativePairing.js";
 import { authorizedVideo, parseCatalog } from "./playbackCatalog.js";
-import { defaultMedia, type WatchRoom } from "../src/shared.js";
+import { defaultMedia, optionalQueryInteger, type WatchRoom } from "../src/shared.js";
 import { VideoSync, positionAt } from "../src/videoSync.js";
 import { isMappedVideoPath } from "../src/sourceResolver.js";
 import { RoomService } from "./roomService.js";
@@ -10,6 +10,15 @@ import { RoomService } from "./roomService.js";
 const host = "111111111111111111", friend = "222222222222222222";
 const entry = { mediaId: "movie:42", season: null, episode: null, sourceIdentifier: "authorized-cut", browserPath: "/media/owned/film.mp4", mimeType: "video/mp4", allowedDiscordUserIds: [host, friend] };
 const media = { ...defaultMedia, mediaId: "movie:42", title: "Owned film", duration: 3600 };
+test("movie launch URLs do not invent season or episode zero and TV identifiers stay exact", () => {
+  const movie = new URLSearchParams("media_id=movie:42&media_type=movie");
+  assert.equal(optionalQueryInteger(movie, "season"), null);
+  assert.equal(optionalQueryInteger(movie, "episode"), null);
+  const tv = new URLSearchParams("season=2&episode=7");
+  assert.equal(optionalQueryInteger(tv, "season"), 2); assert.equal(optionalQueryInteger(tv, "episode"), 7);
+  assert.equal(optionalQueryInteger(new URLSearchParams("season=0"), "season"), 0);
+  for (const raw of ["", "-1", "NaN", "1.5"]) assert.equal(optionalQueryInteger(new URLSearchParams({ episode: raw }), "episode"), null);
+});
 function room(playing = true, position = 333.125): WatchRoom {
   return { revision: 1, sessionId: "activity", media, currentPosition: position, isPlaying: playing,
     hostUserId: host, participants: [], controlMode: "host-only", approvedUserIds: [], sourceChangeUserIds: [], updatedAt: 10_000 };

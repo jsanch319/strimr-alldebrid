@@ -59,6 +59,14 @@ export const defaultMedia: SafeMediaMetadata = {
   selectedSourceIdentifier: null,
 };
 
+/** Missing movie episode parameters are absent, not season/episode zero. */
+export function optionalQueryInteger(query: URLSearchParams, key: string): number | null {
+  const raw = query.get(key);
+  if (raw === null || !raw.trim()) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
 export function sanitizeMedia(value: unknown): SafeMediaMetadata {
   if (!value || typeof value !== "object") return defaultMedia;
   const media = value as Record<string, unknown>;
