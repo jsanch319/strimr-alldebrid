@@ -71,7 +71,7 @@ final class DiscordNativeBridge {
     @ObservationIgnored private var token: String?
     private var origin: URL?
     private var intentionalZeroSeek = false
-    private var resetSampleAfterRemote = false
+    @ObservationIgnored private var remoteBaseline: (sample: DiscordPlaybackSample, date: Date)?
     private var synchronizationSuspended = false
     private let session: URLSession
     private enum BridgeError: Error { case authorization }
@@ -145,7 +145,7 @@ final class DiscordNativeBridge {
                 "Use the HTTPS Activity origin and a fresh pairing code. Wait until this title is ready to play."; return
         }
         let current = UUID(); generation = current
-        synchronizationSuspended = false; resetSampleAfterRemote = false
+        synchronizationSuspended = false; remoteBaseline = nil
         isConnecting = true; message = "Connecting to Discord…"
         defer {
             if generation == current {
@@ -208,11 +208,8 @@ final class DiscordNativeBridge {
             let local = read()
             let acceptsZero = intentionalZeroSeek
             var command: Command?
-            if let local, resetSampleAfterRemote {
-                if !DiscordSyncPolicy.isTemporaryZero(local, previous: previous, intentional: false) {
-                    previous = local; sampled = Date()
-                }
-                resetSampleAfterRemote = false
+            if let baseline = remoteBaseline {
+                previous = baseline.sample; sampled = baseline.date; remoteBaseline = nil
             }
             if let local, applyTask == nil, !synchronizationSuspended {
                 if appliedRevision != reply.room.revision || (!canControl && previous.map {
@@ -235,7 +232,12 @@ final class DiscordNativeBridge {
                         let succeeded = await apply(target)
                         guard generation == current, !Task.isCancelled else { return }
                         applyTask = nil
-                        resetSampleAfterRemote = true
+                        // Capture immediately after the remote action, not at the next poll:
+                        // a user pause/seek during the polling gap must still be published.
+                        let settled = read().flatMap {
+                            DiscordSyncPolicy.isTemporaryZero($0, previous: target, intentional: false) ? nil : $0
+                        } ?? target
+                        remoteBaseline = (settled, Date())
                         if !succeeded {
                             synchronizationSuspended = true
                             message = "Discord position could not be restored. Local playback is retained; disconnect and reconnect to retry."
