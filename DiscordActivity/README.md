@@ -47,7 +47,7 @@ From the repository root:
 
 ```sh
 cd DiscordActivity
-npm ci
+npm ci --include=dev
 cp .env.example .env
 ```
 
@@ -88,7 +88,7 @@ DISCORD_ACTIVITY_URL = https://your-deployed-activity-host.example
 The Activity is not deployed by the iOS build. Deploy the `DiscordActivity/` app as a
 long-running Node.js web service with HTTPS and WebSocket support. For example, create
 a Render Web Service from this repository with root directory `DiscordActivity`,
-build command `npm ci && npm run build`, and start command `npm start`. Configure the
+build command `npm ci --include=dev && npm run build`, and start command `npm start`. Configure the
 server-only environment values from `DiscordActivity/.env.example` in the hosting
 service's secret settings. Do not put the bot token, OAuth client secret, or room
 signing key in `Config.xcconfig`, GitHub variables, or the iOS app.
@@ -118,11 +118,14 @@ secret.
 ## Build, test, run
 
 ```sh
-npm ci
+npm ci --include=dev
 npm test
 npm run build
 npm start
 ```
+
+The current start command uses `tsx`; retain the installed development tools at
+runtime (do not prune them on production hosts).
 
 `npm start` serves the built `dist` client and the WebSocket/HTTP room service from the
 same host. Deploy the build to a long-running Node.js host with HTTPS/WSS and configure

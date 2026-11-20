@@ -91,4 +91,11 @@ test("HTTP/WS authenticated Activity and native pairing preserve permission and 
   const denied = await post("/api/native/sync", { media, command: { type: "sync-playback", revision: pause.body.room.revision, position: 0, isPlaying: true } }, friendPair.body.token);
   assert.equal(denied.status, 403);
   assert.equal((await post("/api/native/leave", {}, replacement.body.token)).status, 200);
+  const existing = new Set(webSocketServer.clients);
+  const broken = new WebSocket(origin.replace("http:", "ws:") + "/ws");
+  await once(broken, "open");
+  const closed = once(broken, "close");
+  [...webSocketServer.clients].find((socket) => !existing.has(socket))!.emit("error", new Error("Fixture transport failure"));
+  await closed;
+  assert.equal((await post("/api/playback", {}, b.body.token)).status, 200);
 });

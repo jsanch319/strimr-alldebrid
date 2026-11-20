@@ -205,6 +205,8 @@ server.on("upgrade", (request, socket, head) => {
 });
 
 webSocketServer.on("connection", (webSocket) => {
+  // Broken/invalid transports must not become an uncaught EventEmitter error.
+  webSocket.on("error", () => webSocket.terminate());
   let roomIdentity: { sessionId: string; userId: string } | null = null;
   (webSocket as WebSocket & { isAlive?: boolean }).isAlive = true;
   webSocket.on("pong", () => {
