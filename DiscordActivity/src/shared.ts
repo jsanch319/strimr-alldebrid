@@ -24,6 +24,7 @@ export interface Participant {
 }
 
 export interface WatchRoom {
+  revision: number;
   sessionId: string;
   media: SafeMediaMetadata;
   currentPosition: number;
@@ -37,6 +38,7 @@ export interface WatchRoom {
 }
 
 export type RoomCommand =
+  | { type: "sync-playback"; position: number; isPlaying: boolean; revision: number }
   | { type: "play" }
   | { type: "pause" }
   | { type: "seek"; position: number }

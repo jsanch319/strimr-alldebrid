@@ -107,6 +107,10 @@ struct PlayerView: View {
     @State private var isAirPlayPickerPresented = false
     @State private var discordWatchTogetherMessage: String?
     @State private var isShowingDiscordWatchTogetherAlert = false
+    @State private var discordBridge = DiscordNativeBridge()
+    @State private var showsDiscordActions = false
+    @State private var showsDiscordPairing = false
+    @State private var discordPreviousRate: Float?
 
     private let controlsHideDelay: TimeInterval = 3.0
     private var seekBackwardInterval: Double {
@@ -202,6 +206,7 @@ struct PlayerView: View {
                     startPlaybackIfNeeded(url: viewModel.playbackURL)
                 }
                 .onDisappear {
+                    discordBridge.disconnect()
                     englishFallbackTask?.cancel()
                     nextEpisodePresentation.cancel()
                     sleepTimer.cancel()
@@ -263,6 +268,9 @@ struct PlayerView: View {
                     englishSession.beginLoad(); refreshTracks()
                 }
                 .onChange(of: viewModel.media?.id) { _, _ in
+                    if discordBridge.isConnected {
+                        discordBridge.disconnect()
+                    }
                     englishFallbackTask?
                         .cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil; showEnglishOffer =
                         false; englishOffer = nil
@@ -536,6 +544,36 @@ struct PlayerView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(discordWatchTogetherMessage ?? "")
+            }
+            .confirmationDialog(
+                "Discord Watch Together",
+                isPresented: $showsDiscordActions,
+                titleVisibility: .visible,
+            ) {
+                Button("Open Discord Activity") { openDiscordActivity() }
+                Button("Connect to Activity") { showsDiscordPairing = true }
+                if discordBridge.isConnected {
+                    Button("Disconnect from Discord", role: .destructive) { discordBridge.disconnect() }
+                }
+            } message: {
+                Text(discordBridge.isConnected ? discordBridge
+                    .message :
+                    "Start the Activity in Discord, create a private pairing code, then connect this existing Strimr player. Each viewer needs an authorized source.")
+            }
+            .sheet(isPresented: $showsDiscordPairing) {
+                DiscordNativePairingView(bridge: discordBridge, connect: connectDiscordActivity)
+            }
+            .onChange(of: discordBridge.isConnected) { _, connected in
+                if connected {
+                    discordPreviousRate = playbackRate; selectPlaybackRate(1)
+                } else if let previous = discordPreviousRate {
+                    discordPreviousRate = nil; selectPlaybackRate(sharePlayCoordinator.isInSession ? 1 : previous)
+                }
+            }
+            .onChange(of: sharePlayCoordinator.isInSession) { _, active in
+                if active, discordBridge.isConnected {
+                    discordBridge.disconnect()
+                }
             }
             .onChange(of: isPauseScreenEligible, initial: true) { _, isEligible in
                 pauseScreen.update(isEligible: isEligible)
@@ -843,6 +881,39 @@ struct PlayerView: View {
     }
 
     private func startDiscordWatchTogether() {
+        showsDiscordActions = true
+    }
+
+    private func connectDiscordActivity(_ code: String) async {
+        guard !sharePlayCoordinator.isInSession else {
+            showDiscordWatchTogetherMessage("Leave SharePlay before connecting Discord synchronization."); return
+        }
+        guard let media = viewModel.media,
+              let metadata = DiscordNativeMedia(
+                  media: media,
+                  duration: playerController.duration ?? viewModel.duration,
+              ),
+              let raw = Bundle.main.object(forInfoDictionaryKey: "DiscordActivityURL") as? String,
+              let origin = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { showDiscordWatchTogetherMessage(DiscordWatchTogetherConfiguration.setupExplanation); return }
+        await discordBridge.connect(code: code, origin: origin, media: metadata, read: {
+            guard !awaitingMediaLoad, !verifyingInitialResume, !isScrubbing, !playerController.isBuffering,
+                  (playerController.duration ?? viewModel.duration ?? 0) > 0 else { return nil }
+            return DiscordPlaybackSample(position: playerController.position, isPlaying: !playerController.isPaused)
+        }, apply: { state in
+            if abs(playerController.position - state.position) > 1.5 {
+                guard await playerController.seekAfterReady(to: state.position), !Task.isCancelled else { return false }
+            }
+            if state.isPlaying {
+                playerController.resume()
+            } else {
+                playerController.pause()
+            }
+            return true
+        })
+    }
+
+    private func openDiscordActivity() {
         guard
             let media = viewModel.media,
             let url = DiscordWatchTogetherConfiguration.activityLaunchURL(
@@ -850,7 +921,7 @@ struct PlayerView: View {
                 position: playerController.position,
                 isPlaying: !playerController.isPaused,
                 duration: playerController.duration ?? viewModel.duration,
-                selectedSourceIdentifier: viewModel.currentVersionID,
+                selectedSourceIdentifier: nil,
             )
         else {
             // Optional integration: a stale action must never interrupt ordinary playback with setup instructions.
@@ -1691,8 +1762,9 @@ struct PlayerView: View {
     }
 
     private func selectPlaybackRate(_ rate: Float) {
-        playbackRate = rate
-        playerController.setPlaybackRate(rate)
+        let sessionRate: Float = discordBridge.isConnected ? 1 : rate
+        playbackRate = sessionRate
+        playerController.setPlaybackRate(sessionRate)
         showControls(temporarily: true)
     }
 
@@ -1822,6 +1894,7 @@ struct PlayerView: View {
     }
 
     private func jump(by seconds: Double) {
+        discordBridge.noteIntentionalSeek()
         playerController.seek(by: seconds)
         showControls(temporarily: true)
     }
@@ -1982,6 +2055,7 @@ struct PlayerView: View {
             }
         } else {
             playerController.endScrubPreviewing()
+            discordBridge.noteIntentionalSeek()
             playerController.seek(to: timelinePosition)
             viewModel.position = timelinePosition
             scheduleControlsHide()

@@ -64,6 +64,7 @@ Config/Config-TopShelf.xcconfig
 node_modules/
 .env
 DiscordActivity/dist/
+DiscordActivity/authorized-media*.local.json
 
 # Bundler
 .bundle/

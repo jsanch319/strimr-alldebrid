@@ -1,5 +1,6 @@
 import React from "react";
 import type { ControlMode, InitialPlaybackState, RoomCommand, WatchRoom } from "./shared.js";
+import { EmbeddedVideo } from "./embeddedVideo.js";
 
 export interface ActivitySession {
   token: string;
@@ -16,6 +17,8 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
   const [error, setError] = React.useState("");
   const [position, setPosition] = React.useState(0);
   const [inviteError, setInviteError] = React.useState("");
+  const [pairCode, setPairCode] = React.useState("");
+  const [native, setNative] = React.useState(false);
   const socketRef = React.useRef<WebSocket | null>(null);
   const reconnectDelay = React.useRef(500);
   const serverClockOffset = React.useRef(0);
@@ -43,26 +46,31 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
         setConnection("Connected");
       });
       socket.addEventListener("message", (event) => {
-        const message = JSON.parse(String(event.data)) as {
+        let message: {
           type: string;
           room?: WatchRoom;
           message?: string;
           serverTime?: number;
         };
+        try { message = JSON.parse(String(event.data)); }
+        catch { setError("The room sent an unreadable message."); return; }
         if (message.type === "room" && message.room) {
           if (typeof message.serverTime === "number") {
             serverClockOffset.current = message.serverTime - Date.now();
           }
-          setRoom(message.room);
+          setRoom((previous) => !previous || message.room!.revision >= previous.revision ? message.room! : previous);
           setPosition(positionAt(message.room, serverClockOffset.current));
           setError("");
         } else if (message.type === "error") {
           setError(message.message ?? "The room request failed.");
         }
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         socketRef.current = null;
         if (stopped) return;
+        if (event.code === 1008) {
+          setConnection("Disconnected"); setError("Discord session ended. Reopen the Activity to authenticate again."); return;
+        }
         setConnection("Reconnecting");
         reconnect = setTimeout(connect, reconnectDelay.current);
         reconnectDelay.current = Math.min(reconnectDelay.current * 2, 10_000);
@@ -106,6 +114,15 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
     }
   }
 
+  async function pairNative() {
+    try {
+      const response = await fetch("/api/native/code", { method: "POST", headers: { Authorization: `Bearer ${session.token}` } });
+      if (!response.ok) throw new Error("Join the room before pairing Strimr.");
+      const { code } = await response.json() as { code: string };
+      setPairCode(code); setNative(true); setError("");
+    } catch { setError("Could not create a Strimr pairing code. Reopen this Activity and retry."); }
+  }
+
   function updateMode(mode: ControlMode) {
     send({ type: "set-control-mode", mode });
   }
@@ -137,10 +154,7 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
       </header>
 
       <section className="watch-card">
-        <div className="artwork" aria-label="Media artwork placeholder">
-          <div className="artwork-symbol">▶</div>
-          <span>STRIMR</span>
-        </div>
+        <EmbeddedVideo room={room} token={session.token} native={native} clockOffset={serverClockOffset.current} connected={connection === "Connected"} />
         <div className="media-info">
           <p className="eyebrow">WATCH PARTY</p>
           <h1>{room?.media.title ?? "Joining room…"}</h1>
@@ -150,7 +164,7 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
               {room.media.episode === null ? "" : ` · Episode ${room.media.episode}`}
             </p>
           )}
-          <p className="room-status">{room?.isPlaying ? "Playing together" : "Paused"} · {connection}</p>
+          <p className="room-status">Room timeline: {room?.isPlaying ? "playing" : "paused"} · {connection}</p>
           <div className="timeline">
             <input
               aria-label="Playback position"
@@ -185,7 +199,13 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
             </button>
             <button className="invite-button" onClick={() => void invite()}>Invite</button>
           </div>
-          <p className="sync-note">Playback position syncs here. Each participant resolves playback in their own Strimr app.</p>
+          <p className="sync-note">Each participant watches an independently authorized copy of the same title. Private Strimr playback URLs never enter the room.</p>
+          <button onClick={() => void pairNative()}>Use my Strimr iPhone player</button>
+          {native && <button onClick={() => { setNative(false); setPairCode(""); }}>Watch on this Discord device instead</button>}
+          {pairCode && <div role="status" className="pairing-code">
+            <p>Copy this one-use code (expires in 2 minutes). In Strimr's player, open Discord → Connect to Activity. Keep it private.</p>
+            <input aria-label="Private Strimr pairing code" readOnly value={pairCode} onFocus={(e) => e.currentTarget.select()} />
+          </div>}
         </div>
       </section>
 
@@ -255,7 +275,7 @@ export function WatchTogetherActivity({ session }: { session: ActivitySession })
         </ul>
 
         <p className="permission-note">
-          Source changes are host-only unless explicitly granted. Playback sources and private URLs are never shared in this room.
+          Source changes are host-only unless explicitly granted. AllDebrid credentials and private playback URLs stay on each iPhone.
         </p>
       </section>
       {(error || inviteError) && <p role="alert" className="error-message">{error || inviteError}</p>}

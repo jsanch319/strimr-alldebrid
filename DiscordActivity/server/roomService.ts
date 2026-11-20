@@ -40,6 +40,7 @@ export class RoomService {
       const safeMedia = sanitizeMedia(media);
       room = {
         state: {
+          revision: 0,
           sessionId,
           media: safeMedia,
           currentPosition: this.clampPosition(initialPlayback.position, safeMedia.duration),
@@ -68,6 +69,8 @@ export class RoomService {
   leave(sessionId: string, userId: string, now = Date.now()): WatchRoom | null {
     const room = this.rooms.get(sessionId);
     if (!room) return null;
+    room.state.currentPosition = this.currentPosition(room.state, now);
+    room.state.updatedAt = now;
     room.users.delete(userId);
     if (room.users.size === 0) {
       room.state.currentPosition = this.currentPosition(room.state, now);
@@ -92,6 +95,18 @@ export class RoomService {
     const state = room.state;
     const isHost = state.hostUserId === userId;
 
+    // Validate permissions before mutating the timeline. A stale native sample must
+    // not overwrite a newer seek/pause received from another participant.
+    if (command.type === "sync-playback") {
+      if (!this.canControl(state, userId)) throw new Error("You do not have playback control.");
+      if (command.revision !== state.revision) return this.snapshot(room, now);
+      state.currentPosition = this.clampPosition(command.position, state.media.duration);
+      state.isPlaying = command.isPlaying;
+      state.updatedAt = now;
+      state.revision += 1;
+      return this.snapshot(room, now);
+    }
+
     switch (command.type) {
       case "play":
       case "pause":
@@ -110,22 +125,26 @@ export class RoomService {
       }
       case "set-control-mode":
         this.requireHost(isHost);
+        state.currentPosition = this.currentPosition(state, now);
         state.controlMode = command.mode;
         if (command.mode !== "approved") state.approvedUserIds = [];
         break;
       case "set-approved-users":
         this.requireHost(isHost);
+        state.currentPosition = this.currentPosition(state, now);
         state.approvedUserIds = this.validUserIds(command.userIds, room, userId);
         state.controlMode = "approved";
         break;
       case "set-source-access":
         this.requireHost(isHost);
+        state.currentPosition = this.currentPosition(state, now);
         state.sourceChangeUserIds = this.validUserIds(command.userIds, room, userId);
         break;
       case "change-source":
         if (!isHost && !state.sourceChangeUserIds.includes(userId)) {
           throw new Error("Only the host can change the playback source.");
         }
+        state.currentPosition = this.currentPosition(state, now);
         state.media = { ...state.media, selectedSourceIdentifier: safeIdentifier(command.sourceIdentifier) };
         break;
       case "change-media":
@@ -138,6 +157,7 @@ export class RoomService {
         throw new Error("Unsupported room command.");
     }
     state.updatedAt = now;
+    state.revision += 1;
     return this.snapshot(room, now);
   }
 
@@ -159,6 +179,8 @@ export class RoomService {
     return {
       ...state,
       currentPosition: this.currentPosition(state, now),
+      isPlaying: state.isPlaying && (state.media.duration <= 0 || this.currentPosition(state, now) < state.media.duration),
+      updatedAt: now,
       participants,
       approvedUserIds: [...state.approvedUserIds],
       sourceChangeUserIds: [...state.sourceChangeUserIds],

@@ -3,6 +3,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import express from "express";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
@@ -14,6 +15,8 @@ import {
   type WatchRoom,
 } from "../src/shared.js";
 import { isControlMode, RoomService } from "./roomService.js";
+import { NativePairing } from "./nativePairing.js";
+import { authorizedVideo, parseCatalog } from "./playbackCatalog.js";
 
 const port = Number(process.env.PORT ?? 3001);
 const appID = process.env.DISCORD_CLIENT_ID ?? "";
@@ -23,12 +26,35 @@ const tokenSecret = process.env.ROOM_TOKEN_SECRET ?? "";
 const redirectURI = process.env.DISCORD_REDIRECT_URI ?? "https://127.0.0.1";
 const activityConfigurationComplete = Boolean(appID && clientSecret && botToken && tokenSecret.length >= 32);
 const app = express();
-const server = createServer(app);
-const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+export const server = createServer(app);
+export const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
 const rooms = new RoomService();
-const sockets = new Map<WebSocket, { sessionId: string; userId: string }>();
+const pairing = new NativePairing();
+const catalog = (() => {
+  try {
+    return process.env.AUTHORIZED_MEDIA_CATALOG_PATH
+      ? parseCatalog(JSON.parse(readFileSync(process.env.AUTHORIZED_MEDIA_CATALOG_PATH, "utf8"))) : [];
+  } catch { throw new Error("Invalid authorized media catalog. Check the documented schema; catalog contents are not logged."); }
+})();
+class MembershipDenied extends Error {}
+const membership = new Map<string, number>();
+const nativeLeases = new Map<string, { identity: Omit<RoomIdentity, "exp">; expires: number }>();
+const requests = new Map<string, { count: number; until: number }>();
+const nativeKey = (instanceId: string, userId: string) => `${instanceId}:${userId}`;
+const sockets = new Map<WebSocket, { sessionId: string; userId: string; expires: number }>();
 const heartbeat = setInterval(() => {
+  for (const [key, lease] of nativeLeases) {
+    if (lease.expires <= Date.now()) {
+      nativeLeases.delete(key);
+      leaveIfDisconnected(lease.identity.instanceId, lease.identity.userId);
+    }
+  }
   for (const webSocket of webSocketServer.clients) {
+    const identity = sockets.get(webSocket);
+    if (identity) {
+      if (identity.expires <= Date.now()) { webSocket.close(1008, "Session expired"); continue; }
+      void verifyActivityParticipant(identity.sessionId, identity.userId).catch((error) => webSocket.close(error instanceof MembershipDenied ? 1008 : 1013, "Membership verification unavailable"));
+    }
     if ((webSocket as WebSocket & { isAlive?: boolean }).isAlive === false) {
       webSocket.terminate();
       continue;
@@ -39,6 +65,21 @@ const heartbeat = setInterval(() => {
 }, 20_000);
 
 app.use(express.json({ limit: "8kb" }));
+app.use("/api", (request, response, next) => {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  // Bound pairing guesses/auth abuse. Configure trusted proxy/IP policy at deployment.
+  for (const [key, item] of requests) if (item.until <= Date.now()) requests.delete(key);
+  let key = request.ip ?? "unknown";
+  try {
+    const header = request.headers.authorization;
+    if (header?.startsWith("Bearer ")) key = `user:${verifyRoomToken(header.slice(7)).userId}`;
+  } catch { /* Invalid tokens share the bounded unauthenticated IP budget. */ }
+  const item = requests.get(key) ?? { count: 0, until: Date.now() + 60_000 };
+  item.count += 1; requests.set(key, item);
+  if (item.count > 180 || requests.size > 10_000) { response.status(429).json({ error: "Request limit reached. Retry shortly." }); return; }
+  next();
+});
 app.get("/api/config", (_request, response) => {
   response.json({
     clientId: appID,
@@ -63,21 +104,85 @@ app.post("/api/auth", async (request, response) => {
   }
 
   try {
-    const user = await exchangeCode(code);
+    const { user, accessToken } = await exchangeCode(code);
     await verifyActivityParticipant(instanceId, user.id);
     response.json({
       token: signRoomToken({ userId: user.id, username: user.global_name || user.username, instanceId }),
       user: { id: user.id, username: user.global_name || user.username },
+      access_token: accessToken,
     });
   } catch (error) {
-    console.error("Discord Activity authentication failed:", error);
+    console.error("Discord Activity authentication failed.");
     response.status(401).json({ error: "Discord could not verify this Activity session." });
   }
+});
+
+app.post("/api/playback", async (request, response) => {
+  try {
+    const identity = await authenticated(request);
+    const room = rooms.get(identity.instanceId);
+    if (!room?.participants.some((p) => p.userId === identity.userId)) throw new Error("Join the Activity room first.");
+    response.json(authorizedVideo(catalog, room.media, identity.userId));
+  } catch { response.status(403).json({ error: "No authorized browser-compatible source is available for you in this room. Ask the operator to configure this title and your Discord ID." }); }
+});
+
+app.post("/api/native/code", async (request, response) => {
+  try {
+    const identity = await authenticated(request, "activity");
+    const room = rooms.get(identity.instanceId);
+    if (!room?.participants.some((p) => p.userId === identity.userId)) throw new Error("Join first.");
+    response.json({ code: pairing.issue(identity), expiresIn: 120 });
+  } catch { response.status(403).json({ error: "Join an authenticated Discord Activity before pairing Strimr." }); }
+});
+
+app.post("/api/native/pair", async (request, response) => {
+  try {
+    const identity = pairing.redeem(request.body?.code);
+    await verifyActivityParticipant(identity.instanceId, identity.userId);
+    const media = sanitizeMedia(request.body?.media);
+    let room = rooms.get(identity.instanceId);
+    if (!media.mediaId || !room?.participants.some((p) => p.userId === identity.userId)) throw new Error("Join first.");
+    if (room.media.mediaId && !sameMedia(room.media, media)) throw new Error("Open the same movie or exact episode in Strimr and Discord.");
+    if (!room.media.mediaId) room = rooms.command(identity.instanceId, identity.userId, { type: "change-media", media });
+    if (room.hostUserId === identity.userId) {
+      const initial = parseInitialPlayback(request.body?.initialPlayback);
+      room = rooms.command(identity.instanceId, identity.userId, { type: "sync-playback", ...initial, revision: room.revision });
+      broadcast(identity.instanceId, room);
+    }
+    nativeLeases.set(nativeKey(identity.instanceId, identity.userId), { identity: { ...identity, kind: "native" }, expires: Date.now() + 15_000 });
+    response.json({ token: signRoomToken({ ...identity, kind: "native" }), userId: identity.userId, room, serverTime: Date.now() });
+  } catch { response.status(403).json({ error: "Pairing failed. Use a fresh code from your Activity and open the same movie or exact episode." }); }
+});
+
+app.post("/api/native/sync", async (request, response) => {
+  try {
+    const identity = await authenticated(request, "native");
+    let room = rooms.get(identity.instanceId);
+    if (!room || !sameMedia(room.media, sanitizeMedia(request.body?.media))) throw new Error("The room title changed. Reconnect with the matching title.");
+    const lease = nativeLeases.get(nativeKey(identity.instanceId, identity.userId));
+    if (!lease || lease.expires <= Date.now()) throw new Error("Native pairing expired. Pair again in Discord.");
+    lease.expires = Date.now() + 15_000;
+    if (request.body?.command) room = rooms.command(identity.instanceId, identity.userId, parseCommand(request.body.command));
+    broadcast(identity.instanceId, room);
+    response.json({ room, serverTime: Date.now() });
+  } catch { response.status(403).json({ error: "Room synchronization unavailable. Check Discord membership, permissions and the selected title, then pair again." }); }
+});
+
+app.post("/api/native/leave", async (request, response) => {
+  try {
+    const identity = await authenticated(request, "native");
+    nativeLeases.delete(nativeKey(identity.instanceId, identity.userId));
+    leaveIfDisconnected(identity.instanceId, identity.userId);
+    response.json({ left: true });
+  } catch { response.status(403).json({ error: "Native session unavailable." }); }
 });
 
 const clientDirectory = resolve(fileURLToPath(new URL("../dist", import.meta.url)));
 app.use(express.static(clientDirectory));
 app.get("*", (_request, response) => response.sendFile(resolve(clientDirectory, "index.html")));
+app.use((_error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  response.status(400).json({ error: "Invalid Activity request." });
+});
 
 server.on("upgrade", (request, socket, head) => {
   if (new URL(request.url ?? "/", "http://localhost").pathname !== "/ws") {
@@ -95,18 +200,21 @@ webSocketServer.on("connection", (webSocket) => {
   webSocket.on("pong", () => {
     (webSocket as WebSocket & { isAlive?: boolean }).isAlive = true;
   });
-  webSocket.once("message", (data) => {
+  webSocket.once("message", async (data) => {
     try {
       const request = parseJSON(data);
       if (request.type !== "join" || typeof request.token !== "string") {
         throw new Error("Join the room before sending commands.");
       }
       const identity = verifyRoomToken(request.token);
+      if (identity.kind === "native") throw new Error("Use the native synchronization endpoint.");
+      await verifyActivityParticipant(identity.instanceId, identity.userId);
+      if (webSocket.readyState !== WebSocket.OPEN) return;
       if (request.sessionId !== identity.instanceId) throw new Error("This Discord identity is for another Activity.");
       const media = isPlainRecord(request.media) ? sanitizeMedia(request.media) : defaultMedia;
       const initialPlayback = parseInitialPlayback(request.initialPlayback);
       roomIdentity = { sessionId: identity.instanceId, userId: identity.userId };
-      sockets.set(webSocket, roomIdentity);
+      sockets.set(webSocket, { ...roomIdentity, expires: identity.exp });
       rooms.join(
         identity.instanceId,
         { userId: identity.userId, username: identity.username, joinedAt: Date.now() },
@@ -121,10 +229,13 @@ webSocketServer.on("connection", (webSocket) => {
     }
   });
 
-  webSocket.on("message", (data) => {
+  webSocket.on("message", async (data) => {
     if (!roomIdentity) return;
     try {
       const request = parseJSON(data);
+      if (request.type === "join") return;
+      await verifyActivityParticipant(roomIdentity.sessionId, roomIdentity.userId);
+      if (webSocket.readyState !== WebSocket.OPEN) return;
       const command = parseCommand(request.command);
       const room = rooms.command(roomIdentity.sessionId, roomIdentity.userId, command);
       broadcast(room.sessionId, room);
@@ -140,8 +251,7 @@ webSocketServer.on("connection", (webSocket) => {
     if ([...sockets.values()].some((candidate) =>
       candidate.sessionId === identity.sessionId && candidate.userId === identity.userId
     )) return;
-    const updated = rooms.leave(identity.sessionId, identity.userId);
-    if (updated) broadcast(identity.sessionId, updated);
+    leaveIfDisconnected(identity.sessionId, identity.userId);
   });
 });
 
@@ -150,7 +260,7 @@ server.listen(port, "0.0.0.0", () => {
 });
 server.on("close", () => clearInterval(heartbeat));
 
-async function exchangeCode(code: string): Promise<{ id: string; username: string; global_name?: string | null }> {
+async function exchangeCode(code: string) {
   const body = new URLSearchParams({
     client_id: appID,
     client_secret: clientSecret,
@@ -159,6 +269,7 @@ async function exchangeCode(code: string): Promise<{ id: string; username: strin
     redirect_uri: redirectURI,
   });
   const tokenResponse = await fetch("https://discord.com/api/oauth2/token", {
+    signal: AbortSignal.timeout(8000),
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -168,25 +279,31 @@ async function exchangeCode(code: string): Promise<{ id: string; username: strin
   if (!token.access_token) throw new Error("Discord OAuth did not return an access token.");
 
   const userResponse = await fetch("https://discord.com/api/users/@me", {
+    signal: AbortSignal.timeout(8000),
     headers: { Authorization: `Bearer ${token.access_token}` },
   });
   if (!userResponse.ok) throw new Error("Discord user lookup was rejected.");
   const user = await userResponse.json() as { id?: string; username?: string; global_name?: string | null };
   if (!user.id || !user.username) throw new Error("Discord returned incomplete user information.");
-  return { id: user.id, username: user.username, global_name: user.global_name };
+  return { user: { id: user.id, username: user.username, global_name: user.global_name }, accessToken: token.access_token };
 }
 
 async function verifyActivityParticipant(instanceId: string, userId: string): Promise<void> {
+  const key = nativeKey(instanceId, userId);
+  for (const [key, expires] of membership) if (expires <= Date.now()) membership.delete(key);
+  if ((membership.get(key) ?? 0) > Date.now()) return;
   const url = `https://discord.com/api/applications/${encodeURIComponent(appID)}/activity-instances/${encodeURIComponent(instanceId)}`;
-  const response = await fetch(url, { headers: { Authorization: `Bot ${botToken}` } });
+  const response = await fetch(url, { headers: { Authorization: `Bot ${botToken}` }, signal: AbortSignal.timeout(8000) });
   if (!response.ok) throw new Error("Discord Activity instance verification failed.");
   const instance = await response.json() as { application_id?: string; users?: string[] };
   if (instance.application_id !== appID || !instance.users?.includes(userId)) {
-    throw new Error("The authenticated user is not part of this Discord Activity.");
+    throw new MembershipDenied("The authenticated user is not part of this Discord Activity.");
   }
+  membership.set(key, Date.now() + 30_000);
 }
 
 interface RoomIdentity {
+  kind?: "native" | "activity";
   userId: string;
   username: string;
   instanceId: string;
@@ -194,7 +311,7 @@ interface RoomIdentity {
 }
 
 function signRoomToken(identity: Omit<RoomIdentity, "exp">): string {
-  const payload = encodeBase64URL(JSON.stringify({ ...identity, exp: Date.now() + 15 * 60 * 1000 }));
+  const payload = encodeBase64URL(JSON.stringify({ ...identity, exp: Date.now() + 8 * 60 * 60 * 1000 }));
   return `${payload}.${signature(payload)}`;
 }
 
@@ -243,6 +360,9 @@ function parseInitialPlayback(value: unknown): InitialPlaybackState {
 function parseCommand(value: unknown): RoomCommand {
   if (!isPlainRecord(value) || typeof value.type !== "string") throw new Error("Invalid room command.");
   switch (value.type) {
+    case "sync-playback":
+      if (typeof value.position !== "number" || !Number.isFinite(value.position) || typeof value.isPlaying !== "boolean" || !Number.isSafeInteger(value.revision)) throw new Error("Invalid playback sample.");
+      return { type: value.type, position: value.position, isPlaying: value.isPlaying, revision: value.revision as number };
     case "play":
     case "pause":
       return { type: value.type };
@@ -291,5 +411,24 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function errorMessage(error: unknown): string {
+  if (error instanceof SyntaxError) return "Invalid JSON room message.";
   return error instanceof Error ? error.message : "The room request failed.";
+}
+
+async function authenticated(request: express.Request, kind?: "native" | "activity"): Promise<RoomIdentity> {
+  const header = request.headers.authorization;
+  if (!header?.startsWith("Bearer ")) throw new Error("Authentication required.");
+  const identity = verifyRoomToken(header.slice(7));
+  if (kind && (identity.kind ?? "activity") !== kind) throw new Error("Wrong session type.");
+  await verifyActivityParticipant(identity.instanceId, identity.userId);
+  return identity;
+}
+function sameMedia(a: SafeMediaMetadata, b: SafeMediaMetadata) {
+  return a.mediaId === b.mediaId && a.mediaType === b.mediaType && a.season === b.season && a.episode === b.episode;
+}
+function leaveIfDisconnected(instanceId: string, userId: string) {
+  if ([...sockets.values()].some((s) => s.sessionId === instanceId && s.userId === userId) ||
+      (nativeLeases.get(nativeKey(instanceId, userId))?.expires ?? 0) > Date.now()) return;
+  const updated = rooms.leave(instanceId, userId);
+  if (updated) broadcast(instanceId, updated);
 }

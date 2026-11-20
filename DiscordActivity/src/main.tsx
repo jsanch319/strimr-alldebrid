@@ -58,10 +58,13 @@ function ActivityRoot() {
           token?: string;
           user?: { id: string; username: string };
           error?: string;
+          access_token?: string;
         };
-        if (!authenticationResponse.ok || !authentication.token || !authentication.user) {
+        if (!authenticationResponse.ok || !authentication.token || !authentication.user || !authentication.access_token) {
           throw new Error(authentication.error ?? "Discord authentication failed.");
         }
+        const authenticated = await discord.commands.authenticate({ access_token: authentication.access_token });
+        if (authenticated.user.id !== authentication.user.id) throw new Error("Discord identities did not match.");
         if (!active) return;
         setSession({
           token: authentication.token,
