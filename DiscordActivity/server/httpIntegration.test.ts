@@ -74,6 +74,15 @@ test("HTTP/WS authenticated Activity and native pairing preserve permission and 
   const stale = await post("/api/native/sync", { media, command: { type: "sync-playback", revision: 0, position: 0, isPlaying: true } }, pair.body.token);
   assert.equal(stale.body.room.currentPosition, 456.875); assert.equal(stale.body.room.isPlaying, false);
   assert.equal(stale.body.commandAccepted, false);
+  const replacementCode = await post("/api/native/code", {}, a.body.token);
+  const replacement = await post("/api/native/pair", { code: replacementCode.body.code,
+    media: { ...media, duration: 3599.75 }, initialPlayback: { position: 456.875, isPlaying: false } });
+  assert.equal(replacement.status, 200);
+  assert.equal(replacement.body.room.media.duration, 3599.75);
+  assert.equal(replacement.body.room.currentPosition, 456.875);
+  assert.equal((await post("/api/native/sync", { media }, pair.body.token)).status, 403);
+  assert.equal((await post("/api/native/leave", {}, pair.body.token)).status, 403);
+  assert.equal((await post("/api/native/sync", { media }, replacement.body.token)).status, 200);
   assert.equal((await post("/api/native/sync", { media: { ...media, episode: 2 } }, pair.body.token)).status, 403);
   assert.equal((await post("/api/native/code", {}, pair.body.token)).status, 403);
   const friendCode = await post("/api/native/code", {}, b.body.token);
@@ -81,5 +90,5 @@ test("HTTP/WS authenticated Activity and native pairing preserve permission and 
   assert.equal(friendPair.status, 200);
   const denied = await post("/api/native/sync", { media, command: { type: "sync-playback", revision: pause.body.room.revision, position: 0, isPlaying: true } }, friendPair.body.token);
   assert.equal(denied.status, 403);
-  assert.equal((await post("/api/native/leave", {}, pair.body.token)).status, 200);
+  assert.equal((await post("/api/native/leave", {}, replacement.body.token)).status, 200);
 });

@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -144,14 +144,21 @@ app.post("/api/native/pair", async (request, response) => {
     let room = rooms.get(identity.instanceId);
     if (!media.mediaId || !room?.participants.some((p) => p.userId === identity.userId)) throw new Error("Join first.");
     if (room.media.mediaId && !sameMedia(room.media, media)) throw new Error("Open the same movie or exact episode in Strimr and Discord.");
-    if (!room.media.mediaId) room = rooms.command(identity.instanceId, identity.userId, { type: "change-media", media });
     if (room.hostUserId === identity.userId) {
+      if (request.body?.initialPlayback === undefined) throw new Error("A ready native playback position is required.");
       const initial = parseInitialPlayback(request.body?.initialPlayback);
+      // Refresh same-title metadata from the ready player. Details/launch metadata
+      // can have a rounded runtime; never publish an intermediate reset to zero.
+      const selectedSourceIdentifier = room.media.mediaId ? room.media.selectedSourceIdentifier : null;
+      room = rooms.command(identity.instanceId, identity.userId, { type: "change-media", media: { ...media, selectedSourceIdentifier } });
       room = rooms.command(identity.instanceId, identity.userId, { type: "sync-playback", ...initial, revision: room.revision });
       broadcast(identity.instanceId, room);
+    } else if (!room.media.mediaId) {
+      throw new Error("The host must choose the title first.");
     }
-    nativeLeases.set(nativeKey(identity.instanceId, identity.userId), { identity: { ...identity, kind: "native" }, expires: Date.now() + 15_000 });
-    response.json({ token: signRoomToken({ ...identity, kind: "native" }), userId: identity.userId, room, serverTime: Date.now() });
+    const nativeIdentity = { ...identity, kind: "native" as const, nativeSession: randomBytes(18).toString("base64url") };
+    nativeLeases.set(nativeKey(identity.instanceId, identity.userId), { identity: nativeIdentity, expires: Date.now() + 15_000 });
+    response.json({ token: signRoomToken(nativeIdentity), userId: identity.userId, room, serverTime: Date.now() });
   } catch { response.status(403).json({ error: "Pairing failed. Use a fresh code from your Activity and open the same movie or exact episode." }); }
 });
 
@@ -161,7 +168,7 @@ app.post("/api/native/sync", async (request, response) => {
     let room = rooms.get(identity.instanceId);
     if (!room || !sameMedia(room.media, sanitizeMedia(request.body?.media))) throw new Error("The room title changed. Reconnect with the matching title.");
     const lease = nativeLeases.get(nativeKey(identity.instanceId, identity.userId));
-    if (!lease || lease.expires <= Date.now()) throw new Error("Native pairing expired. Pair again in Discord.");
+    if (!lease || lease.expires <= Date.now() || lease.identity.nativeSession !== identity.nativeSession) throw new Error("Native pairing expired. Pair again in Discord.");
     lease.expires = Date.now() + 15_000;
     const priorRevision = room.revision;
     if (request.body?.command) room = rooms.command(identity.instanceId, identity.userId, parseCommand(request.body.command));
@@ -173,6 +180,7 @@ app.post("/api/native/sync", async (request, response) => {
 app.post("/api/native/leave", async (request, response) => {
   try {
     const identity = await authenticated(request, "native");
+    if (nativeLeases.get(nativeKey(identity.instanceId, identity.userId))?.identity.nativeSession !== identity.nativeSession) throw new Error("Native pairing replaced.");
     nativeLeases.delete(nativeKey(identity.instanceId, identity.userId));
     leaveIfDisconnected(identity.instanceId, identity.userId);
     response.json({ left: true });
@@ -305,6 +313,7 @@ async function verifyActivityParticipant(instanceId: string, userId: string): Pr
 }
 
 interface RoomIdentity {
+  nativeSession?: string;
   kind?: "native" | "activity";
   userId: string;
   username: string;
@@ -422,6 +431,7 @@ async function authenticated(request: express.Request, kind?: "native" | "activi
   if (!header?.startsWith("Bearer ")) throw new Error("Authentication required.");
   const identity = verifyRoomToken(header.slice(7));
   if (kind && (identity.kind ?? "activity") !== kind) throw new Error("Wrong session type.");
+  if (kind === "native" && !identity.nativeSession) throw new Error("Native session required.");
   await verifyActivityParticipant(identity.instanceId, identity.userId);
   return identity;
 }

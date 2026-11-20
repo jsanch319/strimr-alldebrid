@@ -239,6 +239,10 @@ Native polling is once per two seconds with one in-flight request and bounded fa
 handling. Pairing tokens stay in memory; disconnect/reopening requires fresh pairing.
 Native presence leases expire after missed polls; host transfer and reconnection use
 the existing room lifecycle. Discord membership is rechecked with a 30-second cache.
+Pairing replaces that user's previous native connection; an old token or delayed
+disconnect cannot control or delete the new connection. Host pairing refreshes the
+ready player's actual runtime while preserving its fractional position, so rounded
+details metadata does not cause a false edition mismatch or a zero-position reset.
 Room tokens expire after eight hours; reopen the Activity/pair again after expiry.
 Single-instance deployment is required: rooms, pair codes and leases are in memory.
 Configure HTTPS/WSS, trusted reverse-proxy/IP rules and edge rate limiting. Do not log
