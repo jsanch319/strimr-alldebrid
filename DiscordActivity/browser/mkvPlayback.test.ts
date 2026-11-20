@@ -23,7 +23,11 @@ test("actual Chromium decodes prepared MKV video with audio selection captions s
   const input = await makeMkv(directory, 320, 180, "libx264", 8);
   const entry = await prepareMkv({ input, outputRoot: directory, slug: "browser", mediaId: "movie:42", userIds: ["111111111111111111"], authorized: true, preset: "ultrafast" });
   const duration = Number((await probeFile(input)).format.duration);
-  const vite = await createViteServer({ root: resolve("."), server: { middlewareMode: true }, appType: "custom" });
+  // The inline harness is not an on-disk Vite entry. Prebundle its dependencies so a
+  // cold CI cache cannot trigger a development-only page reload during playback.
+  const vite = await createViteServer({ root: resolve("."), optimizeDeps: {
+    include: ["react", "react-dom/client", "react/jsx-dev-runtime", "react/jsx-runtime", "hls.js"], noDiscovery: true,
+  }, server: { middlewareMode: true }, appType: "custom" });
   closeVite = () => vite.close();
   const app = express();
   let resolutions = 0;
