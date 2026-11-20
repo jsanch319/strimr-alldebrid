@@ -35,6 +35,10 @@ nonisolated struct DiscordPlaybackSample: Codable, Equatable, Sendable {
 }
 
 nonisolated enum DiscordSyncPolicy {
+    static func acknowledgesLocalUpdate(accepted: Bool?, revision: Int, sentRevision: Int) -> Bool {
+        accepted == true && revision == sentRevision + 1
+    }
+
     static func isTemporaryZero(
         _ sample: DiscordPlaybackSample,
         previous: DiscordPlaybackSample?,
@@ -83,6 +87,7 @@ final class DiscordNativeBridge {
     }
 
     nonisolated struct Reply: Decodable, Sendable {
+        let commandAccepted: Bool?
         let token: String?
         let userId: String?
         let room: Room
@@ -118,6 +123,8 @@ final class DiscordNativeBridge {
         configuration.timeoutIntervalForRequest = 10
         session = URLSession(configuration: configuration, delegate: RedirectBlocker(), delegateQueue: nil)
     }
+
+    deinit { session.invalidateAndCancel() }
 
     func noteIntentionalSeek() {
         intentionalZeroSeek = true
@@ -267,7 +274,11 @@ final class DiscordNativeBridge {
                 )
                 guard generation == current else { return }
                 if command != nil,
-                   next.room.revision == reply.room.revision + 1
+                   DiscordSyncPolicy.acknowledgesLocalUpdate(
+                       accepted: next.commandAccepted,
+                       revision: next.room.revision,
+                       sentRevision: reply.room.revision,
+                   )
                 {
                     appliedRevision = next.room.revision
                 }

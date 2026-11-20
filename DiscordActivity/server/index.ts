@@ -75,6 +75,7 @@ app.use("/api", (request, response, next) => {
     const header = request.headers.authorization;
     if (header?.startsWith("Bearer ")) key = `user:${verifyRoomToken(header.slice(7)).userId}`;
   } catch { /* Invalid tokens share the bounded unauthenticated IP budget. */ }
+  if (requests.size >= 10_000 && !requests.has(key)) { response.status(429).json({ error: "Request limit reached. Retry shortly." }); return; }
   const item = requests.get(key) ?? { count: 0, until: Date.now() + 60_000 };
   item.count += 1; requests.set(key, item);
   if (item.count > 180 || requests.size > 10_000) { response.status(429).json({ error: "Request limit reached. Retry shortly." }); return; }
@@ -162,9 +163,10 @@ app.post("/api/native/sync", async (request, response) => {
     const lease = nativeLeases.get(nativeKey(identity.instanceId, identity.userId));
     if (!lease || lease.expires <= Date.now()) throw new Error("Native pairing expired. Pair again in Discord.");
     lease.expires = Date.now() + 15_000;
+    const priorRevision = room.revision;
     if (request.body?.command) room = rooms.command(identity.instanceId, identity.userId, parseCommand(request.body.command));
     broadcast(identity.instanceId, room);
-    response.json({ room, serverTime: Date.now() });
+    response.json({ room, serverTime: Date.now(), commandAccepted: Boolean(request.body?.command) && room.revision > priorRevision });
   } catch { response.status(403).json({ error: "Room synchronization unavailable. Check Discord membership, permissions and the selected title, then pair again." }); }
 });
 

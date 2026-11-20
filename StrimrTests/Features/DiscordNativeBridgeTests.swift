@@ -97,3 +97,31 @@ struct DiscordNativeBridgeTests {
         ))
     }
 }
+
+struct DiscordNativeAcknowledgementTests {
+    @Test func `a concurrent remote command is not mistaken for acknowledgement of a stale local sample`() {
+        #expect(!DiscordSyncPolicy.acknowledgesLocalUpdate(accepted: false, revision: 8, sentRevision: 7))
+        #expect(!DiscordSyncPolicy.acknowledgesLocalUpdate(accepted: nil, revision: 8, sentRevision: 7))
+        #expect(DiscordSyncPolicy.acknowledgesLocalUpdate(accepted: true, revision: 8, sentRevision: 7))
+        #expect(!DiscordSyncPolicy.acknowledgesLocalUpdate(accepted: true, revision: 9, sentRevision: 7))
+    }
+
+    @Test func `temporary zero samples must not replace the prior valid baseline`() {
+        let previous = DiscordPlaybackSample(position: 333.125, isPlaying: true)
+        #expect(DiscordSyncPolicy.isTemporaryZero(
+            .init(position: 0, isPlaying: true),
+            previous: previous,
+            intentional: false,
+        ))
+        #expect(DiscordSyncPolicy.isTemporaryZero(
+            .init(position: 0.2, isPlaying: false),
+            previous: previous,
+            intentional: false,
+        ))
+        #expect(!DiscordSyncPolicy.isTemporaryZero(
+            .init(position: 0, isPlaying: false),
+            previous: previous,
+            intentional: true,
+        ))
+    }
+}

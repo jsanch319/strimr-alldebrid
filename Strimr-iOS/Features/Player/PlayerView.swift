@@ -899,11 +899,17 @@ struct PlayerView: View {
         await discordBridge.connect(code: code, origin: origin, media: metadata, read: {
             guard !awaitingMediaLoad, !verifyingInitialResume, !isScrubbing, !playerController.isBuffering,
                   (playerController.duration ?? viewModel.duration ?? 0) > 0 else { return nil }
-            return DiscordPlaybackSample(position: playerController.position, isPlaying: !playerController.isPaused)
+            let duration = playerController.duration ?? viewModel.duration ?? 0
+            return DiscordPlaybackSample(
+                position: playerController.position,
+                isPlaying: !playerController.isPaused && playerController.position < duration - 0.05,
+            )
         }, apply: { state in
+            guard !sharePlayCoordinator.isInSession, discordBridge.isConnected else { return false }
             if abs(playerController.position - state.position) > 1.5 {
                 guard await playerController.seekAfterReady(to: state.position), !Task.isCancelled else { return false }
             }
+            guard !sharePlayCoordinator.isInSession, discordBridge.isConnected else { return false }
             if state.isPlaying {
                 playerController.resume()
             } else {

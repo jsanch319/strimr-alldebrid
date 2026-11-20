@@ -33,9 +33,9 @@ video playback must pass the acceptance checklist below before calling it workin
    handles the in-Activity authorization redirect.
 5. Copy the public Application/Client ID. Do not copy the Client Secret or bot token
    into client-side configuration.
-6. Create a bot for the application and grant it access to the Activity Instance API.
-   The room service uses that API to verify that each authenticated Discord user is
-   actually participating in the Activity.
+6. Use the bot belonging to this application and configure its token on the server.
+   The room service calls Discord's Activity Instance API to verify that each
+   authenticated Discord user is actually participating in the Activity.
 
 The room API checks every participant with Discord's Activity Instance endpoint.
 It therefore requires the application bot token. Keep the bot token, OAuth client

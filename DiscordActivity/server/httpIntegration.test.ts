@@ -70,8 +70,10 @@ test("HTTP/WS authenticated Activity and native pairing preserve permission and 
   assert.equal(JSON.stringify(pair.body.room).includes("/media/"), false);
   const pause = await post("/api/native/sync", { media, command: { type: "sync-playback", revision: pair.body.room.revision, position: 456.875, isPlaying: false } }, pair.body.token);
   assert.equal(pause.status, 200); assert.equal(pause.body.room.currentPosition, 456.875);
+  assert.equal(pause.body.commandAccepted, true);
   const stale = await post("/api/native/sync", { media, command: { type: "sync-playback", revision: 0, position: 0, isPlaying: true } }, pair.body.token);
   assert.equal(stale.body.room.currentPosition, 456.875); assert.equal(stale.body.room.isPlaying, false);
+  assert.equal(stale.body.commandAccepted, false);
   assert.equal((await post("/api/native/sync", { media: { ...media, episode: 2 } }, pair.body.token)).status, 403);
   assert.equal((await post("/api/native/code", {}, pair.body.token)).status, 403);
   const friendCode = await post("/api/native/code", {}, b.body.token);
