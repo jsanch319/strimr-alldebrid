@@ -37,7 +37,11 @@ enum ErrorReporter {
             guard let dsn, !dsn.isEmpty, dsn != "https://" else { return }
             SentrySDK.start { options in
                 options.dsn = dsn
-                options.enableLogs = true
+                // Add-on URLs may carry secrets in paths as well as queries. Do not collect them automatically.
+                options.enableLogs = false
+                options.enableNetworkBreadcrumbs = false
+                options.enableNetworkTracking = false
+                options.maxBreadcrumbs = 0
                 // Automatic capture reports 5xx from self-hosted servers and third-party proxies we can't act on.
                 options.enableCaptureFailedRequests = false
                 options.beforeBreadcrumb = { breadcrumb in
@@ -55,13 +59,46 @@ enum ErrorReporter {
         #endif
 
         #if canImport(Sentry)
-            SentrySDK.capture(error: error)
+            SentrySDK.capture(error: safeDiagnosticError(error))
         #endif
     }
 
-    /// Plex and Jellyfin pass access tokens in query strings, which network breadcrumbs record.
+    /// Keep only non-sensitive diagnostics. Credential-bearing URLs may occur in arbitrary paths and nested data.
     static func removingSensitiveData(from data: [String: Any]?) -> [String: Any]? {
-        data?.filter { key, _ in key != "http.query" && key != "http.fragment" }
+        data?.filter { key, value in
+            let key = key.lowercased()
+            let secretFields = [
+                "query",
+                "fragment",
+                "url",
+                "path",
+                "target",
+                "request",
+                "header",
+                "authorization",
+                "cookie",
+                "token",
+                "password",
+            ]
+            return !secretFields.contains(where: key.contains) && !String(describing: value).contains("://")
+        }
+    }
+
+    /// Never send NSError userInfo/descriptions, which can contain private source/configuration URLs.
+    static func safeDiagnosticError(_ error: Error) -> NSError {
+        let source = error as NSError
+        let allowed = [
+            NSURLErrorDomain,
+            NSCocoaErrorDomain,
+            NSPOSIXErrorDomain,
+            NSOSStatusErrorDomain,
+            "AVFoundationErrorDomain",
+        ]
+        return NSError(
+            domain: allowed.contains(source.domain) ? source.domain : "Strimr",
+            code: source.code,
+            userInfo: [NSLocalizedDescriptionKey: "An application operation failed. Sensitive details omitted."],
+        )
     }
 }
 
@@ -69,7 +106,7 @@ enum ErrorReporter {
 protocol ExpectedConnectivityError: Error {}
 
 extension Error {
-    var isCancellation: Bool {
+    nonisolated var isCancellation: Bool {
         self is CancellationError
             || (self as? URLError)?.code == .cancelled
     }

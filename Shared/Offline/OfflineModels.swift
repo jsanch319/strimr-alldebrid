@@ -149,3 +149,8 @@ enum OfflineArtworkPath {
         return String(path.dropFirst(downloadPosterPrefix.count))
     }
 }
+
+enum PlaybackProgressPersistenceError: Error {
+    case invalidRecord
+    case encodingFailed
+}

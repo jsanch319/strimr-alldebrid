@@ -145,6 +145,20 @@ struct RemainingTimeFormatterTests {
         return String(localized: "media.labels.remaining \(remaining)")
     }
 
+    @Test func `compact resume caption uses narrow time units and rejects completed or invalid progress`() {
+        for minutes in [1, 42, 106] {
+            let time = Duration.seconds(minutes * 60).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+            #expect(RemainingTimeFormatter.compactText(duration: Double(minutes * 60 + 600), viewOffset: 600)
+                == String(localized: "media.labels.remaining \(time)"))
+        }
+        #expect(RemainingTimeFormatter.compactText(duration: 3600, viewOffset: 3599) != nil)
+        #expect(RemainingTimeFormatter.compactText(duration: 3600, viewOffset: 3600) == nil)
+        #expect(RemainingTimeFormatter.compactText(duration: 3600, viewOffset: 0) == nil)
+        #expect(RemainingTimeFormatter.compactText(duration: nil, viewOffset: 600) == nil)
+        #expect(RemainingTimeFormatter.compactText(duration: .infinity, viewOffset: 600) == nil)
+        #expect(RemainingTimeFormatter.compactText(duration: 3600, viewOffset: .nan) == nil)
+    }
+
     @Test func `no progress means no remaining time`() {
         #expect(RemainingTimeFormatter.text(duration: 3600, viewOffset: nil) == nil)
         #expect(RemainingTimeFormatter.text(duration: 3600, viewOffset: 0) == nil)

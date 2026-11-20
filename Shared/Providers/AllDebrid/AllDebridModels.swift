@@ -10,6 +10,15 @@ struct AllDebridMagnet: Identifiable, Sendable, Hashable {
     var isReady: Bool {
         status.caseInsensitiveCompare("ready") == .orderedSame || statusCode == 4
     }
+
+    var isProcessing: Bool {
+        guard !isReady else { return false }
+        if let statusCode {
+            return (0 ... 3).contains(statusCode)
+        }
+        let value = status.lowercased()
+        return ["queue", "download", "compress", "upload", "process"].contains { value.contains($0) }
+    }
 }
 
 struct AllDebridMagnetFile: Identifiable, Sendable, Hashable {

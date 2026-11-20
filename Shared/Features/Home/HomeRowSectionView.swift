@@ -5,6 +5,9 @@ struct HomeRowSectionView: View {
     @Environment(\.mediaCardActions) private var mediaCardActions
     let row: HomeRow
     let showsLabels: Bool
+    var canOpenWithoutServer = false
+    var compactContinueWatching = false
+    var pagination: PosterRailPagination?
     let onViewAll: (Hub) -> Void
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -15,15 +18,20 @@ struct HomeRowSectionView: View {
             onViewAll: canOpenViewAll ? { onViewAll(row.hub) } : nil,
         ) {
             MediaCarousel(
-                layout: row.style == .landscape ? .landscape : .portrait,
+                layout: compactContinueWatching || row.style == .landscape ? .landscape : .portrait,
                 items: row.items,
                 showsLabels: showsLabels,
                 onViewAll: carouselViewAllAction,
+                pagination: pagination,
+                hub: row.hub,
+                compactContinueWatching: compactContinueWatching,
                 onSelectMedia: select,
             )
             .environment(\.mediaCardOffersDetails, playsOnSelect)
             .environment(\.mediaCardIsInContinueWatching, row.kind == .continueWatching)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.row.\(row.id)")
     }
 
     private var playsOnSelect: Bool {
@@ -47,10 +55,13 @@ struct HomeRowSectionView: View {
     }
 
     private var canOpenViewAll: Bool {
+        if canOpenWithoutServer {
+            return row.hub.hasItems
+        }
         #if os(tvOS)
-            row.hub.canShowViewAll
+            return row.hub.canShowViewAll
         #else
-            row.hub.canOpenDetail
+            return row.hub.canOpenDetail
         #endif
     }
 

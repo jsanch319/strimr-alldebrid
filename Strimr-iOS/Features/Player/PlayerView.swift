@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 struct PlayerView: View {
@@ -11,6 +12,24 @@ struct PlayerView: View {
     @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State var viewModel: PlayerViewModel
+    private let englishAudioFallback: EnglishAudioFallback?
+    @State private var englishSession = EnglishAudioSession()
+    @State private var englishAudioNotice: String?
+    @State private var englishFallbackTask: Task<Void, Never>?
+    private struct EnglishOffer {
+        let replacement: CatalogSourceResolver.Resolved
+        let mediaID: String?
+        let sourceURL: URL?
+    }
+
+    @State private var englishOffer: EnglishOffer?
+    @State private var showEnglishOffer = false
+
+    @State private var audioMediaSettled = false
+    private let onPlaybackFailure: ((String) -> Void)?
+    private let onRestartFromBeginning: (() -> Void)?
+    @State private var verifyingInitialResume = false
+    @State private var replacingCatalogSharePlay = false
     @State private var playerController = PlayerController()
     @State private var controlsVisible = true
     @State private var hideControlsWorkItem: DispatchWorkItem?
@@ -85,8 +104,13 @@ struct PlayerView: View {
     @State private var doubleTapSeek = DoubleTapSeek()
     @State private var tapAreaWidth = 0.0
     @State private var showsPlaybackStatistics = false
+    @State private var isAirPlayPickerPresented = false
     @State private var discordWatchTogetherMessage: String?
     @State private var isShowingDiscordWatchTogetherAlert = false
+    @State private var discordBridge = DiscordNativeBridge()
+    @State private var showsDiscordActions = false
+    @State private var showsDiscordPairing = false
+    @State private var discordPreviousRate: Float?
 
     private let controlsHideDelay: TimeInterval = 3.0
     private var seekBackwardInterval: Double {
@@ -101,8 +125,18 @@ struct PlayerView: View {
         Double(settingsManager.playback.seekForwardSeconds)
     }
 
-    init(viewModel: PlayerViewModel) {
+    init(
+        viewModel: PlayerViewModel,
+        onPlaybackFailure: ((String) -> Void)? = nil,
+        englishAudioFallback: EnglishAudioFallback? = nil,
+        onRestartFromBeginning: (() -> Void)? = nil,
+    ) {
         _viewModel = State(initialValue: viewModel)
+        self.onPlaybackFailure = onPlaybackFailure
+        self.onRestartFromBeginning = onRestartFromBeginning
+        self.englishAudioFallback = englishAudioFallback
+        _englishSession =
+            State(initialValue: EnglishAudioSession(manualTrack: englishAudioFallback?.context?.manualTrack))
     }
 
     var body: some View {
@@ -172,6 +206,8 @@ struct PlayerView: View {
                     startPlaybackIfNeeded(url: viewModel.playbackURL)
                 }
                 .onDisappear {
+                    discordBridge.disconnect()
+                    englishFallbackTask?.cancel()
                     nextEpisodePresentation.cancel()
                     sleepTimer.cancel()
                     pauseScreen.cancel()
@@ -183,7 +219,9 @@ struct PlayerView: View {
                     playerController.stop()
                     AppDelegate.orientationLock = .all
                     isControlsLocked = false
-                    if sharePlayCoordinator.isInSession {
+                    if sharePlayCoordinator.isInSession, !replacingCatalogSharePlay,
+                       sharePlayCoordinator.activity?.catalog == nil
+                    {
                         sharePlayCoordinator.leave()
                     }
                     sharePlayCoordinator.detachPlayer(playerController)
@@ -223,8 +261,25 @@ struct PlayerView: View {
                         chapters: viewModel.chapters,
                     )
                 }
+                .onChange(of: playerController.audioTrackRevision) { _, _ in refreshTracks() }
+                .onChange(of: settingsManager.playback.alwaysPreferEnglishAudio) { _, _ in
+                    englishFallbackTask?
+                        .cancel(); englishAudioNotice = nil; showEnglishOffer = false; englishOffer = nil
+                    englishSession.beginLoad(); refreshTracks()
+                }
+                .onChange(of: viewModel.media?.id) { _, _ in
+                    if discordBridge.isConnected {
+                        discordBridge.disconnect()
+                    }
+                    englishFallbackTask?
+                        .cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil; showEnglishOffer =
+                        false; englishOffer = nil
+                }
                 .onChange(of: playerController.duration) { _, newValue in
                     viewModel.handlePlaybackDuration(newValue)
+                    if viewModel.resumesFromRemotePercentage, !awaitingMediaLoad, !appliedResumeOffset {
+                        applyRemoteResumeWhenReady()
+                    }
                 }
                 .onChange(of: playerController.bufferedAhead) { _, newValue in
                     viewModel.handleBufferedAhead(newValue)
@@ -233,8 +288,39 @@ struct PlayerView: View {
 
         let playbackStatusObservers = AnyView(
             playbackObservers
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { note in
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                    let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
+                        == AVAudioSession.InterruptionType.began.rawValue
+                    let options = note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                    playerController.handleAirPlayInterruption(
+                        began: began,
+                        shouldResume: AVAudioSession.InterruptionOptions(rawValue: options).contains(.shouldResume),
+                        background: scenePhase == .background,
+                    )
+                }
+                .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+                    playerController.cancelAutomaticAirPlayResume()
+                    // Also checkpoint switches initiated from Control Center or receiver removal.
+                    // Route/session recovery remains owned by AetherEngine.
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                }
                 .onChange(of: playerController.videoFormatBadge) { _, newValue in
                     videoFormatBadge = newValue
+                }
+                .onChange(of: playerController.resumeVerifiedPosition) { _, value in
+                    guard value != nil else { return }
+                    if verifyingInitialResume {
+                        verifyingInitialResume = false
+                        viewModel.completeInitialCatalogResume()
+                        finishMediaLoad()
+                    } else if playerController.resumeTransportIntent != nil {
+                        finishMediaLoad()
+                    }
                 }
                 .onChange(of: playerController.errorMessage) { _, newValue in
                     guard let newValue else { return }
@@ -266,6 +352,9 @@ struct PlayerView: View {
                     presentServerRecoveryError(error)
                 }
                 .onChange(of: scenePhase) { oldValue, newValue in
+                    if newValue != .active {
+                        englishFallbackTask?.cancel()
+                    }
                     handleScenePhaseChange(newValue)
                     prepareAutomaticRotation(from: oldValue, to: newValue)
                     rotateAutomaticallyIfNeeded()
@@ -285,9 +374,10 @@ struct PlayerView: View {
         let sessionObservers = AnyView(
             playbackLifecycleObservers
                 .onChange(of: sharePlayCoordinator.activityChangeID) { _, _ in
-                    guard let activity = sharePlayCoordinator.activity,
-                          activity.ratingKey != viewModel.currentRatingKey
-                    else { return }
+                    guard let activity = sharePlayCoordinator.activity else { return }
+                    let newCatalogActivity = activity.catalog != nil &&
+                        sharePlayCoordinator.catalogPlaybackActivity?.activityID != activity.activityID
+                    guard activity.ratingKey != viewModel.currentRatingKey || newCatalogActivity else { return }
                     Task { await startPlayback(for: activity) }
                 }
                 .onChange(of: sharePlayCoordinator.isInSession) { _, isInSession in
@@ -331,6 +421,41 @@ struct PlayerView: View {
                         }
                     }
                     .equatable()
+                }
+                .confirmationDialog(
+                    "Restore saved position",
+                    isPresented: Binding(
+                        get: { playerController.resumeRecoveryMessage != nil },
+                        set: {
+                            if !$0 {
+                                playerController.resumeRecoveryMessage = nil
+                            }
+                        },
+                    ),
+                    titleVisibility: .visible,
+                ) {
+                    Button("Retry Resume") { retryInitialResume() }
+                    Button("Choose Another Source") {
+                        viewModel.saveProgress()
+                        playerController.stop()
+                        if let choose = englishAudioFallback?.chooseSource {
+                            choose()
+                        } else {
+                            dismissPlayer(force: true)
+                        }
+                    }
+                    Button("Start From Beginning", role: .destructive) { restartFromBeginning() }
+                    Button("Keep Waiting", role: .cancel) {}
+                } message: { Text(playerController.resumeRecoveryMessage ?? "Your saved position is preserved.") }
+                .confirmationDialog(
+                    "English audio is available in another source",
+                    isPresented: $showEnglishOffer,
+                    titleVisibility: .visible,
+                ) {
+                    Button("Switch to English Source") { acceptEnglishOffer() }
+                    Button("Keep Current Source", role: .cancel) { englishOffer = nil }
+                } message: {
+                    Text("Switch to a verified English source at your current playback position?")
                 }
                 .alert("player.termination.title", isPresented: $showingTerminationAlert) {
                     Button("player.termination.dismiss") {
@@ -419,6 +544,36 @@ struct PlayerView: View {
                 Button("OK", role: .cancel) {}
             } message: {
                 Text(discordWatchTogetherMessage ?? "")
+            }
+            .confirmationDialog(
+                "Discord Watch Together",
+                isPresented: $showsDiscordActions,
+                titleVisibility: .visible,
+            ) {
+                Button("Open Discord Activity") { openDiscordActivity() }
+                Button("Connect to Activity") { showsDiscordPairing = true }
+                if discordBridge.isConnected {
+                    Button("Disconnect from Discord", role: .destructive) { discordBridge.disconnect() }
+                }
+            } message: {
+                Text(discordBridge.isConnected ? discordBridge
+                    .message :
+                    "Start the Activity in Discord, create a private pairing code, then connect this existing Strimr player. Each viewer needs an authorized source.")
+            }
+            .sheet(isPresented: $showsDiscordPairing) {
+                DiscordNativePairingView(bridge: discordBridge, connect: connectDiscordActivity)
+            }
+            .onChange(of: discordBridge.isConnected) { _, connected in
+                if connected {
+                    discordPreviousRate = playbackRate; selectPlaybackRate(1)
+                } else if let previous = discordPreviousRate {
+                    discordPreviousRate = nil; selectPlaybackRate(sharePlayCoordinator.isInSession ? 1 : previous)
+                }
+            }
+            .onChange(of: sharePlayCoordinator.isInSession) { _, active in
+                if active, discordBridge.isConnected {
+                    discordBridge.disconnect()
+                }
             }
             .onChange(of: isPauseScreenEligible, initial: true) { _, isEligible in
                 pauseScreen.update(isEligible: isEligible)
@@ -666,6 +821,17 @@ struct PlayerView: View {
             tracksMenu: tracksMenuModel,
             tracksMenuActions: tracksMenuActions,
             onWatchTogether: watchTogetherAction,
+            onAirPlayPresentationChanged: { presented in
+                if presented {
+                    playerController.cancelAutomaticAirPlayResume()
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    playerController.prepareForRouteChange()
+                }
+                playerController.recordAirPlayDiagnostic(presented ? "picker-opened" : "picker-closed")
+                isAirPlayPickerPresented = presented
+                showControls(temporarily: !presented)
+            },
             onShowSettings: showSettings,
             chapters: viewModel.chapters,
             showsChaptersOnTimeline: settingsManager.playback.showChaptersOnTimeline,
@@ -711,10 +877,49 @@ struct PlayerView: View {
 
     private var canStartDiscordWatchTogether: Bool {
         guard let media = viewModel.media else { return false }
-        return [.movie, .episode].contains(media.kind)
+        return DiscordWatchTogetherConfiguration.isConfigured && [.movie, .episode].contains(media.kind)
     }
 
     private func startDiscordWatchTogether() {
+        showsDiscordActions = true
+    }
+
+    private func connectDiscordActivity(_ code: String) async {
+        guard !sharePlayCoordinator.isInSession else {
+            showDiscordWatchTogetherMessage("Leave SharePlay before connecting Discord synchronization."); return
+        }
+        guard let media = viewModel.media,
+              let metadata = DiscordNativeMedia(
+                  media: media,
+                  duration: playerController.duration ?? viewModel.duration,
+              ),
+              let raw = Bundle.main.object(forInfoDictionaryKey: "DiscordActivityURL") as? String,
+              let origin = URL(string: raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { showDiscordWatchTogetherMessage(DiscordWatchTogetherConfiguration.setupExplanation); return }
+        await discordBridge.connect(code: code, origin: origin, media: metadata, read: {
+            guard !awaitingMediaLoad, !verifyingInitialResume, !isScrubbing, !playerController.isBuffering,
+                  (playerController.duration ?? viewModel.duration ?? 0) > 0 else { return nil }
+            let duration = playerController.duration ?? viewModel.duration ?? 0
+            return DiscordPlaybackSample(
+                position: playerController.position,
+                isPlaying: !playerController.isPaused && playerController.position < duration - 0.05,
+            )
+        }, apply: { state in
+            guard !sharePlayCoordinator.isInSession, discordBridge.isConnected else { return false }
+            if abs(playerController.position - state.position) > 1.5 {
+                guard await playerController.seekAfterReady(to: state.position), !Task.isCancelled else { return false }
+            }
+            guard !sharePlayCoordinator.isInSession, discordBridge.isConnected else { return false }
+            if state.isPlaying {
+                playerController.resume()
+            } else {
+                playerController.pause()
+            }
+            return true
+        })
+    }
+
+    private func openDiscordActivity() {
         guard
             let media = viewModel.media,
             let url = DiscordWatchTogetherConfiguration.activityLaunchURL(
@@ -722,13 +927,10 @@ struct PlayerView: View {
                 position: playerController.position,
                 isPlaying: !playerController.isPaused,
                 duration: playerController.duration ?? viewModel.duration,
-                selectedSourceIdentifier: viewModel.currentVersionID,
+                selectedSourceIdentifier: nil,
             )
         else {
-            showDiscordWatchTogetherMessage(
-                "Discord Watch Together is not configured. Set " +
-                    "DISCORD_APPLICATION_CLIENT_ID and DISCORD_ACTIVITY_URL in Config/Config.xcconfig.",
-            )
+            // Optional integration: a stale action must never interrupt ordinary playback with setup instructions.
             return
         }
         DiscordWatchTogetherConfiguration.openActivityURL(url) { result in
@@ -1064,9 +1266,10 @@ struct PlayerView: View {
             dialogueBoost: settingsManager.playback.dialogueBoost,
             isAudioShapingAvailable: playerController.isAudioShapingAvailable,
             canSearchSubtitles: viewModel.canSearchSubtitles,
-            canResetTrackSelections: viewModel.canResetRememberedTrackSelections,
+            canResetTrackSelections: viewModel.canResetRememberedTrackSelections || englishSession.manualTrack != nil,
             syncItems: playerController.offsetMenuItems(burnsSubtitles: viewModel.burnsSubtitles),
             subtitleAppearance: subtitleAppearanceAvailability,
+            englishAudioNotice: englishAudioNotice,
         )
     }
 
@@ -1078,9 +1281,23 @@ struct PlayerView: View {
             onSetNightMode: setNightMode(_:),
             onSelectDialogueBoost: selectDialogueBoost(_:),
             onSearchSubtitles: showSubtitleSearch,
-            onResetTrackSelections: { viewModel.resetRememberedTrackSelections() },
+            onResetTrackSelections: {
+                englishFallbackTask?
+                    .cancel(); englishSession = EnglishAudioSession(); englishAudioNotice = nil; showEnglishOffer =
+                    false; englishOffer = nil
+                englishAudioFallback?.context?.manualTrack = nil
+                viewModel.resetRememberedTrackSelections(); refreshTracks()
+            },
             onSelectSync: openOffsetBar(_:),
             onShowSubtitleAppearance: showSubtitleAppearance,
+            onChooseSource: englishAudioFallback?.chooseSource.map { choose in
+                {
+                    englishFallbackTask?.cancel(); showEnglishOffer = false; englishOffer = nil
+                    viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+                    viewModel.saveProgress()
+                    choose()
+                }
+            },
         )
     }
 
@@ -1331,7 +1548,7 @@ struct PlayerView: View {
             }
             restoresAutomaticRotationOnReturn = false
         case .inactive:
-            break
+            viewModel.saveProgress()
         @unknown default:
             break
         }
@@ -1422,8 +1639,77 @@ struct PlayerView: View {
                         selectedSubtitleTrackID = activeSubtitle
                     }
                 }
+                applyEnglishAudioIfNeeded(audio)
             }
         }
+    }
+
+    private func applyEnglishAudioIfNeeded(_ tracks: [PlayerTrack]) {
+        guard audioMediaSettled, !viewModel.awaitsCatalogResume else { return }
+        let enabled = settingsManager.playback.alwaysPreferEnglishAudio
+        if let track = englishSession.selection(in: tracks, enabled: enabled) {
+            selectedAudioTrackID = track.id
+            if !track.isSelected {
+                if viewModel.isTranscoding {
+                    if englishSession.manualTrack != nil || !englishSession.triedServerSwitch {
+                        englishSession.triedServerSwitch = true
+                        viewModel.useSessionAudioTrack(track)
+                        selectQuality(viewModel.selectedQuality, force: true)
+                    }
+                } else {
+                    playerController.selectAudioTrack(id: track.id)
+                }
+            }
+        }
+        guard enabled, englishSession.manualTrack == nil else { englishAudioNotice = nil; return }
+        if EnglishAudioPreference.preferred(in: tracks) != nil {
+            englishAudioNotice = nil; englishFallbackTask?
+                .cancel(); showEnglishOffer = false; englishOffer = nil; return
+        }
+        guard !tracks.isEmpty else { return }
+        let definite = EnglishAudioPreference.definitelyUnavailable(in: tracks)
+        let notice = definite ?
+            "English audio is unavailable in this source. Use Audio & Subtitles to choose another source or audio track." :
+            "English audio could not be confirmed from track metadata. Use Audio & Subtitles."
+        if englishAudioNotice != notice {
+            englishAudioNotice = notice
+            showFeedbackMessage(notice, duration: 5, systemImage: "speaker.wave.2")
+        }
+        guard definite, !englishSession.triedSourceFallback, let englishAudioFallback,
+              !sharePlayCoordinator.isInSession, !viewModel.isLivePlayback, scenePhase == .active,
+              !isScrubbing, !isTracksMenuPresented, !playerController.isPaused,
+              !playerController.isPictureInPictureActive, !LiveLoadOptions.routesAudioToAirPlay else { return }
+        englishSession.triedSourceFallback = true
+        let mediaID = viewModel.media?.id, sourceURL = activePlaybackURL
+        englishFallbackTask = Task { @MainActor in
+            guard let replacement = await englishAudioFallback.find(), !Task.isCancelled,
+                  englishSession.manualTrack == nil, settingsManager.playback.alwaysPreferEnglishAudio,
+                  viewModel.media?.id == mediaID, activePlaybackURL == sourceURL,
+                  scenePhase == .active, !viewModel.awaitsCatalogResume, !isScrubbing,
+                  !isTracksMenuPresented, !playerController.isPaused,
+                  !playerController.isPictureInPictureActive, !LiveLoadOptions.routesAudioToAirPlay,
+                  !sharePlayCoordinator.isInSession,
+                  EnglishAudioPreference.preferred(in: audioTracks) == nil else { return }
+            englishOffer = EnglishOffer(replacement: replacement, mediaID: mediaID, sourceURL: sourceURL)
+            showEnglishOffer = true
+        }
+    }
+
+    private func acceptEnglishOffer() {
+        guard let offer = englishOffer, scenePhase == .active,
+              viewModel.media?.id == offer.mediaID, activePlaybackURL == offer.sourceURL,
+              englishSession.manualTrack == nil, settingsManager.playback.alwaysPreferEnglishAudio,
+              !viewModel.awaitsCatalogResume, !isScrubbing, !playerController.isPictureInPictureActive,
+              !LiveLoadOptions.routesAudioToAirPlay, !sharePlayCoordinator.isInSession
+        else {
+            englishOffer = nil; return
+        }
+        let position = playerController.position
+        guard position.isFinite, position >= 0 else { englishOffer = nil; return }
+        viewModel.handlePlaybackPosition(position, isScrubbing: false)
+        viewModel.saveProgress()
+        englishAudioFallback?.activate(offer.replacement, position)
+        englishOffer = nil
     }
 
     private func selectAudioTrack(_ id: Int?) {
@@ -1436,6 +1722,10 @@ struct PlayerView: View {
             return
         }
 
+        englishFallbackTask?.cancel()
+        showEnglishOffer = false; englishOffer = nil
+        englishSession.selectManually(track); englishAudioNotice = nil
+        englishAudioFallback?.context?.manualTrack = track
         Task {
             await viewModel.persistStreamSelection(for: track)
             if viewModel.isTranscoding {
@@ -1478,8 +1768,9 @@ struct PlayerView: View {
     }
 
     private func selectPlaybackRate(_ rate: Float) {
-        playbackRate = rate
-        playerController.setPlaybackRate(rate)
+        let sessionRate: Float = discordBridge.isConnected ? 1 : rate
+        playbackRate = sessionRate
+        playerController.setPlaybackRate(sessionRate)
         showControls(temporarily: true)
     }
 
@@ -1609,6 +1900,7 @@ struct PlayerView: View {
     }
 
     private func jump(by seconds: Double) {
+        discordBridge.noteIntentionalSeek()
         playerController.seek(by: seconds)
         showControls(temporarily: true)
     }
@@ -1640,7 +1932,16 @@ struct PlayerView: View {
     }
 
     private func finishMediaLoad() {
-        if shouldPauseAfterMediaLoad {
+        audioMediaSettled = true
+        refreshTracks()
+        if let explicitPause = playerController.consumeResumeTransportIntent() {
+            shouldPauseAfterMediaLoad = false; shouldResumeAfterMediaLoad = false
+            if explicitPause {
+                playerController.pause()
+            } else {
+                playerController.resume()
+            }
+        } else if shouldPauseAfterMediaLoad {
             shouldPauseAfterMediaLoad = false
             shouldResumeAfterMediaLoad = false
             playerController.pause()
@@ -1655,6 +1956,50 @@ struct PlayerView: View {
         #endif
     }
 
+    private func retryInitialResume() {
+        let target = playerController.resumeTarget ?? pendingStartPosition ?? viewModel
+            .resumePosition ?? playerController.position
+        playerController.resumeRecoveryMessage = nil
+        verifyingInitialResume = true
+        Task {
+            if await playerController.seekAfterReady(to: target), verifyingInitialResume {
+                verifyingInitialResume = false
+                viewModel.completeInitialCatalogResume(); finishMediaLoad()
+            }
+        }
+    }
+
+    private func restartFromBeginning() {
+        guard let url = activePlaybackURL else { return }
+        let shouldPause = playerController.resumeTransportIntent ??
+            (shouldPauseAfterMediaLoad || (!shouldResumeAfterMediaLoad && playerController.isPaused))
+        verifyingInitialResume = false
+        playerController.stop()
+        onRestartFromBeginning?()
+        viewModel.restartResumeFromBeginning()
+        startPlayback(
+            url: url,
+            startPosition: 0,
+            resetTrackSelection: false,
+            shouldResumeAfterLoad: !shouldPause,
+            shouldPauseAfterLoad: shouldPause,
+        )
+    }
+
+    private func applyRemoteResumeWhenReady() {
+        guard !sharePlayCoordinator.isInSession, viewModel.shouldResumeFromOffset,
+              let resume = viewModel.resumePosition, resume > 0 else { return }
+        appliedResumeOffset = true
+        let loadedURL = activePlaybackURL
+        verifyingInitialResume = true
+        Task {
+            guard await playerController.seekAfterReady(to: resume), activePlaybackURL == loadedURL else { return }
+            verifyingInitialResume = false
+            viewModel.completeInitialCatalogResume()
+            finishMediaLoad()
+        }
+    }
+
     private func handleMediaLoaded() {
         guard awaitingMediaLoad else { return }
         awaitingMediaLoad = false
@@ -1663,6 +2008,16 @@ struct PlayerView: View {
         automaticSubtitleSearchKey = viewModel.currentRatingKey
         if sharePlayCoordinator.isInSession {
             sharePlayCoordinator.playerDidLoad(ratingKey: viewModel.currentRatingKey)
+            if sharePlayCoordinator.activity?.catalog != nil {
+                // The group's current timeline owns late joining. Broadcasting a seek to the
+                // invitation's old initial offset here would rewind every participant.
+                pendingStartPosition = nil; appliedResumeOffset = true
+                viewModel.completeInitialCatalogResume(); finishMediaLoad()
+                return
+            }
+        }
+        if viewModel.resumesFromRemotePercentage {
+            viewModel.handlePlaybackDuration(playerController.duration)
         }
         let resumePosition = pendingStartPosition
             ?? (!sharePlayCoordinator.isInSession && viewModel.shouldResumeFromOffset && !appliedResumeOffset
@@ -1672,9 +2027,12 @@ struct PlayerView: View {
         if let resumePosition, resumePosition > 0 {
             appliedResumeOffset = true
             let loadedURL = activePlaybackURL
+            verifyingInitialResume = true
             Task {
-                await playerController.seekAfterReady(to: resumePosition)
-                guard activePlaybackURL == loadedURL else { return }
+                guard await playerController.seekAfterReady(to: resumePosition),
+                      activePlaybackURL == loadedURL else { return }
+                verifyingInitialResume = false
+                viewModel.completeInitialCatalogResume()
                 finishMediaLoad()
             }
             return
@@ -1703,6 +2061,7 @@ struct PlayerView: View {
             }
         } else {
             playerController.endScrubPreviewing()
+            discordBridge.noteIntentionalSeek()
             playerController.seek(to: timelinePosition)
             viewModel.position = timelinePosition
             scheduleControlsHide()
@@ -1724,6 +2083,8 @@ struct PlayerView: View {
         shouldResumeAfterLoad: Bool = false,
         shouldPauseAfterLoad: Bool = false,
     ) {
+        englishFallbackTask?.cancel(); audioMediaSettled = false
+        englishSession.beginLoad()
         activePlaybackURL = url
         if resetTrackSelection {
             appliedPreferredAudio = false
@@ -1753,7 +2114,10 @@ struct PlayerView: View {
             url: url,
             httpHeaders: viewModel.playbackHTTPHeaders,
             startPosition: nil,
-            preferredAudioTrackID: preferredAudioTrackID,
+            preferredAudioTrackID: settingsManager.playback.alwaysPreferEnglishAudio && englishSession
+                .manualTrack == nil ? nil : preferredAudioTrackID,
+            preferredAudioLanguages: englishSession.manualTrack?.language.map { [$0] }
+                ?? (settingsManager.playback.alwaysPreferEnglishAudio ? ["en", "eng"] : []),
             losslessAudio: settingsManager.playback.losslessAudio,
             readAhead: settingsManager.playback.readAhead,
             spatialAudioLayout: settingsManager.playback.spatialAudioLayout,
@@ -1827,13 +2191,15 @@ struct PlayerView: View {
     private func handleScenePhaseChange(_ scenePhase: ScenePhase) {
         switch scenePhase {
         case .background:
+            playerController.recordAirPlayDiagnostic("app-background")
             viewModel.saveProgress()
             pauseForBackgroundIfNeeded()
             preparePlaybackForBackground()
         case .active:
+            playerController.recordAirPlayDiagnostic("app-foreground")
             reloadPlaybackAfterBackgroundIfNeeded()
         case .inactive:
-            break
+            viewModel.saveProgress()
         @unknown default:
             break
         }
@@ -1842,7 +2208,11 @@ struct PlayerView: View {
     /// A picture in picture window keeps playing: it is on screen, so the audio still belongs to it. A SharePlay
     /// session keeps playing too, since pausing here would pause every participant.
     private func pauseForBackgroundIfNeeded() {
-        guard !settingsManager.playback.backgroundAudio,
+        guard AirPlayPlaybackPolicy.shouldPauseForBackground(
+                  backgroundAudio: settingsManager.playback.backgroundAudio,
+                  externalPlayback: playerController.isAirPlayPlaybackActive,
+                  airPlayRoute: LiveLoadOptions.routesAudioToAirPlay,
+              ),
               !viewModel.isLivePlayback,
               !sharePlayCoordinator.isInSession,
               !playerController.isPictureInPictureActive,
@@ -1930,7 +2300,7 @@ struct PlayerView: View {
 
     private func scheduleControlsHide() {
         hideControlsWorkItem?.cancel()
-        guard activeOffsetBar == nil, !isTracksMenuPresented else { return }
+        guard activeOffsetBar == nil, !isTracksMenuPresented, !isAirPlayPickerPresented else { return }
 
         let workItem = DispatchWorkItem {
             // Paused, the tiles stand in for the pause screen, which the tabletop layout does not show.
@@ -1946,6 +2316,7 @@ struct PlayerView: View {
 
     private func applyPreferredTracksIfNeeded(audioTracks: [PlayerTrack], subtitleTracks: [PlayerTrack]) {
         if !appliedPreferredAudio,
+           !settingsManager.playback.alwaysPreferEnglishAudio || englishSession.manualTrack != nil,
            let preferredAudioIndex = viewModel.preferredAudioStreamFFIndex,
            let track = audioTracks.first(where: { $0.ffIndex == preferredAudioIndex })
         {
@@ -2097,6 +2468,12 @@ struct PlayerView: View {
     }
 
     private func startPlayback(for activity: StrimrWatchActivity) async {
+        if activity.catalog != nil {
+            replacingCatalogSharePlay = true
+            viewModel.saveProgress(); playerController.stop()
+            sharePlayCoordinator.presentCatalogActivity(activity)
+            return
+        }
         do {
             let nextViewModel = try await sharePlayCoordinator.playerViewModel(for: activity)
             await startPlayback(using: nextViewModel)
@@ -2148,6 +2525,14 @@ struct PlayerView: View {
     }
 
     private func handlePlaybackError(_ message: String) async {
+        if let onPlaybackFailure {
+            viewModel.handlePlaybackPosition(playerController.position, isScrubbing: false)
+            viewModel.saveProgress()
+            playerController.pause()
+            onPlaybackFailure(message)
+            return
+        }
+        viewModel.saveProgress()
         // The engine can fail on a read from the lost server before the buffer runs out, while it is not stalled yet.
         if isStreamingServerMarkedUnreachable, handleStreamingServerLost() {
             return

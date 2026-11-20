@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 nonisolated enum SimklAPI {
     static let clientID = "8788ef20dbc533e6950586723a90892be6c07c54864d31a443de7d11421547ab"
@@ -40,6 +41,14 @@ nonisolated enum SimklAPI {
 
     static func error(for response: TrackerHTTPResponse) -> TrackerAPIError {
         let body = response.bodyText
+        let retryAfter = response.retryAfter.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        if response.statusCode == 429 {
+            let reason = body.contains("user_limit_exceeded") ? "user_quota" :
+                body.contains("app_limit_exceeded") ? "app_quota" :
+                body.contains("rate_limit") ? "burst" : "unknown"
+            Logger(subsystem: "app.strimr.simkl", category: "Sync")
+                .notice("stage=http_response http=429 reason=\(reason, privacy: .public)")
+        }
         switch response.statusCode {
         case 400 where body.contains("RATE_LIMIT"): return .writeLocked
         case 401: return .unauthorized
@@ -48,12 +57,12 @@ nonisolated enum SimklAPI {
         case 412: return .throttled
         case 429:
             if body.contains("user_limit_exceeded") || body.contains("app_limit_exceeded") {
-                return .rateLimited(retryAfter: response.retryAfter ?? dailyQuotaFallback)
+                return .rateLimited(retryAfter: retryAfter ?? dailyQuotaFallback)
             }
             if body.contains("rate_limit") {
                 return .rateLimited(retryAfter: burstHold)
             }
-            return .rateLimited(retryAfter: response.retryAfter ?? unknownLimitFallback)
+            return .rateLimited(retryAfter: retryAfter ?? unknownLimitFallback)
         case 500 ... 599: return .server(status: response.statusCode)
         default: return .unexpected(status: response.statusCode)
         }
@@ -140,16 +149,25 @@ final class SimklClient: TrackerClient {
 
     private let http: TrackerHTTP
     private let transport: TrackerTransport
+    private let originGate: TrackerWriteGate
+    private let sleep: TrackerWriteGate.Sleep
+    private let now: () -> Date
+    private var holdUntil: Date?
 
     init(
         session: TrackerSession,
         http: TrackerHTTP = TrackerHTTP(),
         gate: TrackerWriteGate? = nil,
+        originGate: TrackerWriteGate? = nil,
+        sleep: @escaping TrackerWriteGate.Sleep = { try await Task.sleep(for: $0) },
         now: @escaping () -> Date = Date.init,
         onUpdated: @escaping (TrackerSession) -> Void,
         onInvalidated: @escaping () -> Void,
     ) {
         self.http = http
+        self.originGate = originGate ?? TrackerWriteGate(spacing: .milliseconds(150))
+        self.sleep = sleep
+        self.now = now
         let tokens = TrackerTokenProvider(
             session: session,
             refresh: { try await Self.refresh($0, http: http, now: now) },
@@ -180,6 +198,7 @@ final class SimklClient: TrackerClient {
             ],
         ))
         guard response.isSuccess else {
+            SimklSyncFailure.record(SimklAPI.error(for: response), stage: "token_refresh")
             if response.statusCode == 400 || response.statusCode == 401 {
                 throw TrackerAPIError.sessionExpired
             }
@@ -200,7 +219,7 @@ final class SimklClient: TrackerClient {
 
             let user: User?
         }
-        let response = try await transport.read { token in
+        let response = try await read(stage: "user_settings") { token in
             .trackerJSON(
                 url: SimklAPI.url(path: "users/settings"),
                 method: "GET",
@@ -212,10 +231,20 @@ final class SimklClient: TrackerClient {
     }
 
     func report(_ event: TrackerPlaybackEvent, item: TrackerItem, progress: Double) async throws {
-        guard let body = TrackerRequestBody.scrobble(item: item, progress: progress, media: SimklAPI.media) else {
-            return
-        }
-        try await post(path: "scrobble/\(event.rawValue)", body: body)
+        try await report(event, item: item, progress: progress, minimumProgress: nil)
+    }
+
+    func report(
+        _ event: TrackerPlaybackEvent,
+        item: TrackerItem,
+        progress: Double,
+        minimumProgress: Int?,
+    ) async throws {
+        guard let body = TrackerRequestBody.scrobble(item: item, progress: progress, media: SimklAPI.media)
+        else { return }
+        let query = minimumProgress
+            .map { [URLQueryItem(name: "min_progress", value: String(min(100, max(50, $0))))] } ?? []
+        try await post(path: "scrobble/\(event.rawValue)", body: body, query: query)
     }
 
     func addToHistory(_ entries: [TrackerHistoryEntry]) async throws {
@@ -237,11 +266,116 @@ final class SimklClient: TrackerClient {
         ))
     }
 
-    private func post(path: String, body: [String: Any]) async throws {
-        let payload = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
-        try await transport.write { token in
+    /// Uses the same token provider and write gate as scrobbling, avoiding competing refreshes.
+    func libraryRead(_ path: String, query: [URLQueryItem] = []) async throws -> TrackerHTTPResponse {
+        try await read(stage: Self.readStage(path)) { token in
+            .trackerJSON(
+                url: SimklAPI.url(path: path).appending(queryItems: query),
+                method: "GET",
+                headers: SimklAPI.headers(token: token),
+                body: nil,
+            )
+        }
+    }
+
+    func libraryDecode<T: Decodable>(
+        _ type: T.Type, path: String, query: [URLQueryItem] = [],
+    ) async throws -> T {
+        let response = try await libraryRead(path, query: query)
+        do { return try response.decode(type) }
+        catch {
+            SimklSyncFailure.record(error, stage: Self.readStage(path) + "_decode", httpStatus: response.statusCode)
+            throw error
+        }
+    }
+
+    @discardableResult
+    func libraryWrite(_ path: String, body: [String: Any]) async throws -> [String: Any] {
+        let data = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+        let response = try await write { token in
             var request = URLRequest.trackerJSON(
                 url: SimklAPI.url(path: path),
+                headers: SimklAPI.headers(token: token),
+                body: nil,
+            )
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = data
+            return request
+        }
+        guard let result = try JSONSerialization.jsonObject(with: response.data) as? [String: Any] else {
+            throw TrackerAPIError.invalidResponse
+        }
+        if let raw = result["not_found"] {
+            guard let notFound = raw as? [String: Any] else { throw TrackerAPIError.invalidResponse }
+            for value in notFound.values {
+                guard let rows = value as? [Any] else { throw TrackerAPIError.invalidResponse }
+                if !rows.isEmpty {
+                    throw TrackerAPIError.notFound
+                }
+            }
+        }
+        return result
+    }
+
+    private static func readStage(_ path: String) -> String {
+        switch path {
+        case "sync/activities": "activities"
+        case "sync/playback": "paused_playback"
+        case "sync/all-items/movies": "movie_list"
+        case "sync/all-items/shows": "episode_list"
+        default: "library_read"
+        }
+    }
+
+    private func checkHold() throws {
+        if let holdUntil, holdUntil > now() {
+            throw TrackerAPIError.rateLimited(retryAfter: holdUntil.timeIntervalSince(now()))
+        }
+    }
+
+    private func read(
+        stage: String,
+        _ build: @escaping (String) -> URLRequest,
+    ) async throws -> TrackerHTTPResponse {
+        try await originGate.run { [self] in
+            try checkHold()
+            for attempt in 0 ... 2 {
+                try Task.checkCancellation()
+                do { return try await transport.read(build) }
+                catch {
+                    SimklSyncFailure.record(error, stage: stage)
+                    guard let delay = SimklSyncFailure.retryDelay(error, attempt: attempt) else {
+                        if case let TrackerAPIError.rateLimited(delay) = error {
+                            holdUntil = now().addingTimeInterval(max(1, delay ?? 60))
+                        }
+                        throw error
+                    }
+                    try await sleep(.seconds(delay))
+                }
+            }
+            throw TrackerAPIError.unavailable
+        }
+    }
+
+    private func write(_ build: @escaping (String) -> URLRequest) async throws -> TrackerHTTPResponse {
+        try await originGate.run { [self] in
+            try checkHold()
+            do { return try await transport.write(build) }
+            catch {
+                SimklSyncFailure.record(error, stage: "write")
+                if case let TrackerAPIError.rateLimited(delay) = error {
+                    holdUntil = now().addingTimeInterval(max(1, delay ?? 60))
+                }
+                throw error
+            }
+        }
+    }
+
+    private func post(path: String, body: [String: Any], query: [URLQueryItem] = []) async throws {
+        let payload = try JSONSerialization.data(withJSONObject: body, options: .sortedKeys)
+        try await write { token in
+            var request = URLRequest.trackerJSON(
+                url: SimklAPI.url(path: path).appending(queryItems: query),
                 headers: SimklAPI.headers(token: token),
                 body: nil,
             )

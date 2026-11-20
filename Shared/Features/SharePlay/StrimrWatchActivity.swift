@@ -11,6 +11,29 @@ struct StrimrWatchActivity: GroupActivity, Hashable, Sendable {
     let mediaKind: MediaKind
     let title: String
     let initialPosition: Double
+    let catalog: CatalogSharePlayItem?
+
+    init(
+        activityID: UUID,
+        provider: MediaProvider,
+        serverIdentifier: String,
+        ratingKey: String,
+        mediaKind: MediaKind,
+        title: String,
+        initialPosition: Double,
+        catalog: CatalogSharePlayItem? = nil,
+    ) {
+        self.activityID = activityID; self.provider = provider; self.serverIdentifier = serverIdentifier
+        self.ratingKey = ratingKey; self.mediaKind = mediaKind; self.title = title
+        self.initialPosition = initialPosition; self.catalog = catalog
+    }
+
+    var hasValidSharePlayMetadata: Bool {
+        guard initialPosition.isFinite, initialPosition >= 0,
+              !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !ratingKey.isEmpty, !serverIdentifier.isEmpty else { return false }
+        return catalog.map { $0.matches(self) } ?? true
+    }
 
     var metadata: GroupActivityMetadata {
         get async {
@@ -18,8 +41,12 @@ struct StrimrWatchActivity: GroupActivity, Hashable, Sendable {
             metadata.type = .watchTogether
             metadata.title = title
             metadata.subtitle = String(localized: "sharePlay.activity.subtitle")
-            metadata.supportsContinuationOnTV = true
+            metadata.supportsContinuationOnTV = catalog == nil
             return metadata
         }
     }
 }
+
+extension StrimrWatchActivity: Identifiable { var id: UUID {
+    activityID
+} }

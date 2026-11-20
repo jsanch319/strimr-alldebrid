@@ -10,6 +10,18 @@ struct SettingsAudioView: View {
 
     var body: some View {
         List {
+            #if os(iOS)
+                Section {
+                    Toggle("Always Prefer English Audio", isOn: Binding(
+                        get: { settingsManager.playback.alwaysPreferEnglishAudio },
+                        set: { value in settingsManager.updatePlayback { $0.alwaysPreferEnglishAudio = value } },
+                    ))
+                } footer: {
+                    Text(
+                        "Prefer main English audio using real track language metadata. Manual choices override this preference for the current playback. If English is missing, another ready source is used only when its audio can be verified; otherwise playback continues with a notice.",
+                    )
+                }
+            #endif
             Section {
                 VStack(alignment: .leading, spacing: 6) {
                     Toggle("settings.playback.losslessAudio", isOn: viewModel.losslessAudioBinding)

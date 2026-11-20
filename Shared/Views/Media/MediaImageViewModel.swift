@@ -12,7 +12,7 @@ final class MediaImageViewModel {
         case cardArt
     }
 
-    @ObservationIgnored private let service: any MediaArtworkService
+    @ObservationIgnored private let service: (any MediaArtworkService)?
     var artworkKind: ArtworkKind
     var media: MediaDisplayItem
     var spoilerProtection = SpoilerProtectionLevel.off
@@ -24,6 +24,24 @@ final class MediaImageViewModel {
         service = services.artwork
         self.artworkKind = artworkKind
         self.media = media
+    }
+
+    init(artworkKind: ArtworkKind, media: MediaDisplayItem) {
+        service = nil
+        self.artworkKind = artworkKind
+        self.media = media
+    }
+
+    /// Progress updates retain the decoded image; replacing artwork for the same title rebuilds its image state.
+    var artworkIdentity: [String] {
+        [
+            media.id,
+            artworkKind.rawValue,
+            media.preferredArtPath ?? "",
+            media.preferredThumbPath ?? "",
+            media.playableItem?.seriesArtworkPath ?? "",
+            media.playableItem?.seasonPosterPath ?? "",
+        ]
     }
 
     /// Whether the series artwork preferences replace the default artwork of an episode or season card.
@@ -93,6 +111,11 @@ final class MediaImageViewModel {
             return
         }
 
+        if service == nil, let url = CatalogMediaAdapter.artworkURL(path) {
+            resource = .url(url)
+            return
+        }
+        guard let service else { resource = nil; return }
         do {
             resource = try await service.artwork(path: path, width: nil, height: nil)
         } catch {

@@ -1,0 +1,98 @@
+[
+  {
+    "name": "Torrentio 4K",
+    "title": "Ready release\nAudio: Russian",
+    "languages": [
+      "ru"
+    ],
+    "url": "https://media.example.test/ready/ru.mkv"
+  },
+  {
+    "name": "Torrentio 1080p",
+    "title": "The.Rings.of.Power.2022.S02E01.1080p.WEB-DL\n🌐 🇬🇧",
+    "url": "https://media.example.test/opaque/english.mkv",
+    "behaviorHints": {
+      "filename": "The.Rings.of.Power.2022.S02E01.1080p.WEB-DL.mkv",
+      "notWebReady": true,
+      "bingeGroup": "fixture-group"
+    }
+  },
+  {
+    "name": "Torrentio 4K",
+    "title": "MULTI\n💾 8 GB",
+    "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fileIdx": 4,
+    "sources": [
+      "tracker:udp://tracker.example.test:80/announce"
+    ],
+    "behaviorHints": {
+      "notWebReady": true,
+      "videoSize": 8000000000
+    }
+  },
+  {
+    "name": "Torrentio 4K",
+    "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fileIdx": 5,
+    "behaviorHints": {
+      "filename": "The.Rings.of.Power.S02E02.mkv"
+    }
+  },
+  {
+    "name": "Torrentio 720p",
+    "languages": [
+      "en-US"
+    ],
+    "url": "https://media.example.test/opaque/video.mkv",
+    "behaviorHints": {
+      "filename": "video.mkv"
+    }
+  },
+  {
+    "name": "Torrentio 4K",
+    "title": "The.Rings.of.Power.S02E02.2160p.WEB-DL",
+    "url": "https://media.example.test/opaque/wrong.mkv"
+  },
+  {
+    "url": "https://media.example.test/protected.mpd",
+    "drm": {
+      "type": "widevine"
+    }
+  },
+  {
+    "externalUrl": "https://player.example.test/episode"
+  },
+  {
+    "url": "https://media.example.test/header-required.mkv",
+    "behaviorHints": {
+      "proxyHeaders": {
+        "request": {
+          "Authorization": "fixture-only"
+        }
+      }
+    }
+  },
+  {
+    "name": "Torrentio 1080p",
+    "infoHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "fileIdx": 5
+  },
+  {
+    "name": "Torrentio 720p",
+    "infoHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "fileIdx": null
+  },
+  {
+    "name": "Torrentio 1080p",
+    "url": "https://media.example.test/opaque/multi.mkv",
+    "behaviorHints": {
+      "filename": "The.Rings.of.Power.S02E01E02.mkv"
+    }
+  },
+  {
+    "name": "Torrentio 720p",
+    "url": "https://media.example.test/nullable/video.mkv",
+    "fileIdx": null,
+    "behaviorHints": null
+  }
+]

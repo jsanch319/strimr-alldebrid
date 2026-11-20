@@ -4,6 +4,28 @@ import Foundation
 #endif
 
 enum DiscordWatchTogetherConfiguration {
+    static var isConfigured: Bool {
+        isConfigured(
+            applicationID: Bundle.main.object(forInfoDictionaryKey: "DiscordApplicationClientID") as? String,
+            activityURL: Bundle.main.object(forInfoDictionaryKey: "DiscordActivityURL") as? String,
+        )
+    }
+
+    static func isConfigured(applicationID: String?, activityURL: String?) -> Bool {
+        let id = applicationID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard (17 ... 20).contains(id.count), id.allSatisfy { $0.isASCII && $0.isNumber },
+              let raw = activityURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: raw), url.scheme == "https", let host = url.host,
+              url.user == nil, url.password == nil,
+              !host.hasSuffix(".example"), !host.hasSuffix(".invalid"), !host.contains("$(")
+        else { return false }
+        return true
+    }
+
+    static let setupExplanation = """
+    Discord Watch Together is not configured in this build. Set DISCORD_APPLICATION_CLIENT_ID to your real Discord application's public client ID and DISCORD_ACTIVITY_URL to your deployed HTTPS Activity URL, then rebuild. The Activity must be deployed and configured in the Discord Developer Portal; configuration values alone do not make Watch Together operational. AllDebrid playback does not require Discord.
+    """
+
     static func activityLaunchURL(
         for media: MediaItem,
         position: Double = 0,
@@ -32,10 +54,9 @@ enum DiscordWatchTogetherConfiguration {
         selectedSourceIdentifier: String? = nil,
     ) -> URL? {
         let applicationID = applicationID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !applicationID.isEmpty,
-              applicationID.allSatisfy(\.isNumber),
+        guard isConfigured(applicationID: applicationID, activityURL: activityURL),
               let activityURL,
-              let configuredActivityURL = URL(string: activityURL),
+              let configuredActivityURL = URL(string: activityURL.trimmingCharacters(in: .whitespacesAndNewlines)),
               configuredActivityURL.scheme == "https",
               configuredActivityURL.host != nil,
               configuredActivityURL.user == nil,

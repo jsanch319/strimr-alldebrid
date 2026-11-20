@@ -154,6 +154,14 @@ final class SessionManager {
     func hydrate() async {
         status = .hydrating
         loadingPhase = .preparing
+        #if DEBUG && os(iOS) && targetEnvironment(simulator)
+            // The credential-free catalog fixture has no legacy accounts to migrate. The normal migrator
+            // reads the real Keychain even when an isolated AccountStore was injected.
+            if CatalogVisualFixtures.isEnabled {
+                status = .needsAccount
+                return
+            }
+        #endif
         #if DEBUG
             // Unsigned simulator builds cannot read the Keychain, and the demo stores must stay apart from real data.
             if DemoMode.isEnabled {

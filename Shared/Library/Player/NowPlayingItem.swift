@@ -43,11 +43,41 @@ struct NowPlayingItem {
         self.init(
             title: media.title,
             subtitle: subtitle?.isEmpty == false ? subtitle : nil,
-            artworkPath: media.preferredThumbPath,
+            artworkPath: CatalogMediaAdapter.selectionID(media) != nil && media.type == .episode
+                ? (media.thumbPath ?? media.preferredThumbPath) : media.preferredThumbPath,
             artworkService: artworkService,
             skipBackwardSeconds: Double(skipBackwardSeconds),
             skipForwardSeconds: Double(skipForwardSeconds),
         )
+    }
+
+    /// Server artwork stays with its authenticated service. Catalog playback has no server service;
+    /// only public TMDb image URLs may be fetched directly (never the signed playback URL).
+    func artworkResources() async -> [ArtworkResource] {
+        guard let artworkPath else { return [] }
+        if let artworkService {
+            return await (try? artworkService.artwork(path: artworkPath, width: 1024, height: nil)).map { [$0] } ?? []
+        }
+        guard let url = CatalogMediaAdapter.artworkURL(artworkPath) else { return [] }
+        let parts = url.pathComponents
+        guard parts.count >= 5, parts[1] == "t", parts[2] == "p" else { return [] }
+        let original = TMDBImageService.imageURL(path: parts.dropFirst(4).joined(separator: "/"), size: .original)
+        return (original == url ? [url] : [original, url].compactMap(\.self)).map(ArtworkResource.url)
+    }
+
+    /// A paused background session may have released its video item and be holding a static card.
+    /// Refresh its identity without losing the player's saved timing or retaining the previous artwork.
+    func updatingIdentity(in current: [String: Any], artwork: MPMediaItemArtwork?, isLive: Bool) -> [String: Any] {
+        var updated = identityInfo(artwork: artwork, isLive: isLive)
+        for key in [
+            MPNowPlayingInfoPropertyElapsedPlaybackTime,
+            MPNowPlayingInfoPropertyPlaybackRate,
+            MPNowPlayingInfoPropertyDefaultPlaybackRate,
+            MPMediaItemPropertyPlaybackDuration,
+        ] {
+            updated[key] = current[key]
+        }
+        return updated
     }
 
     /// Identity keys only: position, duration and rate come from the player.

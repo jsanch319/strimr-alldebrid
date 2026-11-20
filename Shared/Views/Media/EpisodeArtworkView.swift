@@ -22,13 +22,7 @@ struct EpisodeArtworkView: View {
         .id(artworkPath)
         .frame(width: width, height: width / aspectRatio)
         .background(Color.black)
-        .overlay(alignment: .bottomLeading) {
-            if let progress {
-                CardProgressBar(progress: progress)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-            }
-        }
+        .artworkProgress(progress, inset: 10)
         .frame(width: width)
         .clipped()
         .mediaArtworkStyle(.compact, borderColor: .white.opacity(0.05))

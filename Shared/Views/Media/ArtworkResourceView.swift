@@ -25,6 +25,20 @@ struct ArtworkResourceView: View {
         Color.surfaceSubtle
     }
 
+    /// Shares the exact decoded image/cache with rendering; sampling a tiny bitmap happens off the main actor.
+    static func progressColors(for resource: ArtworkResource) async -> [ProgressArtworkColor] {
+        let image: PlatformImage? = switch resource {
+        case let .url(url): try? await RemoteArtworkImage.image(for: url)
+        case let .data(data): await DataArtworkImage.image(for: data)
+        }
+        #if os(macOS)
+            guard let cgImage = image?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return [] }
+        #else
+            guard let cgImage = image?.cgImage else { return [] }
+        #endif
+        return await ArtworkProgressSampler.colors(from: cgImage)
+    }
+
     /// Warms the image caches so a view created afterwards renders the artwork on its first frame.
     static func preload(_ resource: ArtworkResource) async {
         _ = await image(for: resource)
@@ -32,13 +46,27 @@ struct ArtworkResourceView: View {
 
     /// The decoded artwork, for callers that lay it out themselves; nil when it cannot be loaded.
     static func image(for resource: ArtworkResource) async -> Image? {
-        let image: PlatformImage? = switch resource {
-        case let .url(url):
-            try? await RemoteArtworkImage.image(for: url)
-        case let .data(data):
-            await DataArtworkImage.image(for: data)
+        await platformImage(for: resource).map(Image.init(platformImage:))
+    }
+
+    /// Keep original logo pixels and alpha; reject opaque artwork masquerading as a transparent logo.
+    static func transparentImage(for resource: ArtworkResource) async -> Image? {
+        guard let image = await platformImage(for: resource) else { return nil }
+        #if os(macOS)
+            guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        #else
+            guard let cgImage = image.cgImage else { return nil }
+        #endif
+        guard await PlayerTitleLogoPolicy.hasTransparency(cgImage) else { return nil }
+        return Image(platformImage: image)
+    }
+
+    /// System media artwork shares the same decoded cache as on-screen artwork.
+    static func platformImage(for resource: ArtworkResource) async -> PlatformImage? {
+        switch resource {
+        case let .url(url): try? await RemoteArtworkImage.image(for: url)
+        case let .data(data): await DataArtworkImage.image(for: data)
         }
-        return image.map(Image.init(platformImage:))
     }
 }
 
@@ -164,17 +192,28 @@ private struct RemoteArtworkImage: View {
         }
     }
 
+    private static var inFlight: [URL: Task<PlatformImage, Error>] = [:]
+
     static func image(for url: URL) async throws -> PlatformImage {
         if let cached = cache.object(forKey: url as NSURL) {
             return cached
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
-        if let status = (response as? HTTPURLResponse)?.statusCode, !(200 ..< 300).contains(status) {
-            throw URLError(.badServerResponse)
+        if let task = inFlight[url] {
+            return try await task.value
         }
-        guard let (image, cost) = await ArtworkDecoder.decode(data) else { throw URLError(.cannotDecodeContentData) }
-        cache.setObject(image, forKey: url as NSURL, cost: cost)
-        return image
+        let task = Task {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let status = (response as? HTTPURLResponse)?.statusCode, !(200 ..< 300).contains(status) {
+                throw URLError(.badServerResponse)
+            }
+            guard let (image, cost) = await ArtworkDecoder.decode(data)
+            else { throw URLError(.cannotDecodeContentData) }
+            cache.setObject(image, forKey: url as NSURL, cost: cost)
+            return image
+        }
+        inFlight[url] = task
+        defer { inFlight[url] = nil }
+        return try await task.value
     }
 
     private func platformImage(_ image: PlatformImage) -> Image {
@@ -187,9 +226,9 @@ private struct RemoteArtworkImage: View {
 }
 
 #if os(macOS)
-    private typealias PlatformImage = NSImage
+    typealias PlatformImage = NSImage
 #else
-    private typealias PlatformImage = UIImage
+    typealias PlatformImage = UIImage
 #endif
 
 /// `UIImage(data:)` decodes lazily on the main actor at first render, which stalls tvOS focus moves once artwork
@@ -220,6 +259,7 @@ struct ArtworkPathView: View {
 
     var body: some View {
         ArtworkResourceView(resource: resource, contentMode: contentMode)
+            .preference(key: ProgressArtworkPreference.self, value: resource)
             .task(id: path) {
                 guard let path else {
                     resource = nil

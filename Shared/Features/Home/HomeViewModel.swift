@@ -17,7 +17,15 @@ final class HomeViewModel {
     private var libraryGroupOrder: [String] = []
     private(set) var loadedServers: Set<ServerIdentity> = []
     /// Pages of the hero at the top of the home; empty when it is off or has nothing to show.
-    private(set) var heroSlides: [HomeHeroSlide] = []
+    private var serverHeroSlides: [HomeHeroSlide] = []
+    let isServerFree: Bool
+    let catalog: CatalogHomeData?
+    var heroSlides: [HomeHeroSlide] {
+        catalog?
+            .heroSlides(source: heroSource, includesTrending: settingsManager.interface.homeHeroIncludesTrending) ??
+            serverHeroSlides
+    }
+
     @ObservationIgnored private var featuredByServer: [ServerIdentity: [FeaturedCandidate]] = [:]
     @ObservationIgnored private var trendingCandidates: [FeaturedCandidate] = []
     @ObservationIgnored private var trendingTask: Task<Void, Never>?
@@ -73,7 +81,14 @@ final class HomeViewModel {
     private static let periodicRefreshInterval: Duration = .seconds(300)
     private static let failedServersRetryInterval: TimeInterval = 90
 
-    init(sessionManager: SessionManager, settingsManager: SettingsManager, now: @escaping () -> Date = Date.init) {
+    init(
+        sessionManager: SessionManager,
+        settingsManager: SettingsManager,
+        serverFree: Bool = false,
+        now: @escaping () -> Date = Date.init,
+    ) {
+        isServerFree = serverFree
+        catalog = serverFree ? CatalogHomeData() : nil
         self.sessionManager = sessionManager
         self.settingsManager = settingsManager
         self.now = now
@@ -84,7 +99,7 @@ final class HomeViewModel {
     }
 
     private var profileID: String {
-        sessionManager.activeProfile?.id ?? ""
+        isServerFree ? TrackerCoordinator.allDebridProfileID : (sessionManager.activeProfile?.id ?? "")
     }
 
     // MARK: - Rows
@@ -136,6 +151,14 @@ final class HomeViewModel {
 
     var rows: [HomeRow] {
         let preferences = settingsManager.homeRowPreferences(profileID: profileID)
+        if let catalog {
+            let visible = preferences.visibleRows(from: catalog.rows).map(preferences.styled)
+            // A prior saved movie/TV row order must not strand the new combined row below discovery.
+            let trendingID = "catalog:\(TMDBClient.Feed.trendingMovies.id)"
+            return visible.filter { $0.kind == .continueWatching }
+                + visible.filter { $0.id == trendingID }
+                + visible.filter { $0.kind != .continueWatching && $0.id != trendingID }
+        }
         return pinningOfflineDownloads(preferences.visibleRows(from: availableRows), preferences: preferences)
             .map(preferences.styled)
     }
@@ -221,6 +244,14 @@ final class HomeViewModel {
 
     /// Reloads every server.
     func reload() async {
+        if let catalog {
+            isLoading = true
+            await catalog.load(force: true)
+            availableRows = catalog.rows; editableRows = catalog.rows
+            errorMessage = catalog.errorMessage
+            isLoading = false
+            return
+        }
         await reload(servers: nil, preservingExistingContent: false)
     }
 
@@ -229,6 +260,9 @@ final class HomeViewModel {
     /// on another device.
     func refreshIfNeeded(now: Date = Date()) async {
         guard !isPlaybackActive, refreshGate.hasStartedInitialLoad else { return }
+        if let catalog {
+            await catalog.load(); return
+        }
         if libraryOrder != builtLibraryOrder {
             rebuild()
         } else {
@@ -302,6 +336,7 @@ final class HomeViewModel {
 
     /// Runs while the home is on screen, for progress made on another device while the app stays in front.
     func refreshPeriodically() async {
+        guard !isServerFree else { return }
         while true {
             do {
                 try await Task.sleep(for: Self.periodicRefreshInterval)
@@ -582,8 +617,8 @@ final class HomeViewModel {
         case .discover:
             HomeHeroSlides.featured(featuredSelection())
         }
-        if slides != heroSlides {
-            heroSlides = slides
+        if slides != serverHeroSlides {
+            serverHeroSlides = slides
         }
     }
 

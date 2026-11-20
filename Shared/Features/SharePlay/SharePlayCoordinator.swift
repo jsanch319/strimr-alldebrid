@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import GroupActivities
 import Observation
+import OSLog
 
 @MainActor
 @Observable
@@ -13,14 +14,90 @@ final class SharePlayCoordinator {
     private(set) var participantCount = 0
     private(set) var isActivating = false
     var errorMessage: String?
+    var catalogErrorMessage: String?
+    var catalogPlaybackActivity: StrimrWatchActivity?
+    var catalogInvitationActivity: StrimrWatchActivity?
 
     var isEligibleForGroupSession: Bool {
-        groupStateObserver.isEligibleForGroupSession
+        signingUnavailableReason == nil && groupStateObserver.isEligibleForGroupSession
+    }
+
+    var isLaunching: Bool {
+        isActivating || launchGuard.activeID != nil || sharingPresentationActivityID != nil
+    }
+
+    @ObservationIgnored private let signingUnavailableReason = SharePlaySigningCheck.installedAppUnavailableReason
+    private var launchGuard = SharePlayLaunchGuard()
+    @ObservationIgnored private var activationDeadline: Task<Void, Never>?
+    @ObservationIgnored private static let launchLog = Logger(subsystem: "app.strimr.shareplay", category: "Launch")
+
+    /// Called before constructing any native invitation controller or invoking GroupActivities.
+    func checkLaunchAvailability(for activity: StrimrWatchActivity) -> Bool {
+        if let signingUnavailableReason {
+            Self.launchLog.notice("stage=preflight outcome=signing_unconfirmed")
+            reportLaunchError(signingUnavailableReason, for: activity)
+            return false
+        }
+        guard activity.hasValidSharePlayMetadata else {
+            reportLaunchError(
+                "This SharePlay invitation has invalid media identity or playback metadata.",
+                for: activity,
+            )
+            Self.launchLog.notice("stage=preflight outcome=invalid_metadata")
+            return false
+        }
+        return true
+    }
+
+    private func reportLaunchError(_ message: String, for activity: StrimrWatchActivity) {
+        if activity.catalog != nil {
+            catalogErrorMessage = message
+        } else {
+            errorMessage = message
+        }
+    }
+
+    func beginSharingPresentation(_ activity: StrimrWatchActivity) -> Bool {
+        guard checkLaunchAvailability(for: activity), !isLaunching,
+              launchGuard.begin(activity.activityID) else { return false }
+        completedInvitationID = nil
+        sharingPresentationActivityID = activity.activityID
+        locallyPreparedActivityIDs.insert(activity.activityID)
+        Self.launchLog.notice("stage=invitation outcome=constructing")
+        return true
+    }
+
+    func sharingPresentationDidAppear() {
+        Self.launchLog.notice("stage=invitation outcome=visible")
+    }
+
+    func sharingPresentationFailed(_ activity: StrimrWatchActivity) {
+        sharingDidCancel(activity)
+        sharingPresentationActivityID = nil
+        reportLaunchError(
+            "SharePlay could not present its invitation. Check FaceTime availability and the final signed app's Group Activities authorization.",
+            for: activity,
+        )
+        Self.launchLog.notice("stage=invitation outcome=presentation_failed")
+    }
+
+    private func awaitSession(for activity: StrimrWatchActivity) {
+        activationDeadline?.cancel()
+        activationDeadline = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            guard let self, launchGuard.activeID == activity.activityID, !isInSession else { return }
+            launchGuard.finish(activity.activityID)
+            locallyPreparedActivityIDs.remove(activity.activityID)
+            setActivationError(for: activity)
+            Self.launchLog.notice("stage=activation outcome=session_not_received")
+        }
     }
 
     @ObservationIgnored private let sessionManager: SessionManager
-    @ObservationIgnored private let groupStateObserver = GroupStateObserver()
+    @ObservationIgnored private lazy var groupStateObserver = GroupStateObserver()
     @ObservationIgnored private var session: GroupSession<StrimrWatchActivity>?
+    @ObservationIgnored private var acceptingSession: GroupSession<StrimrWatchActivity>?
+    @ObservationIgnored private var acceptanceGeneration = UUID()
     @ObservationIgnored private weak var playbackPresenter: (any PlaybackPresenting)?
     @ObservationIgnored private weak var playerController: PlayerController?
     @ObservationIgnored private var sessionSubscriptions: Set<AnyCancellable> = []
@@ -28,7 +105,8 @@ final class SharePlayCoordinator {
     @ObservationIgnored private var locallyPreparedActivityIDs: Set<UUID> = []
     @ObservationIgnored private var pendingNextItem: MediaItem?
     @ObservationIgnored private var lastLaunchedActivityID: UUID?
-    @ObservationIgnored private var sharingPresentationActivityID: UUID?
+    @ObservationIgnored private var completedInvitationID: UUID?
+    private var sharingPresentationActivityID: UUID?
     @ObservationIgnored private var pendingSessionAcceptanceActivityID: UUID?
     @ObservationIgnored private var deferredSessionInvalidation = false
     @ObservationIgnored private var pendingInitialResumeActivityID: UUID?
@@ -36,6 +114,13 @@ final class SharePlayCoordinator {
 
     init(sessionManager: SessionManager) {
         self.sessionManager = sessionManager
+        guard signingUnavailableReason == nil else {
+            Self.launchLog.notice("stage=listener outcome=signing_unconfirmed")
+            return
+        }
+        // Begin observing eligibility once signing is confirmed, rather than creating an
+        // observer on the first tap and immediately consulting its initial state.
+        _ = groupStateObserver
         sessionListener = Task { [weak self] in
             for await session in StrimrWatchActivity.sessions() {
                 guard !Task.isCancelled else { return }
@@ -46,6 +131,44 @@ final class SharePlayCoordinator {
 
     func configurePlaybackPresenter(_ presenter: any PlaybackPresenting) {
         playbackPresenter = presenter
+    }
+
+    func makeCatalogActivity(title: TMDBTitle, episode: TMDBEpisode?, initialPosition: Double) -> StrimrWatchActivity? {
+        catalogErrorMessage = nil
+        let item = CatalogSharePlayItem(
+            tmdbID: title.id,
+            isTV: title.kind == .tv,
+            season: episode?.season_number,
+            episode: episode?.episode_number,
+        )
+        guard item.isValid, initialPosition.isFinite, initialPosition >= 0 else {
+            catalogErrorMessage = "Choose a movie or an exact TV episode before starting SharePlay."
+            return nil
+        }
+        // Legacy server fields remain on the wire for compatibility. Catalog routing never
+        // looks up a Plex/Jellyfin server and never includes a source URL or account token.
+        let sharedTitle = episode
+            .map { "\(title.displayTitle) · S\($0.season_number) E\($0.episode_number) — \($0.name)" }
+            ?? title.displayTitle
+        return StrimrWatchActivity(
+            activityID: UUID(),
+            provider: .plex,
+            serverIdentifier: "tmdb-catalog",
+            ratingKey: item.ratingKey,
+            mediaKind: item.mediaKind,
+            title: sharedTitle,
+            initialPosition: initialPosition,
+            catalog: item,
+        )
+    }
+
+    func presentCatalogActivity(_ activity: StrimrWatchActivity) {
+        guard let item = activity.catalog, item.matches(activity) else {
+            catalogErrorMessage = "This SharePlay title or episode could not be identified safely."
+            return
+        }
+        lastLaunchedActivityID = activity.activityID
+        catalogPlaybackActivity = activity
     }
 
     func makeActivity(
@@ -96,13 +219,15 @@ final class SharePlayCoordinator {
     }
 
     func activate(_ activity: StrimrWatchActivity) async {
-        guard !isActivating else { return }
+        guard checkLaunchAvailability(for: activity), !isLaunching,
+              launchGuard.begin(activity.activityID) else { return }
 
         isActivating = true
         locallyPreparedActivityIDs.insert(activity.activityID)
         defer { isActivating = false }
 
         if let session {
+            launchGuard.finish(activity.activityID, cooldown: false)
             session.activity = activity
             handleActivityChange(activity)
             if playerController == nil {
@@ -112,43 +237,81 @@ final class SharePlayCoordinator {
         }
 
         do {
+            Self.launchLog.notice("stage=preparation outcome=started")
             let preparationResult = await activity.prepareForActivation()
+            guard !Task.isCancelled else {
+                launchGuard.finish(activity.activityID)
+                locallyPreparedActivityIDs.remove(activity.activityID)
+                return
+            }
             switch preparationResult {
             case .activationPreferred:
+                Self.launchLog.notice("stage=activation outcome=started")
                 let activated = try await activity.activate()
-                if !activated {
+                if activated {
+                    Self.launchLog.notice("stage=activation outcome=waiting_for_session")
+                    if !isInSession {
+                        awaitSession(for: activity)
+                    }
+                } else {
                     locallyPreparedActivityIDs.remove(activity.activityID)
-                    errorMessage = String(localized: "sharePlay.error.unavailable")
+                    setActivationError(for: activity)
                 }
             case .activationDisabled:
                 locallyPreparedActivityIDs.remove(activity.activityID)
-                errorMessage = String(localized: "sharePlay.error.unavailable")
+                setActivationError(for: activity)
             case .cancelled:
+                launchGuard.finish(activity.activityID)
+                Self.launchLog.notice("stage=preparation outcome=cancelled")
                 locallyPreparedActivityIDs.remove(activity.activityID)
             @unknown default:
                 locallyPreparedActivityIDs.remove(activity.activityID)
-                errorMessage = String(localized: "sharePlay.error.unavailable")
+                setActivationError(for: activity)
             }
         } catch {
             locallyPreparedActivityIDs.remove(activity.activityID)
+            launchGuard.finish(activity.activityID)
             guard !Task.isCancelled, !error.isCancellation else { return }
-            ErrorReporter.capture(error)
-            errorMessage = error.localizedDescription
+            Self.launchLog.notice("stage=activation outcome=failed")
+            setActivationError(for: activity)
         }
     }
 
-    func sharingDidStart(_ activity: StrimrWatchActivity) {
-        locallyPreparedActivityIDs.insert(activity.activityID)
-        sharingPresentationActivityID = activity.activityID
+    private func setActivationError(for activity: StrimrWatchActivity) {
+        launchGuard.finish(activity.activityID)
+        Self.launchLog.notice("stage=activation outcome=unavailable")
+        if activity.catalog != nil {
+            catalogErrorMessage = "SharePlay is unavailable. Check FaceTime access and that both apps are signed with the Group Activities entitlement."
+        } else {
+            errorMessage = String(localized: "sharePlay.error.unavailable")
+        }
     }
 
     func sharingDidCancel(_ activity: StrimrWatchActivity) {
+        launchGuard.finish(activity.activityID)
         locallyPreparedActivityIDs.remove(activity.activityID)
+        Self.launchLog.notice("stage=invitation outcome=cancelled")
+    }
+
+    func sharingDidComplete(_ activity: StrimrWatchActivity) {
+        completedInvitationID = activity.activityID
+        Self.launchLog.notice("stage=invitation outcome=completed")
+        if !isInSession {
+            awaitSession(for: activity)
+        }
     }
 
     func sharingPresentationDidEnd() async {
         guard let activityID = sharingPresentationActivityID else { return }
         sharingPresentationActivityID = nil
+        // A cancelled/dismissed sheet must release its reservation; an accepted invitation
+        // keeps the activation reservation until a session or bounded timeout arrives.
+        if completedInvitationID != activityID, !isInSession {
+            locallyPreparedActivityIDs.remove(activityID)
+            launchGuard.finish(activityID)
+        }
+        completedInvitationID = nil
+        Self.launchLog.notice("stage=invitation outcome=dismissed")
         guard playerController == nil,
               let activity,
               activity.activityID == activityID
@@ -158,6 +321,9 @@ final class SharePlayCoordinator {
 
     func attachPlayer(_ controller: PlayerController, ratingKey: String) {
         playerController = controller
+        if let activity, activity.ratingKey == ratingKey {
+            controller.configureCatalogSharePlay(activity.catalog != nil, initialTime: activity.initialPosition)
+        }
         guard participantCount > 1,
               let session,
               let activity,
@@ -215,8 +381,29 @@ final class SharePlayCoordinator {
     }
 
     func leave() {
+        Self.launchLog.notice("stage=session_leave outcome=explicit_local_request")
+        acceptanceGeneration = UUID()
+        acceptingSession = nil
+        pendingSessionAcceptanceActivityID = nil
+        activationDeadline?.cancel()
+        if let id = launchGuard.activeID {
+            launchGuard.finish(id)
+        }
         session?.leave()
         detach(continueLocally: false)
+    }
+
+    func catalogPresentationDismissed(expectedID: UUID?) {
+        guard SharePlaySessionLifecycle.ownsDismissal(
+            expected: expectedID, presented: catalogPlaybackActivity?.activityID, active: activity?.activityID,
+        ) else {
+            Self.launchLog.notice("stage=playback_sheet outcome=stale_dismissal_ignored")
+            return
+        }
+        catalogPlaybackActivity = nil
+        if isInSession {
+            leave()
+        }
     }
 
     private var isLocalLeader: Bool {
@@ -227,18 +414,57 @@ final class SharePlayCoordinator {
         return leader?.id == session.localParticipant.id
     }
 
+    private func rejectIncomingSession(_ incoming: GroupSession<StrimrWatchActivity>) {
+        guard SharePlaySessionLifecycle.mayLeaveRejected(incoming: incoming.id, active: session?.id) else {
+            Self.launchLog.notice("stage=session_reject outcome=active_session_preserved")
+            return
+        }
+        Self.launchLog.notice("stage=session_reject outcome=distinct_session_declined")
+        incoming.leave()
+    }
+
     private func accept(_ newSession: GroupSession<StrimrWatchActivity>) async {
+        guard checkLaunchAvailability(for: newSession.activity) else {
+            rejectIncomingSession(newSession)
+            return
+        }
+        guard SharePlaySessionLifecycle.shouldAccept(
+            incoming: newSession.id, active: session?.id, accepting: acceptingSession?.id,
+        ) else {
+            Self.launchLog.notice("stage=session_access outcome=duplicate_ignored")
+            return
+        }
+        guard launchGuard.canAccept(newSession.activity.activityID) else {
+            Self.launchLog.notice("stage=session_access outcome=competing_launch_rejected")
+            rejectIncomingSession(newSession)
+            return
+        }
+        Self.launchLog.notice("stage=session_access outcome=started")
         let acceptanceActivityID = newSession.activity.activityID
+        let generation = UUID()
+        acceptanceGeneration = generation
+        acceptingSession = newSession
+        defer {
+            if acceptanceGeneration == generation {
+                acceptingSession = nil
+            }
+        }
         pendingSessionAcceptanceActivityID = acceptanceActivityID
         do {
             try await ensureAccess(to: newSession.activity)
-            guard pendingSessionAcceptanceActivityID == acceptanceActivityID else {
-                newSession.leave()
+            guard acceptanceGeneration == generation, session?.id != newSession.id,
+                  pendingSessionAcceptanceActivityID == acceptanceActivityID,
+                  launchGuard.canAccept(acceptanceActivityID)
+            else {
+                if pendingSessionAcceptanceActivityID == acceptanceActivityID {
+                    pendingSessionAcceptanceActivityID = nil
+                }
+                rejectIncomingSession(newSession)
                 return
             }
         } catch {
-            guard pendingSessionAcceptanceActivityID == acceptanceActivityID else {
-                newSession.leave()
+            guard acceptanceGeneration == generation, pendingSessionAcceptanceActivityID == acceptanceActivityID else {
+                rejectIncomingSession(newSession)
                 return
             }
             pendingSessionAcceptanceActivityID = nil
@@ -250,9 +476,14 @@ final class SharePlayCoordinator {
                 }
                 return
             }
-            ErrorReporter.capture(error)
-            errorMessage = String(localized: "sharePlay.error.mediaUnavailable")
-            newSession.leave()
+            launchGuard.finish(acceptanceActivityID)
+            Self.launchLog.notice("stage=session_access outcome=failed")
+            if newSession.activity.catalog != nil {
+                catalogErrorMessage = "This SharePlay movie or episode is unavailable. Check TMDb setup and access to your own playback sources."
+            } else {
+                errorMessage = String(localized: "sharePlay.error.mediaUnavailable")
+            }
+            rejectIncomingSession(newSession)
             if deferredSessionInvalidation {
                 deferredSessionInvalidation = false
                 detach(continueLocally: true)
@@ -262,13 +493,16 @@ final class SharePlayCoordinator {
 
         let previousSession = session
         sessionSubscriptions.removeAll()
-        if previousSession != nil,
-           previousSession !== newSession,
+        if let previousSession,
+           previousSession.id != newSession.id,
            playerController?.isCoordinatedPlayback == true
         {
             playerController?.endCoordinatedPlayback(continueLocally: true)
         }
-        previousSession?.leave()
+        if let previousSession, previousSession.id != newSession.id {
+            Self.launchLog.notice("stage=session_replace outcome=leaving_distinct_session")
+            previousSession.leave()
+        }
         session = newSession
         handleActivityChange(newSession.activity)
         isInSession = true
@@ -278,13 +512,16 @@ final class SharePlayCoordinator {
 
         newSession.$activity
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] activity in self?.handleActivityChange(activity) }
+            .sink { [weak self] activity in
+                guard let self, session === newSession else { return }
+                handleActivityChange(activity)
+            }
             .store(in: &sessionSubscriptions)
 
         newSession.$activeParticipants
             .receive(on: DispatchQueue.main)
             .sink { [weak self] participants in
-                guard let self else { return }
+                guard let self, session === newSession else { return }
                 let previousCount = participantCount
                 participantCount = participants.count
                 handleParticipantCountChange(previousCount: previousCount)
@@ -295,16 +532,33 @@ final class SharePlayCoordinator {
         newSession.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
-                guard case .invalidated = state, let self, session === newSession else { return }
+                guard let self, session === newSession else { return }
+                switch state {
+                case .waiting:
+                    Self.launchLog.notice("stage=session_state outcome=waiting")
+                    return
+                case .joined:
+                    Self.launchLog.notice("stage=session_state outcome=joined")
+                    return
+                case .invalidated:
+                    break
+                @unknown default:
+                    Self.launchLog.notice("stage=session_state outcome=unknown")
+                    return
+                }
                 if pendingSessionAcceptanceActivityID != nil {
                     deferredSessionInvalidation = true
                     return
                 }
+                Self.launchLog.notice("stage=session_state outcome=invalidated_continuing_locally")
                 detach(continueLocally: true)
             }
             .store(in: &sessionSubscriptions)
 
+        Self.launchLog.notice("stage=session_join outcome=requested")
         newSession.join()
+        activationDeadline?.cancel()
+        launchGuard.finish(acceptanceActivityID, cooldown: false)
         if let playerController, let activity {
             if participantCount > 1 {
                 playerController.playbackCoordinator.coordinateWithSession(newSession)
@@ -320,9 +574,11 @@ final class SharePlayCoordinator {
     }
 
     private func launchPlaybackIfNeeded(for activity: StrimrWatchActivity) async {
-        guard lastLaunchedActivityID != activity.activityID,
-              let playbackPresenter
-        else { return }
+        guard lastLaunchedActivityID != activity.activityID else { return }
+        if activity.catalog != nil {
+            presentCatalogActivity(activity); return
+        }
+        guard let playbackPresenter else { return }
         lastLaunchedActivityID = activity.activityID
         do {
             let services = try await resolvedServices(for: activity)
@@ -340,6 +596,12 @@ final class SharePlayCoordinator {
     }
 
     private func ensureAccess(to activity: StrimrWatchActivity) async throws {
+        if let item = activity.catalog {
+            guard item.matches(activity) else { throw SharePlayError.mediaUnavailable }
+            let reference = TMDBTitle.reference(id: item.tmdbID, kind: item.isTV ? .tv : .movie, title: activity.title)
+            _ = try await TMDBClient.shared.details(reference)
+            return
+        }
         let services = try await resolvedServices(for: activity)
         _ = try await services.detail.mediaItem(id: activity.ratingKey)
     }
@@ -379,7 +641,10 @@ final class SharePlayCoordinator {
         // replacement media to finish loading leaves each participant coordinated against the old
         // item, so a seek can be applied locally while peers reject it for an identifier mismatch.
         // AetherEngine retains commands for this item until the replacement transport is ready.
-        if isReplacingActivity,
+        if newActivity.catalog == nil {
+            playerController?.configureCatalogSharePlay(false, initialTime: newActivity.initialPosition)
+        }
+        if isReplacingActivity, newActivity.catalog == nil,
            participantCount > 1,
            let playerController,
            playerController.isCoordinatedPlayback
@@ -389,6 +654,11 @@ final class SharePlayCoordinator {
                 initialTime: newActivity.initialPosition,
             )
             lastCoordinatedActivityID = newActivity.activityID
+        }
+        if newActivity.catalog != nil, session != nil, playerController == nil,
+           sharingPresentationActivityID == nil
+        {
+            presentCatalogActivity(newActivity)
         }
     }
 
@@ -434,6 +704,9 @@ final class SharePlayCoordinator {
     }
 
     private func detach(continueLocally: Bool) {
+        if !continueLocally {
+            catalogPlaybackActivity = nil
+        }
         let continuingPlayer = continueLocally ? playerController : nil
         if playerController?.isCoordinatedPlayback == true {
             playerController?.endCoordinatedPlayback(continueLocally: continueLocally)

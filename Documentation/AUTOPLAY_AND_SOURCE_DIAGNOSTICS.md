@@ -1,0 +1,17 @@
+# AllDebrid Auto Play and source diagnostics
+
+Auto Play AllDebrid defaults on, including when migrating existing playback settings. Toggle it in Settings → Playback. Play/Resume/Restart and episode Play use the same catalog playback entry and original native Strimr player. Select Source on title details explicitly opens the manual selector regardless of the toggle.
+
+The entry reads the existing Keychain credential, verifies the account, refreshes its library, hydrates TMDb external IDs/original and alternative titles, and matches available saved links and ready magnet files. Matching requires an exact verified ID or title/alias and a compatible year; episodes additionally require season and episode. Episode-only filenames require an explicit season folder/pack. Combined episode ranges are excluded because one timestamp cannot safely represent multiple episodes. Arbitrary renamed files without identifying names/IDs cannot be matched reliably; they remain accessible in the AllDebrid library browser.
+
+Candidates are ranked 2160p/4K/UHD, 1080p, 720p, then unknown resolution. Each source link is attempted once per refreshed queue. Unlock/HTTP/media-header failures fall back to the next candidate, and iOS native-engine failures checkpoint progress and trigger the same queue. Authentication/rate-limit failures stop the queue. Manual selection plays the chosen file and reports its error rather than silently changing the choice. Refresh discards stale candidates. A credential/profile change invalidates the loaded queue.
+
+A saved-link endpoint failure does not discard successfully retrieved magnets (and vice versa). Incomplete refreshes, pending magnets, expired authentication, no matching files and exhausted sources are reported separately. Ready magnet file requests use batches of at most 100. A host rejecting HEAD is probed with a range GET cancelled after headers, without buffering a full video.
+
+Resume continues to use CatalogProgressStore, PlaybackProgressRecorder, the existing PlayerViewModel and tracker channel: exact local seconds first, Simkl percentage fallback, and completion/restart fences. Restart clears stale positions only after a source resolves. A fallback retains the latest checkpoint instead of repeating the restart operation. No new external backend or content acquisition is added.
+
+Discord is optional. Missing, template or invalid configuration hides its player and details actions. Stale/unconfigured actions quietly return; setup instructions no longer appear during normal playback. Validly configured integrations keep their existing Discord launch behavior. No player control layout, HDR badge, seek bar, audio or video configuration was replaced.
+
+Detail backdrops keep a sharper/brighter upper image and concentrate the readability gradient and subtle blurred color wash below it. Home artwork treatment remains unchanged. TV episode payloads are restricted to the selected season and ordered by episode number; stale episode selections are cleared if absent from the returned season.
+
+Automated validation uses stubbed APIs and isolated catalog fixtures, not real service credentials. Live account authentication, the user's private file naming/library shapes, actual video codecs/HDR, native-engine source fallback, device interruption/background behavior, and real Simkl synchronization still require a signed iPhone build with privately configured accounts. Never commit or send account keys in chat.

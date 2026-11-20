@@ -12,6 +12,7 @@ struct PlayerTracksMenuModel: Equatable {
     var canResetTrackSelections: Bool
     var syncItems: [PlaybackOffsetMenuItem]
     var subtitleAppearance: SubtitleAppearanceAvailability
+    var englishAudioNotice: String?
 
     var showsIndicator: Bool {
         syncItems.contains { $0.kind == .subtitles && $0.isActive }
@@ -28,6 +29,7 @@ struct PlayerTracksMenuActions {
     var onResetTrackSelections: () -> Void
     var onSelectSync: (PlaybackOffsetKind) -> Void
     var onShowSubtitleAppearance: () -> Void
+    var onChooseSource: (() -> Void)?
 }
 
 /// Compares the model only, so that the playback position refreshing the player does not rebuild an open menu.
@@ -65,6 +67,12 @@ struct PlayerTracksMenu<MenuLabel: View>: View, Equatable {
 
     private var audioMenu: some View {
         Menu {
+            if let notice = model.englishAudioNotice {
+                Text(notice)
+                if let choose = actions.onChooseSource {
+                    Button("Choose Another Source", systemImage: "list.bullet", action: choose)
+                }
+            }
             if model.audioTracks.isEmpty {
                 Text("player.settings.audio.empty")
             }

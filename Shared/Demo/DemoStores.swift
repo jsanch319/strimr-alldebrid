@@ -10,6 +10,21 @@
         let profileStore: ProfileStore
 
         static func makeIfEnabled() -> DemoStores? {
+            #if os(iOS) && targetEnvironment(simulator)
+                if CatalogVisualFixtures.isEnabled {
+                    let suite = "strimr.visual-tests"
+                    let defaults = UserDefaults(suiteName: suite)!
+                    defaults.removePersistentDomain(forName: suite)
+                    return DemoStores(
+                        defaults: defaults,
+                        accountStore: AccountStore(
+                            userDefaults: defaults,
+                            secureStore: DemoSecureStore(),
+                        ),
+                        profileStore: ProfileStore(userDefaults: defaults),
+                    )
+                }
+            #endif
             guard DemoMode.isEnabled else { return nil }
             let suiteName = "strimr.demo"
             let defaults = UserDefaults(suiteName: suiteName)!

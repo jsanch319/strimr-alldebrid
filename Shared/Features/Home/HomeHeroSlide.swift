@@ -9,6 +9,8 @@ struct HomeHeroSlide: Identifiable, Hashable {
 
     let media: MediaItem
     let badge: Badge
+    /// Optional adapter input from an authorized direct-trailer provider. TMDb does not supply these streams.
+    var authorizedTrailer: AuthorizedTrailerStream?
 
     var id: MediaIdentity {
         media.identity

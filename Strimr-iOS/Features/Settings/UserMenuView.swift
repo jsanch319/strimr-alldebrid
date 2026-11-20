@@ -7,12 +7,13 @@ struct UserMenuView: View {
     @Environment(OfflineCoordinator.self) private var offlineCoordinator
     @EnvironmentObject private var coordinator: MainCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.isCatalogNavigation) private var isCatalogNavigation
 
     var body: some View {
         List {
             Section {
                 NavigationLink {
-                    SettingsView()
+                    SettingsView(catalogMode: isCatalogNavigation)
                 } label: {
                     Label("settings.title", systemImage: "gearshape.fill")
                 }
@@ -23,7 +24,7 @@ struct UserMenuView: View {
                     Label("Connect AllDebrid", systemImage: "play.tv")
                 }
 
-                if !settingsManager.interface.displayDownloadsTab {
+                if !isCatalogNavigation, !settingsManager.interface.displayDownloadsTab {
                     NavigationLink {
                         DownloadsView()
                     } label: {
@@ -31,7 +32,7 @@ struct UserMenuView: View {
                     }
                 }
 
-                if !settingsManager.interface.displayFavoritesTab {
+                if !isCatalogNavigation, !settingsManager.interface.displayFavoritesTab {
                     NavigationLink {
                         FavoritesView(
                             sessionManager: sessionManager,

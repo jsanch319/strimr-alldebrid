@@ -138,44 +138,40 @@ struct AllDebridHomeSection: View {
 
 @MainActor
 struct AllDebridOnlyHomeView: View {
-    @State private var selectedItem: AllDebridHomeItem?
+    @Environment(LibraryStore.self) private var libraryStore
+    @Environment(SessionManager.self) private var sessionManager
+    @Environment(SettingsManager.self) private var settingsManager
     let onSignedOut: () -> Void
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                AllDebridHomeSection { item in
-                    selectedItem = item
+        #if os(iOS)
+            MainTabView(
+                homeViewModel: HomeViewModel(
+                    sessionManager: sessionManager,
+                    settingsManager: settingsManager,
+                    serverFree: true,
+                ),
+                libraryViewModel: LibraryViewModel(
+                    sessionManager: sessionManager,
+                    libraryStore: libraryStore,
+                    settingsManager: settingsManager,
+                ),
+                settingsManager: settingsManager,
+            )
+            .task { TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID) }
+            .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in onSignedOut() }
+        #else
+            NavigationStack {
+                HomeView(viewModel: HomeViewModel(
+                    sessionManager: sessionManager,
+                    settingsManager: settingsManager,
+                    serverFree: true,
+                ))
+                .task { TrackerCoordinator.shared.activate(profileID: TrackerCoordinator.allDebridProfileID) }
+                .onReceive(NotificationCenter.default.publisher(for: .allDebridCredentialsDidChange)) { _ in
+                    onSignedOut()
                 }
-                .padding(.horizontal, LayoutMetrics.pageMargin)
-                .padding(.vertical, 20)
             }
-            .navigationTitle("tabs.home")
-            .sheet(item: $selectedItem) { item in
-                let initialFile: AllDebridMagnetFile? = {
-                    if case let .magnetFile(file) = item {
-                        return file
-                    }
-                    return nil
-                }()
-                let initialLink: AllDebridSavedLink? = {
-                    if case let .savedLink(link) = item {
-                        return link
-                    }
-                    return nil
-                }()
-
-                AllDebridLibraryView(
-                    navigationTitle: "AllDebrid",
-                    initialFile: initialFile,
-                    initialLink: initialLink,
-                    onAuthenticated: { selectedItem = nil },
-                    onSignedOut: {
-                        selectedItem = nil
-                        onSignedOut()
-                    },
-                )
-            }
-        }
+        #endif
     }
 }

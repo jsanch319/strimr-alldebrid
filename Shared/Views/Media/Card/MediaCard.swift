@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct MediaCard: View {
+    @Environment(\.mediaCardIsInContinueWatching) private var isInContinueWatching
+    @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @Environment(ServerRegistry.self) private var registry
     @Environment(MediaServices.self) private var scopedServices: MediaServices?
     #if os(tvOS)
@@ -17,6 +19,7 @@ struct MediaCard: View {
     let artworkKind: MediaImageViewModel.ArtworkKind
     let showsLabels: Bool
     let onTap: () -> Void
+    var compactResume = false
 
     private var progress: Double? {
         media.viewProgressPercentage.map { $0 / 100 }
@@ -30,11 +33,32 @@ struct MediaCard: View {
             #endif
 
             if showsLabels {
-                labels
+                if compactResume {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(media.primaryLabel).font(.subheadline.weight(.semibold)).lineLimit(1)
+                        if media.playableItem?.type == .episode {
+                            Text(episodeCaption)
+                                .font(.caption).foregroundStyle(.textSecondary).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                } else {
+                    labels
+                    if episodeLabel != nil {
+                        Text(episodeCaption).font(.caption).foregroundStyle(.textSecondary).lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+            } else if episodeLabel != nil {
+                Text(episodeCaption).font(.caption).foregroundStyle(.textSecondary).lineLimit(1).truncationMode(.tail)
             }
         }
         .frame(width: size.width, alignment: .leading)
-        .offlineAvailability(of: media)
+        #if os(iOS)
+            // Artwork is clipped and captions contain transparent space. Give the card's
+            // tap and context-menu gestures one stable hit region across both children.
+            .contentShape(Rectangle())
+        #endif
+            .offlineAvailability(of: media)
         #if os(tvOS)
             .focusable()
             .focused($isFocused)
@@ -48,7 +72,14 @@ struct MediaCard: View {
             .contentShape(Rectangle())
             .onHover { isFocused = $0 }
         #endif
-            .onTapGesture(perform: onTap)
+            .onTapGesture {
+                if let media = media.playableItem {
+                    catalogBackdrop?.select(media)
+                }
+                onTap()
+            }
+            .accessibilityIdentifier("catalog.card.\(media.playableItem?.id ?? media.primaryLabel)")
+            .catalogBackdropCandidate(media.playableItem)
             .mediaCardContextMenu(media)
     }
 
@@ -59,18 +90,44 @@ struct MediaCard: View {
             media: media,
         )
         .frame(width: size.width, height: size.height)
+        .overlay(alignment: .bottomLeading) {
+            if compactResume {
+                ZStack(alignment: .bottomLeading) {
+                    LinearGradient(colors: [.clear, .black.opacity(0.8)], startPoint: .center, endPoint: .bottom)
+                    Label(compactRemainingTime ?? String(localized: "common.actions.resume"), systemImage: "play.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 20)
+                }
+            }
+        }
         .mediaArtworkStyle()
         .overlay(alignment: .topTrailing) {
             WatchStatusBadge(media: media)
         }
         .downloadStatusOverlay(media)
-        .overlay(alignment: .bottomLeading) {
-            if let progress {
-                CardProgressBar(progress: progress)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
-            }
+        .artworkProgress(progress, hidePercentage: compactResume)
+    }
+
+    private var episodeLabel: String? {
+        isInContinueWatching ? media.playableItem?.continueWatchingEpisodeLabel : nil
+    }
+
+    private var episodeCaption: String {
+        if isInContinueWatching, let caption = media.playableItem?.continueWatchingEpisodeCaption {
+            return caption
         }
+        return media.cardSecondaryLabel(remainingTime: nil) ?? ""
+    }
+
+    private var compactRemainingTime: String? {
+        RemainingTimeFormatter.compactText(
+            duration: media.playableItem?.duration,
+            viewOffset: media.playableItem?.viewOffset,
+        )
     }
 
     private var labels: some View {
@@ -166,6 +223,8 @@ struct ItemArtworkView: View {
     var body: some View {
         if let services {
             MediaImageView(viewModel: MediaImageViewModel(services: services, artworkKind: kind, media: media))
+        } else if let item = media.playableItem, CatalogMediaAdapter.selectionID(item) != nil {
+            MediaImageView(viewModel: MediaImageViewModel(artworkKind: kind, media: media))
         } else {
             Rectangle()
                 .fill(.gray.opacity(0.15))

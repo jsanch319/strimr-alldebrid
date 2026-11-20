@@ -76,6 +76,7 @@ struct RelatedHubsSection: View {
                             items: hub.items,
                             showsLabels: true,
                             onViewAll: carouselViewAllAction(for: hub),
+                            hub: hub,
                             onSelectMedia: onSelectMedia,
                         )
                     }

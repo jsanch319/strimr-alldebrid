@@ -24,6 +24,7 @@ export interface Participant {
 }
 
 export interface WatchRoom {
+  revision: number;
   sessionId: string;
   media: SafeMediaMetadata;
   currentPosition: number;
@@ -37,6 +38,7 @@ export interface WatchRoom {
 }
 
 export type RoomCommand =
+  | { type: "sync-playback"; position: number; isPlaying: boolean; revision: number }
   | { type: "play" }
   | { type: "pause" }
   | { type: "seek"; position: number }
@@ -56,6 +58,14 @@ export const defaultMedia: SafeMediaMetadata = {
   duration: 0,
   selectedSourceIdentifier: null,
 };
+
+/** Missing movie episode parameters are absent, not season/episode zero. */
+export function optionalQueryInteger(query: URLSearchParams, key: string): number | null {
+  const raw = query.get(key);
+  if (raw === null || !raw.trim()) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
 
 export function sanitizeMedia(value: unknown): SafeMediaMetadata {
   if (!value || typeof value !== "object") return defaultMedia;
@@ -87,4 +97,8 @@ function safeInteger(value: unknown): number | null {
 
 function safeDuration(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? Math.min(Math.max(0, value), 7 * 24 * 3600) : 0;
+}
+
+export function isMappedVideoPath(value: unknown): value is string {
+  return typeof value === "string" && /^\/media\/[a-zA-Z0-9_/-]+\.(mp4|m3u8)$/.test(value);
 }

@@ -3,6 +3,7 @@ import SwiftUI
 struct MediaCarousel: View {
     enum Layout { case portrait, landscape }
 
+    @Environment(\.catalogBackdropSelection) private var catalogBackdrop
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(SettingsManager.self) private var settingsManager
     @Environment(\.railPageMargin) private var pageMargin
@@ -14,9 +15,34 @@ struct MediaCarousel: View {
         @State private var isViewAllFocused = false
     #endif
 
+    @Environment(MediaServices.self) private var scopedServices: MediaServices?
+    @Environment(ServerRegistry.self) private var registry: ServerRegistry?
+    @State private var nativePager: HubDetailViewModel?
+    var hub: Hub?
+    private struct PagingContext: Hashable { let hub: Hub?; let generation: Int }
+    private var displayedItems: [MediaDisplayItem] {
+        nativePager?.items ?? items
+    }
+
+    private var rowPagination: PosterRailPagination? {
+        if let pagination {
+            return pagination
+        }
+        guard let nativePager else { return nil }
+        return PosterRailPagination(
+            hasMore: nativePager.canLoadMore,
+            loading: nativePager.isLoadingMore,
+            error: nativePager.errorMessage,
+            loadMore: { await nativePager.loadMore() },
+        )
+    }
+
     let layout: Layout
     let items: [MediaDisplayItem]
     let showsLabels: Bool
+    var pagination: PosterRailPagination?
+    let compactContinueWatching: Bool
+    @State private var viewportWidth: CGFloat = 390
     let onViewAll: (() -> Void)?
     let onSelectMedia: (MediaDisplayItem) -> Void
 
@@ -25,8 +51,14 @@ struct MediaCarousel: View {
         items: [MediaDisplayItem],
         showsLabels: Bool,
         onViewAll: (() -> Void)? = nil,
+        pagination: PosterRailPagination? = nil,
+        hub: Hub? = nil,
+        compactContinueWatching: Bool = false,
         onSelectMedia: @escaping (MediaDisplayItem) -> Void,
     ) {
+        self.compactContinueWatching = compactContinueWatching
+        self.hub = hub
+        self.pagination = pagination
         self.layout = layout
         self.items = items
         self.showsLabels = showsLabels
@@ -37,7 +69,7 @@ struct MediaCarousel: View {
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(alignment: .top, spacing: LayoutMetrics.railSpacing(for: layout)) {
-                ForEach(items, id: \.id) { item in
+                ForEach(displayedItems, id: \.id) { item in
                     card(for: item)
                     #if os(tvOS)
                         .focused($focusedItemID, equals: item.id)
@@ -47,6 +79,7 @@ struct MediaCarousel: View {
                     viewAllCard(action: onViewAll)
                 }
             }
+            .scrollTargetLayout()
             .padding(.vertical, LayoutMetrics.railVerticalInset)
         }
         #if !os(tvOS)
@@ -55,6 +88,28 @@ struct MediaCarousel: View {
         #endif
         .railBleed(pageMargin: pageMargin)
         .mouseDragScrolling()
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            if compactContinueWatching, width > 0, abs(viewportWidth - width) > 1 {
+                viewportWidth = width
+            }
+        }
+        .posterRailPagination(rowPagination, ids: displayedItems.map(\.id))
+        #if os(iOS)
+            .task(id: PagingContext(hub: hub, generation: registry?.generation ?? 0)) {
+                nativePager = nil
+                if let hub, hub.canOpenDetail, hub.hasMoreItems,
+                   let services = hub.server.flatMap({ registry?.services(for: $0) }) ?? scopedServices,
+                   hub.server == nil || services.identity == hub.server
+                {
+                    nativePager = HubDetailViewModel(hub: hub, services: services, seedsLoadedItems: true)
+                }
+            }
+        #endif
+            .onScrollPhaseChange {
+                _, phase in if phase != .idle {
+                    catalogBackdrop?.clearTapPriority()
+                }
+            }
         #if os(tvOS)
             .scrollClipDisabled()
             .focusSection()
@@ -93,8 +148,18 @@ struct MediaCarousel: View {
                 onSelectMedia(media)
             }
         case .landscape:
-            LandscapeMediaCard(media: media, showsLabels: showsLabels) {
-                onSelectMedia(media)
+            if compactContinueWatching {
+                let width = min(320, max(180, viewportWidth * 0.58))
+                MediaCard(
+                    size: CGSize(width: width, height: width * 9 / 16),
+                    media: media,
+                    artworkKind: .cardArt,
+                    showsLabels: showsLabels,
+                    onTap: { onSelectMedia(media) },
+                    compactResume: true,
+                )
+            } else {
+                LandscapeMediaCard(media: media, showsLabels: showsLabels) { onSelectMedia(media) }
             }
         }
     }

@@ -147,6 +147,7 @@ struct MediaDetailHeaderSection: View {
             Task { await sharePlayCoordinator.sharingPresentationDidEnd() }
         }) { request in
             SharePlaySharingControllerView(controller: request.controller)
+                .onAppear { sharePlayCoordinator.sharingPresentationDidAppear() }
                 .task {
                     let result = await request.controller.result
                     handleSharingResult(result, for: request.activity)
@@ -213,7 +214,7 @@ struct MediaDetailHeaderSection: View {
     }
 
     private var isStartingSharePlay: Bool {
-        sharePlayCoordinator.isActivating || sharePlaySharingRequest != nil
+        sharePlayCoordinator.isLaunching || sharePlaySharingRequest != nil
     }
 
     private func startSharePlay() {
@@ -226,24 +227,23 @@ struct MediaDetailHeaderSection: View {
                 title: item.primaryLabel,
                 initialPosition: viewModel.primaryActionInitialPosition,
                 server: viewModel.server,
-            ) else { return }
-
+            ),
+            sharePlayCoordinator.checkLaunchAvailability(for: activity),
+            !sharePlayCoordinator.isLaunching else { return }
         if sharePlayCoordinator.isEligibleForGroupSession {
             Task { await sharePlayCoordinator.activate(activity) }
             return
         }
 
+        guard sharePlayCoordinator.beginSharingPresentation(activity) else { return }
         do {
             let controller = try GroupActivitySharingController(activity)
-            sharePlayCoordinator.sharingDidStart(activity)
             sharePlaySharingRequest = SharePlaySharingRequest(
                 activity: activity,
                 controller: controller,
             )
         } catch {
-            guard !error.isCancellation else { return }
-            ErrorReporter.capture(error)
-            sharePlayCoordinator.errorMessage = String(localized: "sharePlay.error.unavailable")
+            sharePlayCoordinator.sharingPresentationFailed(activity)
         }
     }
 
@@ -253,6 +253,8 @@ struct MediaDetailHeaderSection: View {
     ) {
         if result == .cancelled {
             sharePlayCoordinator.sharingDidCancel(activity)
+        } else {
+            sharePlayCoordinator.sharingDidComplete(activity)
         }
         sharePlaySharingRequest = nil
     }

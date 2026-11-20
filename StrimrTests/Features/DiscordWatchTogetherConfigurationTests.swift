@@ -3,6 +3,26 @@ import Foundation
 import Testing
 
 struct DiscordWatchTogetherConfigurationTests {
+    @Test func `Discord is optional and absent or template configuration stays hidden`() {
+        #expect(!DiscordWatchTogetherConfiguration.isConfigured(applicationID: nil, activityURL: nil))
+        #expect(!DiscordWatchTogetherConfiguration.isConfigured(
+            applicationID: "YOUR_DISCORD_APPLICATION_CLIENT_ID",
+            activityURL: "https://your-strimr-activity-host.example",
+        ))
+        #expect(!DiscordWatchTogetherConfiguration.isConfigured(
+            applicationID: "123456789012345678",
+            activityURL: "https://your-strimr-activity-host.example",
+        ))
+        #expect(!DiscordWatchTogetherConfiguration.isConfigured(
+            applicationID: "123456789012345678",
+            activityURL: "http://watch.strimr.test",
+        ))
+        #expect(DiscordWatchTogetherConfiguration.isConfigured(
+            applicationID: "123456789012345678",
+            activityURL: "https://watch.strimr.test",
+        ))
+    }
+
     @Test func `configured Discord Activity link carries safe playback metadata`() throws {
         let server = ServerIdentity(provider: .plex, id: "server-1")
         let media = MediaItem.make(
@@ -17,7 +37,7 @@ struct DiscordWatchTogetherConfigurationTests {
             DiscordWatchTogetherConfiguration.activityLaunchURL(
                 for: media,
                 applicationID: "123456789012345678",
-                activityURL: "https://watch.strimr.example/",
+                activityURL: "https://watch.strimr.test/",
                 position: 125,
                 isPlaying: true,
                 duration: 7200,
@@ -51,9 +71,9 @@ struct DiscordWatchTogetherConfigurationTests {
     }
 
     @Test(arguments: [
-        ("not-an-application-id", "https://watch.strimr.example"),
-        ("123456789012345678", "http://watch.strimr.example"),
-        ("123456789012345678", "https://user:password@watch.strimr.example"),
+        ("not-an-application-id", "https://watch.strimr.test"),
+        ("123456789012345678", "http://watch.strimr.test"),
+        ("123456789012345678", "https://user:password@watch.strimr.test"),
     ])
     func `invalid Discord configuration does not produce a launch URL`(
         applicationID: String,

@@ -6,8 +6,20 @@ struct SettingsView: View {
     @Environment(LibraryStore.self) private var libraryStore
     @Environment(SessionManager.self) private var sessionManager
 
+    var catalogMode = false
+    var onCatalogChanged: (() -> Void)?
+    @State private var showsAllDebrid = false
+    @State private var showsTMDB = false
+
     var body: some View {
         List {
+            if catalogMode {
+                Section("Discovery and Playback Accounts") {
+                    Button("AllDebrid") { showsAllDebrid = true }
+                    NavigationLink("Simkl") { TrackerSettingsView(service: .simkl) }
+                    Button("TMDb") { showsTMDB = true }
+                }
+            }
             if sessionManager.canManageAccounts {
                 Section {
                     NavigationLink("settings.accounts.title") {
@@ -89,6 +101,11 @@ struct SettingsView: View {
         #if os(iOS)
         .listStyle(.insetGrouped)
         #endif
+        .catalogBackdropDisabled()
         .navigationTitle("settings.title")
+        .sheet(isPresented: $showsAllDebrid) {
+            AllDebridLibraryView(navigationTitle: "AllDebrid", onAuthenticated: { onCatalogChanged?() })
+        }
+        .sheet(isPresented: $showsTMDB) { TMDBSettingsView { onCatalogChanged?() } }
     }
 }

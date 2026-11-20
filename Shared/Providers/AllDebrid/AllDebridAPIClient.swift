@@ -18,7 +18,7 @@ actor AllDebridAPIClient {
 
         var errorDescription: String? {
             switch self {
-            case .invalidAPIKey: "An AllDebrid API key is required."
+            case .invalidAPIKey: "AllDebrid is not connected or its authorization has expired. Reconnect AllDebrid in Settings."
             case .invalidResponse: "AllDebrid returned an unexpected response."
             case .pinExpired: "The AllDebrid PIN expired. Start a new connection."
             case let .serviceError(message): message
@@ -31,6 +31,8 @@ actor AllDebridAPIClient {
         }
     }
 
+    private var nextAPITurn = ContinuousClock.now
+    private var importedURLs: [String: URL] = [:]
     private let apiKey: String?
     private let session: URLSession
     private let baseURL = URL(string: "https://api.alldebrid.com/v4/")!
@@ -121,12 +123,15 @@ actor AllDebridAPIClient {
     /// Fetches the user's saved links. Response structure may vary by API version.
     func savedLinks() async throws -> [AllDebridSavedLink] {
         let payload = try await request("user/links")
-        guard let data = payload["data"] as? [String: Any] else { throw APIError.invalidResponse }
-        let rawLinks = (data["links"] as? [[String: Any]]) ?? []
-        return rawLinks.compactMap { item in
-            guard let link = item["link"] as? String, !link.isEmpty else { return nil }
-            let filename = (item["filename"] as? String) ?? (item["name"] as? String) ?? "Untitled"
-            return AllDebridSavedLink(id: String(describing: item["id"] ?? link), filename: filename, link: link)
+        guard let data = payload["data"] as? [String: Any],
+              let rawLinks = data["links"] as? [Any] else { throw APIError.invalidResponse }
+        return rawLinks.compactMap { raw in
+            let item = raw as? [String: Any]
+            guard let link = (item?["link"] as? String) ?? (raw as? String),
+                  let url = URL(string: link), ["http", "https"].contains(url.scheme ?? ""),
+                  url.host != nil else { return nil }
+            let filename = (item?["filename"] as? String) ?? (item?["name"] as? String) ?? url.lastPathComponent
+            return AllDebridSavedLink(id: Self.stringValue(item?["id"]) ?? link, filename: filename, link: link)
         }
     }
 
@@ -137,8 +142,15 @@ actor AllDebridAPIClient {
             method: "POST",
             parametersInBody: true,
         )
-        guard let data = payload["data"] as? [String: Any],
-              let rawMagnets = data["magnets"] as? [Any] else { throw APIError.invalidResponse }
+        guard let data = payload["data"] as? [String: Any] else { throw APIError.invalidResponse }
+        let rawMagnets: [Any]
+        if let list = data["magnets"] as? [Any] {
+            rawMagnets = list
+        } else if let single = data["magnets"] as? [String: Any], single["id"] != nil {
+            rawMagnets = [single]
+        } else {
+            throw APIError.invalidResponse
+        }
 
         let magnets: [AllDebridMagnet] = rawMagnets.compactMap { rawMagnet -> AllDebridMagnet? in
             guard let magnet = rawMagnet as? [String: Any],
@@ -173,14 +185,18 @@ actor AllDebridAPIClient {
         guard let data = payload["data"] as? [String: Any] else { throw APIError.invalidResponse }
 
         var files: [AllDebridMagnetFile] = []
-        if let magnets = data["magnets"] as? [Any] {
+        let magnetRows = (data["magnets"] as? [Any]) ?? (data["magnets"] as? [String: Any]).map { [$0] }
+        if let magnets = magnetRows {
+            var recognized = false
             for rawMagnet in magnets {
                 guard let magnet = rawMagnet as? [String: Any],
                       let magnetID = Self.stringValue(magnet["id"]),
                       ids.contains(magnetID),
                       let entries = magnet["files"] as? [Any] else { continue }
+                recognized = true
                 Self.flatten(entries, magnetID: magnetID, parentPath: "", into: &files)
             }
+            guard recognized else { throw APIError.invalidResponse }
         } else if ids.count == 1, let entries = data["files"] as? [Any] {
             Self.flatten(entries, magnetID: ids[0], parentPath: "", into: &files)
         } else {
@@ -190,21 +206,132 @@ actor AllDebridAPIClient {
     }
 
     func librarySnapshot() async throws -> AllDebridLibrarySnapshot {
-        async let savedLinksTask = savedLinks()
-        async let magnetsTask = magnets()
-        let (savedLinks, magnets) = try await (savedLinksTask, magnetsTask)
-        let readyMagnets = magnets.filter(\.isReady)
-        let files = try await magnetFiles(for: readyMagnets.map(\.id))
+        var links: [AllDebridSavedLink] = []
+        var magnets: [AllDebridMagnet] = []
+        var warnings: [String] = []
+        var firstError: Error?
+        var succeeded = false
+        do { links = try await savedLinks(); succeeded = true }
+        catch {
+            if Self.isAuthenticationOrRateLimit(error) {
+                throw error
+            }
+            firstError = error
+            warnings.append("Saved links could not be refreshed. \(error.localizedDescription)")
+        }
+        do { magnets = try await self.magnets(); succeeded = true }
+        catch {
+            if Self.isAuthenticationOrRateLimit(error) {
+                throw error
+            }
+            firstError = firstError ?? error
+            warnings.append("Magnet status could not be refreshed. \(error.localizedDescription)")
+        }
+        if !succeeded {
+            throw firstError ?? APIError.invalidResponse
+        }
+        let ready = magnets.filter(\.isReady)
+        var files: [AllDebridMagnetFile] = []
+        // The files endpoint has bounded requests; large libraries must not disappear in one oversized batch.
+        for offset in stride(from: 0, to: ready.count, by: 100) {
+            try Task.checkCancellation()
+            do { files += try await magnetFiles(for: Array(ready[offset ..< min(offset + 100, ready.count)]).map(\.id))
+            } catch {
+                if Self.isAuthenticationOrRateLimit(error) {
+                    throw error
+                }
+                warnings.append("Some ready magnet files could not be refreshed. \(error.localizedDescription)")
+            }
+        }
         return AllDebridLibrarySnapshot(
-            savedLinks: savedLinks,
+            savedLinks: links,
             magnets: magnets,
-            readyMagnetCount: readyMagnets.count,
+            readyMagnetCount: ready.count,
             magnetFiles: files,
+            warnings: warnings,
         )
+    }
+
+    nonisolated static func isAuthenticationOrRateLimit(_ error: Error) -> Bool {
+        guard let error = error as? APIError else { return false }
+        switch error {
+        case .invalidAPIKey, .httpStatus(401), .httpStatus(403), .httpStatus(429): return true
+        default: return false
+        }
+    }
+
+    /// Documented acquisition endpoints; links stay in memory and are never logged or persisted.
+    func uploadMagnet(_ link: String) async throws -> String {
+        guard link.lowercased().hasPrefix("magnet:"),
+              AuthorizedSourceCandidate.validLink(link) else { throw APIError.invalidLink }
+        let payload = try await request(
+            "magnet/upload",
+            parameters: [URLQueryItem(name: "magnets[]", value: link)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any], let rows = data["magnets"] as? [[String: Any]],
+              rows.count == 1, let row = rows.first else { throw APIError.invalidResponse }
+        if row["error"] !=
+            nil
+        {
+            throw APIError
+                .serviceError("AllDebrid rejected the magnet. Check the link, account limits and authorization.")
+        }
+        guard let id = Self.stringValue(row["id"]) else { throw APIError.invalidResponse }
+        return id
+    }
+
+    func importDownloadLink(_ link: String) async throws -> AllDebridLinkImport {
+        guard let url = URL(string: link), ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              AuthorizedSourceCandidate.validLink(link) else { throw APIError.invalidLink }
+        let payload = try await request(
+            "link/unlock",
+            parameters: [URLQueryItem(name: "link", value: link)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any], let filename = data["filename"] as? String,
+              !filename.isEmpty else { throw APIError.invalidResponse }
+        if let id = Self.stringValue(data["delayed"]) {
+            return .delayed(id: id, filename: filename)
+        }
+        guard let raw = data["link"] as? String, let ready = URL(string: raw),
+              ["https", "http"].contains(ready.scheme?.lowercased() ?? ""),
+              ready.host != nil else { throw APIError.invalidResponse }
+        importedURLs[link] = ready
+        return .ready(.init(id: link, filename: filename, link: link))
+    }
+
+    func delayedDownload(id: String, original: String, filename: String) async throws -> AllDebridSavedLink? {
+        let payload = try await request(
+            "link/delayed",
+            parameters: [URLQueryItem(name: "id", value: id)],
+            method: "POST",
+            parametersInBody: true,
+        )
+        guard let data = payload["data"] as? [String: Any],
+              let status = Self.integerValue(data["status"]) else { throw APIError.invalidResponse }
+        if status == 1 {
+            return nil
+        }
+        guard status == 2
+        else {
+            throw APIError
+                .serviceError("AllDebrid could not generate this download link. Try another authorized source.")
+        }
+        guard let raw = data["link"] as? String, let url = URL(string: raw),
+              ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
+              url.host != nil else { throw APIError.invalidResponse }
+        importedURLs[original] = url
+        return .init(id: original, filename: filename, link: original)
     }
 
     /// Resolves an AllDebrid link to a streamable URL and confirms the result is not an API or web page.
     func unlock(_ link: String) async throws -> URL {
+        if let imported = importedURLs[link] {
+            return imported
+        }
         guard let candidate = URL(string: link),
               ["https", "http"].contains(candidate.scheme?.lowercased() ?? ""),
               candidate.host != nil else { throw APIError.invalidLink }
@@ -231,8 +358,14 @@ actor AllDebridAPIClient {
         request.httpMethod = "HEAD"
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
-        let (_, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        var (_, rawResponse) = try await session.data(for: request)
+        if let head = rawResponse as? HTTPURLResponse, [401, 403, 405, 501].contains(head.statusCode) {
+            request.httpMethod = "GET"
+            request.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+            // Receive only headers, then cancel; hosts that ignore Range must not download an entire movie.
+            rawResponse = try await playbackHeaders(request)
+        }
+        guard let response = rawResponse as? HTTPURLResponse else { throw APIError.invalidResponse }
 
         let contentType = response.value(forHTTPHeaderField: "Content-Type")
         let finalURL = response.url ?? unlockedURL
@@ -254,13 +387,20 @@ actor AllDebridAPIClient {
         return resolution
     }
 
+    private func playbackHeaders(_ request: URLRequest) async throws -> URLResponse {
+        let delegate = AllDebridHeaderProbe()
+        let probe = URLSession(configuration: session.configuration, delegate: delegate, delegateQueue: nil)
+        defer { probe.invalidateAndCancel() }
+        return try await delegate.response(session: probe, request: request)
+    }
+
     private static func isNonMediaContentType(_ contentType: String) -> Bool {
         let normalizedType = contentType
             .split(separator: ";", maxSplits: 1)
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() ?? ""
-        return normalizedType.hasPrefix("text/")
+        return normalizedType.hasPrefix("image/") || normalizedType.hasPrefix("text/")
             || normalizedType.contains("json")
             || normalizedType.contains("html")
             || normalizedType.contains("xml")
@@ -297,12 +437,16 @@ actor AllDebridAPIClient {
         guard let url = components.url else { throw APIError.invalidResponse }
         var request = URLRequest(url: url)
         request.httpMethod = method
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if parametersInBody {
             var bodyComponents = URLComponents()
             bodyComponents.queryItems = requestParameters
-            guard let body = bodyComponents.percentEncodedQuery?.data(using: .utf8) else {
+            // Query syntax allows literal +, but form bodies decode it as space.
+            guard let body = bodyComponents.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+                .data(using: .utf8)
+            else {
                 throw APIError.invalidResponse
             }
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -319,17 +463,17 @@ actor AllDebridAPIClient {
     ) {
         for rawEntry in entries {
             guard let entry = rawEntry as? [String: Any],
-                  let name = entry["n"] as? String,
+                  let name = (entry["n"] as? String) ?? (entry["name"] as? String) ?? (entry["filename"] as? String),
                   !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             let fullPath = parentPath.isEmpty ? name : "\(parentPath)/\(name)"
-            if let children = entry["e"] as? [Any] {
+            if let children = (entry["e"] as? [Any]) ?? (entry["children"] as? [Any]) {
                 flatten(children, magnetID: magnetID, parentPath: fullPath, into: &files)
             }
-            guard let link = entry["l"] as? String,
+            guard let link = (entry["l"] as? String) ?? (entry["link"] as? String),
                   let url = URL(string: link),
                   ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
                   url.host != nil else { continue }
-            let size = integerValue(entry["s"]) ?? 0
+            let size = integerValue(entry["s"] ?? entry["size"]) ?? 0
             files.append(
                 AllDebridMagnetFile(
                     id: "\(magnetID):\(fullPath):\(size)",
@@ -371,12 +515,22 @@ actor AllDebridAPIClient {
     }
 
     private func send(_ request: URLRequest) async throws -> [String: Any] {
+        // Reserve before awaiting so concurrent calls on this actor cannot burst after the same sleep.
+        let turn = max(ContinuousClock.now, nextAPITurn)
+        nextAPITurn = turn.advanced(by: .milliseconds(200))
+        try await ContinuousClock().sleep(until: turn)
+        try Task.checkCancellation()
         var request = request
         request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (responseData, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard (200 ... 299).contains(response.statusCode) else { throw APIError.httpStatus(response.statusCode) }
+        guard (200 ... 299).contains(response.statusCode) else {
+            if [401, 403].contains(response.statusCode) {
+                throw APIError.invalidAPIKey
+            }
+            throw APIError.httpStatus(response.statusCode)
+        }
         guard let payload = try JSONSerialization.jsonObject(with: responseData) as? [String: Any] else {
             throw APIError.invalidResponse
         }
@@ -384,6 +538,12 @@ actor AllDebridAPIClient {
             let error = payload["error"] as? [String: Any]
             if error?["code"] as? String == "PIN_EXPIRED" {
                 throw APIError.pinExpired
+            }
+            if let code = error?["code"] as? String, code.hasPrefix("AUTH_") {
+                throw APIError.invalidAPIKey
+            }
+            if error?["code"] as? String == "API_RATE_LIMIT" {
+                throw APIError.httpStatus(429)
             }
             let message = (error?["message"] as? String) ?? "AllDebrid request failed."
             throw APIError.serviceError(message)
@@ -404,6 +564,7 @@ struct AllDebridLibrarySnapshot: Sendable {
     let magnets: [AllDebridMagnet]
     let readyMagnetCount: Int
     let magnetFiles: [AllDebridMagnetFile]
+    var warnings: [String] = []
 }
 
 struct AllDebridPIN: Sendable {
@@ -490,7 +651,7 @@ struct AllDebridSavedLink: Sendable, Identifiable, Hashable {
     let link: String
 
     var isVideo: Bool {
-        let path = filename.lowercased()
-        return [".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm"].contains { path.hasSuffix($0) }
+        let path = filename.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return [".mkv", ".mp4", ".m4v", ".mov", ".avi", ".webm", ".ts", ".m2ts"].contains { path.hasSuffix($0) }
     }
 }

@@ -391,6 +391,12 @@ enum PlaybackReadAhead: String, Codable, CaseIterable, Hashable, Identifiable {
 }
 
 struct PlaybackSettings: Codable, Equatable {
+    /// Startup language preference; explicit manual choices win for the current playback.
+    var alwaysPreferEnglishAudio = true
+    /// Applies only to TMDb/AllDebrid playback; media-server playback keeps its existing behavior.
+    var allDebridAutoPlay = true
+    var automaticTrailerPreviews = true
+    var trailerPreviewsOnCellular = false
     var qualityPreset = TranscodeQualityPreset.original
     var nextEpisodeAutoplay = NextEpisodeAutoplay.after15Seconds
     /// Armed when the player opens. Nil leaves the sleep timer off.
@@ -444,6 +450,11 @@ struct PlaybackSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        alwaysPreferEnglishAudio = try container.decodeIfPresent(Bool.self, forKey: .alwaysPreferEnglishAudio) ?? true
+        allDebridAutoPlay = try container.decodeIfPresent(Bool.self, forKey: .allDebridAutoPlay) ?? true
+        automaticTrailerPreviews = try container.decodeIfPresent(Bool.self, forKey: .automaticTrailerPreviews) ?? true
+        trailerPreviewsOnCellular = try container
+            .decodeIfPresent(Bool.self, forKey: .trailerPreviewsOnCellular) ?? false
         qualityPreset = try container.decodeIfPresent(
             TranscodeQualityPreset.self,
             forKey: .qualityPreset,

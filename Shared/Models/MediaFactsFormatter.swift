@@ -61,6 +61,16 @@ enum RemainingTimeFormatter {
             .map { String(localized: "media.labels.remaining \($0)") }
     }
 
+    /// Compact card caption, still localized through the existing remaining-time string.
+    static func compactText(duration: TimeInterval?, viewOffset: TimeInterval?) -> String? {
+        guard let duration, let viewOffset, duration.isFinite, viewOffset.isFinite,
+              viewOffset > 0, duration > viewOffset else { return nil }
+        let minutes = max(1, Int(((duration - viewOffset) / 60).rounded()))
+        let time = Duration.seconds(minutes * 60)
+            .formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+        return String(localized: "media.labels.remaining \(time)")
+    }
+
     /// Just the time left, "23 min", for places that already say it is a resume.
     static func shortText(duration: TimeInterval?, viewOffset: TimeInterval?) -> String? {
         guard let duration, let viewOffset, viewOffset > 0, duration > viewOffset else { return nil }

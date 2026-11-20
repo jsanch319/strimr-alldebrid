@@ -35,14 +35,30 @@ struct SeerrDiscoverView: View {
                 } else {
                     requestsEntry
 
-                    rail(String(localized: "integrations.seerr.discover.trending"), items: viewModel.trending)
-                    rail(String(localized: "integrations.seerr.discover.popularMovies"), items: viewModel.popularMovies)
+                    rail(
+                        String(localized: "integrations.seerr.discover.trending"),
+                        key: "trending",
+                        items: viewModel.trending,
+                    )
+                    rail(
+                        String(localized: "integrations.seerr.discover.popularMovies"),
+                        key: "popularMovies",
+                        items: viewModel.popularMovies,
+                    )
                     rail(
                         String(localized: "integrations.seerr.discover.upcomingMovies"),
-                        items: viewModel.upcomingMovies,
+                        key: "upcomingMovies", items: viewModel.upcomingMovies,
                     )
-                    rail(String(localized: "integrations.seerr.discover.popularTV"), items: viewModel.popularTV)
-                    rail(String(localized: "integrations.seerr.discover.upcomingTV"), items: viewModel.upcomingTV)
+                    rail(
+                        String(localized: "integrations.seerr.discover.popularTV"),
+                        key: "popularTV",
+                        items: viewModel.popularTV,
+                    )
+                    rail(
+                        String(localized: "integrations.seerr.discover.upcomingTV"),
+                        key: "upcomingTV",
+                        items: viewModel.upcomingTV,
+                    )
                 }
 
                 if viewModel.isLoading, !viewModel.hasContent, !searchViewModel.isSearchActive {
@@ -135,11 +151,12 @@ struct SeerrDiscoverView: View {
     }
 
     @ViewBuilder
-    private func rail(_ title: String, items: [SeerrMedia]) -> some View {
+    private func rail(_ title: String, key: String, items: [SeerrMedia]) -> some View {
         if !items.isEmpty {
             MediaHubSection(title: title) {
                 SeerrMediaCarousel(
                     items: items,
+                    pagination: viewModel.pagination(for: key),
                     showsLabels: settingsManager.interface.showsCardLabels,
                     onSelectMedia: onSelectMedia,
                 )

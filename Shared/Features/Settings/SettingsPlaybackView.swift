@@ -17,6 +17,42 @@ struct SettingsPlaybackView: View {
 
     var body: some View {
         List {
+            #if os(iOS)
+                Section { NavigationLink("Audio") { SettingsAudioView() } }
+            #endif
+            Section {
+                Toggle("Auto Play AllDebrid", isOn: Binding(
+                    get: { settingsManager.playback.allDebridAutoPlay },
+                    set: { enabled in settingsManager.updatePlayback { $0.allDebridAutoPlay = enabled } },
+                ))
+            } footer: {
+                Text(
+                    "Automatically play the best matching file in your AllDebrid library. Prefer 4K, then 1080p, then 720p, and try another source if playback fails. You can still select a source manually from title details.",
+                )
+            }
+
+            #if os(iOS)
+                Section("Trailer Previews") {
+                    Toggle("Automatic Trailer Previews", isOn: Binding(
+                        get: { settingsManager.playback.automaticTrailerPreviews },
+                        set: { enabled in settingsManager.updatePlayback { $0.automaticTrailerPreviews = enabled } },
+                    ))
+                    Toggle("Allow Previews on Cellular", isOn: Binding(
+                        get: { settingsManager.playback.trailerPreviewsOnCellular },
+                        set: { enabled in settingsManager.updatePlayback { $0.trailerPreviewsOnCellular = enabled } },
+                    ))
+                    Text(
+                        "Authorized direct previews start muted. Reduce Motion, Low Power Mode and Low Data Mode disable automatic previews. YouTube and Vimeo trailers open only after you tap Watch Trailer.",
+                    )
+                    .font(.footnote).foregroundStyle(.secondary)
+                }
+            #endif
+
+            Section {
+                NavigationLink("Stremio Add-ons") { StremioAddonsView() }
+                NavigationLink("Authorized Playback Sources") { AuthorizedSourceSetupView() }
+            }
+
             externalPlayerSection
 
             #if os(iOS)

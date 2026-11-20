@@ -5,7 +5,7 @@ struct HomeContent {
     let rows: [HomeRow]
 }
 
-enum ArtworkResource {
+nonisolated enum ArtworkResource: Hashable, Sendable {
     case url(URL)
     case data(Data)
 }

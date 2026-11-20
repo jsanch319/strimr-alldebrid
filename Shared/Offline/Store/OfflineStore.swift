@@ -1246,11 +1246,6 @@ final class OfflineStore {
     }
 }
 
-enum PlaybackProgressPersistenceError: Error {
-    case invalidRecord
-    case encodingFailed
-}
-
 extension MediaItem {
     func applying(_ state: OfflineWatchState) -> MediaItem {
         let played = state.played || state.viewCount > 0

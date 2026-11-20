@@ -2,12 +2,22 @@ name: AllDebrid iOS compile check
 
 on:
   workflow_dispatch:
+    inputs:
+      ui_test:
+        description: 'Run all UI tests or repeat the Continue Watching regression (stops on first failure)'
+        type: choice
+        options:
+          - all
+          - continue-watching
+        default: all
   push:
     paths:
       - 'Shared/**'
       - 'Strimr-iOS/**'
+      - 'StrimrVisualUITests/**'
       - 'Strimr.xcodeproj/**'
       - 'Config/**'
+      - 'Scripts/**'
       - '.github/workflows/alldebrid-ios-check.yml'
 
 permissions:
@@ -16,7 +26,7 @@ permissions:
 jobs:
   simulator-compile:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,25 +39,142 @@ jobs:
         run: |
           cp Config/Config-example.xcconfig Config/Config.xcconfig
           printf '\nPRODUCT_BUNDLE_IDENTIFIER = app.strimr.alldebrid.ci\n' >> Config/Config.xcconfig
-          if [[ -n "$DISCORD_APPLICATION_CLIENT_ID" ]]; then
-            printf 'DISCORD_APPLICATION_CLIENT_ID = %s\n' "$DISCORD_APPLICATION_CLIENT_ID" >> Config/Config.xcconfig
-          fi
-          if [[ -n "$DISCORD_ACTIVITY_URL" ]]; then
-            printf 'DISCORD_ACTIVITY_URL = %s\n' "$DISCORD_ACTIVITY_URL" >> Config/Config.xcconfig
-          fi
+          python3 Scripts/configure_discord.py Config/Config.xcconfig
           touch Config/Config-TopShelf.xcconfig
+      - name: Test optional Discord build configuration
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Scripts -p 'test_discord_configuration.py' -v
+
       - name: Compile iOS simulator (no signing)
         shell: bash
         run: |
           set -o pipefail
-          xcodebuild \
+          xcodebuild -quiet \
             -project Strimr.xcodeproj \
             -scheme Strimr \
             -destination 'generic/platform=iOS Simulator' \
             -configuration Debug \
             -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
             build 2>&1 | tee build-output.log
+      - name: Launch app on an available iPhone simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PYSMOKE'
+          import json, os, subprocess
+          devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "--json"]))["devices"]
+          available = [(runtime, device) for runtime, rows in devices.items() if ".iOS-" in runtime for device in rows if device["name"].startswith("iPhone") and device.get("deviceTypeIdentifier")]
+          if not available:
+              print("No installed iPhone simulator runtime: launch behavior remains unverified.")
+              raise SystemExit(0)
+          runtime, device = available[0]
+          with open("build/simulator.json", "w") as output:
+              json.dump({"runtime": runtime, "model": device["name"], "deviceType": device["deviceTypeIdentifier"]}, output, indent=2)
+          identifier = subprocess.check_output(["xcrun", "simctl", "create", "Strimr launch smoke", device["deviceTypeIdentifier"], runtime], text=True).strip()
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              output.write("STRIMR_SMOKE_ID=" + identifier + "\n")
+          subprocess.run(["xcrun", "simctl", "boot", identifier], check=True)
+          subprocess.run(["xcrun", "simctl", "bootstatus", identifier, "-b"], check=True)
+          app = "build/DerivedData/Build/Products/Debug-iphonesimulator/Strimr-iOS.app"
+          bundle = subprocess.check_output(["/usr/libexec/PlistBuddy", "-c", "Print CFBundleIdentifier", app + "/Info.plist"], text=True).strip()
+          subprocess.run(["xcrun", "simctl", "install", identifier, app], check=True)
+          subprocess.run(["xcrun", "simctl", "launch", identifier, bundle], check=True)
+          import time
+          time.sleep(3)
+          processes = subprocess.check_output(["xcrun", "simctl", "spawn", identifier, "launchctl", "list"], text=True)
+          running = [line.split() for line in processes.splitlines() if bundle in line]
+          if not any(row and row[0].isdigit() and int(row[0]) > 0 for row in running):
+              raise RuntimeError("The app exited immediately after simulator launch")
+          subprocess.run(["xcrun", "simctl", "io", identifier, "screenshot", "build/ios-launch-smoke.png"], check=True)
+          print("iOS app startup smoke passed. This fresh simulator has no user API credentials; authenticated catalog interactions are not covered.")
+          PYSMOKE
+      - name: Test credential-free catalog interactions and capture screens
+        # Prior runs exported 11 passing tests but xcodebuild exceeded 25 minutes on the hosted runner.
+        timeout-minutes: 35
+        if: env.STRIMR_SMOKE_ID != ''
+        shell: bash
+        env:
+          UI_TEST_SELECTION: ${{ inputs.ui_test || 'all' }}
+        run: |
+          set -o pipefail
+          ui_test_args=()
+          case "$UI_TEST_SELECTION" in
+            all) ;;
+            continue-watching)
+              ui_test_args=(
+                -only-testing:StrimrVisualUITests/CatalogVisualTests/testContinueWatchingEpisodeLabelAndImmediateDismissal
+                -run-tests-until-failure -test-iterations 3
+              )
+              ;;
+            *) echo "Unsupported UI test selection"; exit 2 ;;
+          esac
+          xcodebuild -quiet test \
+            -project Strimr.xcodeproj \
+            -scheme Strimr-VisualTests \
+            -destination "platform=iOS Simulator,id=$STRIMR_SMOKE_ID" \
+            -parallel-testing-enabled NO \
+            "${ui_test_args[@]}" \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/CatalogVisualTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES 2>&1 | tee build/visual-tests.log
+      - name: Export visual test screenshots
+        if: always()
+        shell: bash
+        run: |
+          if [[ -d build/CatalogVisualTests.xcresult ]]; then
+            xcrun xcresulttool get test-results summary --path build/CatalogVisualTests.xcresult > build/visual-test-summary.json
+            cat build/visual-test-summary.json
+            xcrun xcresulttool export attachments --path build/CatalogVisualTests.xcresult --output-path build/screenshots
+            python3 - <<'PYPHOTOS'
+          import json, pathlib
+          root = pathlib.Path("build/screenshots")
+          manifest = root / "manifest.json"
+          rows = json.loads(manifest.read_text())
+          for row in rows:
+              row["attachments"] = [entry for entry in row["attachments"] if entry["exportedFileName"].endswith(".png")]
+          keep = {entry["exportedFileName"] for row in rows for entry in row["attachments"]}
+          for path in root.iterdir():
+              if path.is_file() and path.name not in keep and path.name != "manifest.json":
+                  path.unlink()
+          manifest.write_text(json.dumps(rows, indent=2))
+          PYPHOTOS
+          fi
+      - name: Upload visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-catalog-screenshots
+          path: |
+            build/screenshots
+            build/simulator.json
+            build/visual-test-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload visual test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-catalog-visual-tests
+          path: |
+            build/visual-tests.log
+            build/visual-test-summary.json
+            build/CatalogVisualTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Clean up launch simulator
+        if: always() && env.STRIMR_SMOKE_ID != ''
+        shell: bash
+        run: |
+          xcrun simctl shutdown "$STRIMR_SMOKE_ID" || true
+          xcrun simctl delete "$STRIMR_SMOKE_ID" || true
+      - name: Upload iOS launch screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-launch-smoke
+          path: build/ios-launch-smoke.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload compiler output
         if: always()
         uses: actions/upload-artifact@v4

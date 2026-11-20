@@ -142,13 +142,7 @@ struct MediaListRow: View {
         )
         .frame(width: artworkSize.width, height: artworkSize.height)
         .mediaArtworkStyle(.compact)
-        .overlay(alignment: .bottom) {
-            if let progress = media.viewProgressPercentage.map({ $0 / 100 }) {
-                CardProgressBar(progress: progress)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 6)
-            }
-        }
+        .artworkProgress(media.viewProgressPercentage.map { $0 / 100 }, inset: 6)
     }
 
     private var details: some View {
